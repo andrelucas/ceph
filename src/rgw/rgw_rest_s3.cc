@@ -35,6 +35,7 @@
 #include "rgw_rest_s3website.h"
 #include "rgw_rest_pubsub.h"
 #include "rgw_auth_s3.h"
+#include "rgw_rest_storequery.h"
 #include "rgw_acl.h"
 #include "rgw_policy_s3.h"
 #include "rgw_user.h"
@@ -4418,7 +4419,9 @@ void RGWGetBucketPublicAccessBlock_ObjStore_S3::send_response()
 
 RGWOp *RGWHandler_REST_Service_S3::op_get()
 {
-  if (is_usage_op()) {
+  if (s->info.args.sub_resource_exists("storequery")) {
+    return new RGWStoreQueryPing;
+  } else if (is_usage_op()) {
     return new RGWGetUsage_ObjStore_S3;
   } else {
     return new RGWListBuckets_ObjStore_S3;
@@ -5067,7 +5070,7 @@ RGWHandler_REST* RGWRESTMgr_S3::get_handler(rgw::sal::Store* store,
     }
   } else {
     if (s->init_state.url_bucket.empty()) {
-      handler = new RGWHandler_REST_Service_S3(auth_registry, enable_sts, enable_iam, enable_pubsub);
+      handler = new RGWHandler_REST_Service_S3(auth_registry, enable_sts, enable_iam, enable_pubsub, enable_storequery);
     } else if (!rgw::sal::Object::empty(s->object.get())) {
       handler = new RGWHandler_REST_Obj_S3(auth_registry);
     } else if (s->info.args.exist_obj_excl_sub_resource()) {
