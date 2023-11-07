@@ -259,6 +259,10 @@ if(WITH_RADOSGW_DBSTORE)
   target_link_libraries(rgw_common PRIVATE global dbstore)
 endif()
 
+if(WITH_RADOSGW_GRPC)
+  target_link_libraries(rgw_common PRIVATE grpc++)
+endif()
+
 set(rgw_a_srcs
   rgw_auth_keystone.cc
   rgw_client_io.cc
