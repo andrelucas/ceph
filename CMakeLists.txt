@@ -484,6 +484,9 @@ if(WITH_RADOSGW)
   message(STATUS "crypto soname: ${LIBCRYPTO_SONAME}")
 
   if(WITH_RADOSGW_GRPC)
+    # Without this we get a warning.
+    set(ABSL_PROPAGATE_CXX_STD ON CACHE INTERNAL "")
+
     # Use libraries we've already configured. Without this, the CMake run
     # explodes.
     set(gRPC_SSL_PROVIDER package CACHE INTERNAL "")

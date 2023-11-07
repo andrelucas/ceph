@@ -259,7 +259,27 @@ if(WITH_RADOSGW_DBSTORE)
 endif()
 
 if(WITH_RADOSGW_GRPC)
-  target_link_libraries(rgw_common PRIVATE grpc++)
+  add_custom_target(rgw_grpc_headers
+    COMMAND env PATH=${CMAKE_BINARY_DIR}/bin:$$PATH buf generate --output ${CMAKE_BINARY_DIR}
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src"
+  )
+  target_include_directories(rgw_common PUBLIC "${CMAKE_BINARY_DIR}/bufgen")
+
+  set(rgw_grpc_srcs
+    ${CMAKE_BINARY_DIR}/bufgen/rgw/auth/v1/auth.grpc.pb
+    ${CMAKE_BINARY_DIR}/bufgen/rgw/auth/v1/auth.pb
+    ${CMAKE_BINARY_DIR}/bufgen/rgw/test/v1/test_rgw_grpc.grpc.pb
+    ${CMAKE_BINARY_DIR}/bufgen/rgw/test/v1/test_rgw_grpc.pb
+  )
+
+  add_library(rgw_grpc_generated ${rgw_grpc_srcs})
+  target_link_libraries(rgw_grpc_generated grpc++)
+  target_include_directories(rgw_grpc_generated PUBLIC "${CMAKE_BINARY_DIR}/bufgen")
+
+  # Make sure libraries and binary tools are built.
+  add_dependencies(rgw_common grpc++ protoc grpc_cpp_plugin rgw_grpc_headers rgw_grpc_generated)
+
+  target_link_libraries(rgw_common PUBLIC grpc++ rgw_grpc_generated)
 endif()
 
 set(rgw_a_srcs
