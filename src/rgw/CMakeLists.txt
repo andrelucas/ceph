@@ -260,27 +260,114 @@ if(WITH_RADOSGW_DBSTORE)
 endif()
 
 if(WITH_RADOSGW_GRPC)
-  add_custom_target(rgw_grpc_headers
+  include(RGWgRPC)
+
+  # This is all the machinery for dealing with generating gRPC and protobuf
+  # source files, and for linking them into binaries.
+
+  # This has to match the out: parameters in src/buf.gen.yaml (and they should
+  # all be the same).
+  set(BUFGEN_DIRECTORY "${CMAKE_BINARY_DIR}/bufgen")
+
+  # EDIT THIS to specify .proto source files. Omit the '.proto' suffix!
+  set(grpc_source
+    rgw/auth/v1/auth
+  )
+
+  # EDIT THIS to specify test .proto source files. Omit the '.proto suffix!
+  set(grpc_test_source
+    "rgw/test/v1/test_rgw_grpc"
+  )
+
+  # Fill variables with input and generated source locations.
+  buf_grpc_expand(rgw_grpc_proto rgw_grpc_header rgw_grpc_source
+    "${CMAKE_SOURCE_DIR}/src/rgw/protos" # Must match the dir in src/buf.work.yaml.
+    "${grpc_source}"
+    ${BUFGEN_DIRECTORY}
+  )
+
+  # Fill variables with input and generated source locations.
+  buf_grpc_expand(rgw_grpc_test_proto rgw_grpc_test_header rgw_grpc_test_source
+    "${CMAKE_SOURCE_DIR}/src/test/rgw/protos" # Must match the dir in src/buf.work.yaml.
+    ${grpc_test_source}
+    ${BUFGEN_DIRECTORY}
+  )
+
+  set(rgw_grpc_gen_sources
+    ${rgw_grpc_header}
+    ${rgw_grpc_source}
+  )
+  set(rgw_grpc_gen_test_sources
+    ${rgw_grpc_test_headers}
+    ${rgw_grpc_test_source}
+  )
+
+  # The static configuration files for buf. These are used to detect changes
+  # that might require a rebuild of the generated sources.
+  set(buf_config_files
+    ${CMAKE_SOURCE_DIR}/src/buf.work.yaml
+    ${CMAKE_SOURCE_DIR}/src/buf.gen.yaml
+    ${CMAKE_SOURCE_DIR}/src/buf.yaml
+  )
+
+  # This custom command is used to invoke buf to regenerate the gRPC and
+  # protobuf sources whenever a source file (or buf config file) changes.
+  #
+  # The DEPENDS:
+  # - the protobuf command line generator tools protoc and grpc_cpp_plugin.
+  # - all the protobuf input files.
+  # - all the buf configuration files.
+  #
+  # The OUTPUT is the generated .cc and .h files.
+  #
+  # As a result of matching the DEPENDS and OUTPUT, CMake knows how (and when)
+  # to rebuild a target that lists those generated .cc and .h files as
+  # sources.
+  #
+  add_custom_command(
+    OUTPUT ${rgw_grpc_gen_sources} ${rgw_grpc_gen_test_sources}
     COMMAND env PATH=${CMAKE_BINARY_DIR}/bin:$$PATH buf generate --output ${CMAKE_BINARY_DIR}
+    DEPENDS protoc grpc_cpp_plugin ${rgw_grpc_proto} ${rgw_grpc_test_proto} ${buf_config_files}
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src"
   )
-  target_include_directories(rgw_common PUBLIC "${CMAKE_BINARY_DIR}/bufgen")
 
-  set(rgw_grpc_srcs
-    ${CMAKE_BINARY_DIR}/bufgen/rgw/auth/v1/auth.grpc.pb
-    ${CMAKE_BINARY_DIR}/bufgen/rgw/auth/v1/auth.pb
-    ${CMAKE_BINARY_DIR}/bufgen/rgw/test/v1/test_rgw_grpc.grpc.pb
-    ${CMAKE_BINARY_DIR}/bufgen/rgw/test/v1/test_rgw_grpc.pb
+  # rgw_grpc_lint calls `buf lint` to check the inputs.
+  add_custom_target(rgw_grpc_lint
+    COMMAND env PATH=${CMAKE_BINARY_DIR}/bin:$$PATH buf lint
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src"
   )
 
-  add_library(rgw_grpc_generated ${rgw_grpc_srcs})
-  target_link_libraries(rgw_grpc_generated grpc++)
-  target_include_directories(rgw_grpc_generated PUBLIC "${CMAKE_BINARY_DIR}/bufgen")
+  # rgw_grpc_clean removes the buf output directory entirely.
+  add_custom_target(rgw_grpc_clean
+    COMMAND rm -rf "${BUFGEN_DIRECTORY}"
+  )
 
-  # Make sure libraries and binary tools are built.
-  add_dependencies(rgw_common grpc++ protoc grpc_cpp_plugin rgw_grpc_headers rgw_grpc_generated)
+  # rgw_common needs to know to look for includes in the buf output directory.
+  # Note the include path will still have all the components under bufgen/,
+  # e.g. to include bufgen/rgw/auth/v1/auth.pb.h, the path will be '#include
+  # "rgw/auth/v1/auth.pb.h". This is intentional. It's the way buf wants to
+  # work, and it matches how the protobuf compiler generates code.
+  #
+  target_include_directories(rgw_common PUBLIC "${BUFGEN_DIRECTORY}")
 
-  target_link_libraries(rgw_common PUBLIC grpc++ rgw_grpc_generated)
+  # For the main library, generate rgw_grpc_genobj with the compiled gRPC and
+  # protobuf code.
+  add_library(rgw_grpc_genobj ${rgw_grpc_gen_sources})
+  target_link_libraries(rgw_grpc_genobj grpc++)
+  target_include_directories(rgw_grpc_genobj PUBLIC "${BUFGEN_DIRECTORY}")
+
+  # For unit tests, generate rgw_grpc_test_genobj with the compiled gRPC and
+  # protobuf code.
+  add_library(rgw_grpc_test_genobj ${rgw_grpc_gen_test_sources})
+  target_link_libraries(rgw_grpc_test_genobj grpc++)
+  target_include_directories(rgw_grpc_test_genobj PUBLIC "${BUFGEN_DIRECTORY}")
+
+  # Make sure libraries and binary tools are built, as well as the gRPC
+  # and protobuf compiled code. Tests will need to specify
+  # rgw_grpc_test_genobj themselves - don't link these into the main library.
+  add_dependencies(rgw_common rgw_grpc_genobj)
+
+  target_link_libraries(rgw_common PUBLIC grpc++ rgw_grpc_genobj)
 endif()
 
 set(rgw_a_srcs
