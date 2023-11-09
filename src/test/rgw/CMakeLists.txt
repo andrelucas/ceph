@@ -236,3 +236,13 @@ add_executable(unittest_rgw_lua test_rgw_lua.cc)
 add_ceph_unittest(unittest_rgw_lua)
 target_link_libraries(unittest_rgw_lua ${rgw_libs} ${LUA_LIBRARIES})
 
+add_executable(unittest_rgw_grpc
+  test_rgw_grpc.cc
+  $<TARGET_OBJECTS:unit-main>
+)
+add_ceph_unittest(unittest_rgw_grpc)
+target_link_libraries(unittest_rgw_grpc
+  rgw_grpc_test_genobj
+  ${UNITTEST_LIB}
+  ${rgw_libs}
+)

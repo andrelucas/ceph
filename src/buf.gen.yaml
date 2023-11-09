@@ -1,0 +1,8 @@
+version: v1
+plugins:
+  - plugin: cpp
+    out: bufgen
+  - plugin: grpc_cpp
+    # This is the binary that the gRPC C++ source builds into bin/.
+    path: grpc_cpp_plugin
+    out: bufgen

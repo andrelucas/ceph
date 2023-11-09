@@ -426,6 +426,7 @@ option(WITH_RADOSGW_KAFKA_ENDPOINT "Rados Gateway's pubsub support for Kafka pus
 option(WITH_RADOSGW_LUA_PACKAGES "Rados Gateway's support for dynamically adding lua packagess" ON)
 option(WITH_RADOSGW_DBSTORE "DBStore backend for Rados Gateway" ON)
 option(WITH_RADOSGW_SELECT_PARQUET "Support for s3 select on parquet objects" ON)
+option(WITH_RADOSGW_GRPC "Rados Gateway gRPC support" ON)
 
 option(WITH_SYSTEM_ARROW "Use system-provided arrow" OFF)
 option(WITH_SYSTEM_UTF8PROC "Use system-provided utf8proc" OFF)
@@ -481,6 +482,33 @@ if(WITH_RADOSGW)
   endif()
   message(STATUS "ssl soname: ${LIBSSL_SONAME}")
   message(STATUS "crypto soname: ${LIBCRYPTO_SONAME}")
+
+  if(WITH_RADOSGW_GRPC)
+    set(ABSL_PROPAGATE_CXX_STD ON CACHE INTERNAL "")
+    set(BUILD_TESTING OFF CACHE INTERNAL "")
+
+    # Use libraries we've already configured. Without this, the CMake run
+    # explodes.
+    set(gRPC_SSL_PROVIDER package CACHE INTERNAL "")
+    set(gRPC_ZLIB_PROVIDER package CACHE INTERNAL "")
+
+    # Turn off everything but C++.
+    foreach(l in CSHARP NODE OBJECTIVE_C PHP PYTHON RUBY)
+      set("gRPC_BUILD_GRPC_${l}_PLUGIN" OFF CACHE INTERNAL "")
+    endforeach(l)
+
+    # See: https://grpc.io/blog/cmake-improvements/
+    # Note: 20231106 v1.55.4 is the latest that configures correctly, any
+    # later results in CMake errors.
+    include(FetchContent)
+    FetchContent_Declare(
+      gRPC
+      GIT_REPOSITORY https://github.com/grpc/grpc
+      GIT_TAG v1.54.3
+    )
+    set(FETCHCONTENT_QUIET OFF)
+    FetchContent_MakeAvailable(gRPC)
+  endif(WITH_RADOSGW_GRPC)
 endif (WITH_RADOSGW)
 
 #option for CephFS
