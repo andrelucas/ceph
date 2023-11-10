@@ -314,65 +314,6 @@ public:
       const std::string_view& signature,
       const req_state* const s,
       optional_yield y);
-
-  /**
-   * @brief Construct an Authorization header from the parsed query string
-   * parameters.
-   *
-   * The Authorization header is a fairly concise way of sending a bunch of
-   * bundled parameters to the Authenticator. So if (as would be the case with
-   * a presigned URL) we don't get an Authorization header, see if we can
-   * synthesize one from the query parameters.
-   *
-   * This function first has to distinguish between v2 and v4 parameters
-   * (normally v2 if no region is supplied, defaulting to us-east-1). Then it
-   * has to parse the completely distinct parameters for each version into a
-   * v2 or v4 Authorization: header, via synthesize_v2_header() or
-   * synthesize_v4_header() respectively.
-   *
-   * @param dpp DoutPrefixProvider.
-   * @param s The request.
-   * @return std::optional<std::string> The header on success, or std::nullopt
-   * on any failure.
-   */
-  std::optional<std::string> synthesize_auth_header(
-      const DoutPrefixProvider* dpp,
-      const req_state* s);
-
-  /**
-   * @brief Assuming an already-parsed (via synthesize_auth_header) presigned
-   * header URL, check that the given expiry time has not expired. Note that
-   * in v17.2.6, this won't get called - RGW checks the expiry time before
-   * even calling our authentication engine.
-   *
-   * Fail closed - if we can't parse the parameters to check, assume we're not
-   * authenticated.
-   *
-   * The fields are version-specific. For the v2-ish URLs (no region
-   * specified), we're given an expiry unix time to compare against. For the
-   * v4-type URLs (region specified), we're given a start time and a delta in
-   * seconds.
-   *
-   * @param dpp DoutPrefixProvider.
-   * @param s The request.
-   * @param now The current UNIX time (seconds since the epoch).
-   * @return true The request has not expired
-   * @return false The request has expired, or a check was not possible
-   */
-  bool valid_presigned_time(const DoutPrefixProvider* dpp, const req_state* s, time_t now);
-
-  /**
-   * @brief Return true if the supplied credential looks like an Extended
-   * Access Key.
-   *
-   * The EAK format is specified to have a small set of known prefix strings,
-   * to make them easy to detect. The prefixes are case-significant.
-   *
-   * @param access_key_id
-   * @return true The credential has a recognised EAK prefix.
-   * @return false The credential is a regular access key.
-   */
-  bool is_eak_credential(const std::string_view access_key_id);
 };
 
 } /* namespace rgw */

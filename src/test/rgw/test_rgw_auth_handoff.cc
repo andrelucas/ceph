@@ -1,15 +1,6 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
-#include "common/async/yield_context.h"
-#include "common/ceph_argparse.h"
-#include "common/ceph_json.h"
-#include "common/dout.h"
-#include "global/global_init.h"
-#include "rgw/rgw_b64.h"
-#include "rgw/rgw_client_io.h"
-#include "rgw/rgw_handoff.h"
-#include "rgw/rgw_http_client.h"
 #include <boost/algorithm/hex.hpp>
 #include <boost/regex.hpp>
 #include <cstdint>
@@ -23,6 +14,17 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
+#include "common/async/yield_context.h"
+#include "common/ceph_argparse.h"
+#include "common/ceph_json.h"
+#include "common/dout.h"
+#include "global/global_init.h"
+#include "rgw/rgw_b64.h"
+#include "rgw/rgw_client_io.h"
+#include "rgw/rgw_handoff.h"
+#include "rgw/rgw_handoff_impl.h"
+#include "rgw/rgw_http_client.h"
 
 /*
  * Tools tests.
@@ -475,7 +477,7 @@ protected:
     ASSERT_EQ(hh.init(g_ceph_context, nullptr), 0);
   }
 
-  HandoffHelper hh { verify_by_func };
+  HandoffHelperImpl hh { verify_by_func };
   optional_yield y = null_yield;
   DoutPrefix dpp { g_ceph_context, ceph_subsys_rgw, "unittest " };
 };
@@ -815,7 +817,7 @@ TEST(HandoffHelperEak, IsEakCredential)
     { "otv1", false },
   };
 
-  HandoffHelper hh;
+  HandoffHelperImpl hh;
 
   for (const auto& t : tests) {
     auto desc = fmt::format("test: prefix {}, expects {}", t.input, t.expected);
