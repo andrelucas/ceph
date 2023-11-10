@@ -194,6 +194,8 @@ public:
 
 std::ostream& operator<<(std::ostream& os, const EAKParameters& ep);
 
+class HandoffHelperImpl; // Forward declaration.
+
 /**
  * @brief Support class for 'handoff' authentication.
  *
@@ -207,11 +209,10 @@ public:
   using VerifyFunc = std::function<HandoffVerifyResult(const DoutPrefixProvider*, const std::string&, ceph::bufferlist*, optional_yield)>;
 
 private:
-  const std::optional<VerifyFunc> verify_func_;
-  rgw::sal::Store* store_;
+  std::unique_ptr<HandoffHelperImpl> impl_;
 
 public:
-  HandoffHelper() { }
+  HandoffHelper();
   /**
    * @brief Construct a new Handoff Helper object with an alternative callout
    * mechanism. Used by test harnesses.
@@ -219,11 +220,17 @@ public:
    * @param v A function to replace the HTTP client callout. This must mimic
    * the inputs and outputs of the \p verify_standard() function.
    */
-  HandoffHelper(VerifyFunc v)
-      : verify_func_ { v }
-  {
-  }
-  ~HandoffHelper() { }
+  HandoffHelper(VerifyFunc v);
+
+  /**
+   * @brief Destroy the Handoff Helper object. See notes.
+   *
+   * We need to implement this destructor when we know the size of
+   * HandoffHelperImpl. This means implementing it in rgw_handoff_impl.cc.
+   *
+   * (See https://www.fluentcpp.com/2017/09/22/make-pimpl-using-unique_ptr/).
+   */
+  ~HandoffHelper();
 
   /**
    * @brief Initialise any long-lived state for this engine.

@@ -49,8 +49,6 @@ public:
   {
   }
 
-  ~AuthClient();
-
   HandoffAuthResult Auth(const AuthRequest& req)
   {
     ::grpc::ClientContext context;
@@ -69,8 +67,6 @@ public:
     return HandoffAuthResult(500, "XXX NOTIMPL");
   }
 };
-
-AuthClient::~AuthClient() = default;
 
 /**
  * @brief Support class for 'handoff' authentication.
