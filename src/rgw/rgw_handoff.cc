@@ -136,7 +136,7 @@ static HandoffVerifyResult verify_standard(const DoutPrefixProvider* dpp, const 
 {
   auto cct = dpp->get_cct();
 
-  auto query_url = cct->_conf->rgw_handoff_uri;
+  auto query_url = cct->_conf->rgw_handoff_http_uri;
   if (!ba::ends_with(query_url, "/")) {
     query_url += "/";
   }
