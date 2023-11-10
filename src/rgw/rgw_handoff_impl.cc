@@ -1,12 +1,19 @@
 /**
  * @file rgw_handoff_impl.cc
  * @author André Lucas (alucas@akamai.com)
- * @brief Implementation for rgw::HandoffHelper (PIMPL pattern).
+ * @brief Implementation for rgw::HandoffHelperImpl.
  * @version 0.1
  * @date 2023-11-10
  *
  * @copyright Copyright (c) 2023
  *
+ * PIMPL implementation class for HandoffHelper.
+ *
+ * Exists because HandoffHelper is created in rgw_rest_s3.cc, so has to be
+ * #include'd. The include ends up being transient (via rgw_rest_s3.h), so we
+ * end up including all that extra stuff for almost every file.
+ *
+ * Also it has the usual PIMPL benefits.
  */
 
 #include "rgw_handoff_impl.h"
@@ -225,6 +232,13 @@ static std::optional<std::string> synthesize_v4_header(const DoutPrefixProvider*
   }
   return std::make_optional(fmt::format("AWS4-HMAC-SHA256 Credential={}, SignedHeaders={}, Signature={}",
       *maybe_credential, *maybe_signedheaders, *maybe_signature));
+}
+
+int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Store* store)
+{
+  ldout(cct, 20) << "HandoffHelperImpl::init" << dendl;
+  store_ = store;
+  return 0;
 }
 
 std::optional<std::string> HandoffHelperImpl::synthesize_auth_header(
