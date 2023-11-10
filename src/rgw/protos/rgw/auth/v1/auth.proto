@@ -1,3 +1,45 @@
 syntax = "proto3";
 
 package rgw.auth.v1;
+
+service AuthService
+{
+  rpc Auth(AuthRequest) returns (AuthResponse);
+}
+
+enum RequestMethod {
+  REQUEST_METHOD_UNSPECIFIED = 0;
+  REQUEST_METHOD_GET = 1;
+  REQUEST_METHOD_PUT = 2;
+  REQUEST_METHOD_POST = 3;
+}
+
+message AuthorizationParameters
+{
+  RequestMethod method = 1;
+  string bucket_name = 2;
+  string object_key_name = 3;
+}
+
+message AuthRequest
+{
+  string string_to_sign = 1;
+  string access_key_id = 2;
+  string authorization_header = 3;
+  AuthorizationParameters param = 4;
+}
+
+enum AuthCode {
+  AUTH_CODE_UNSPECIFIED = 0;
+  AUTH_CODE_OK = 200;
+  AUTH_CODE_UNAUTHORIZED = 401;
+  AUTH_CODE_FORBIDDEN = 403;
+  AUTH_CODE_FAILURE = 500;
+}
+
+message AuthResponse
+{
+  string uid = 1;
+  string message = 2;
+  AuthCode code = 3;
+}
