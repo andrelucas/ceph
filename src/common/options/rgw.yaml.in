@@ -932,6 +932,7 @@ options:
   type: str
   level: advanced
   desc: URI for the S3 authentication handoff service via gRPC.
+  default: dns:127.0.0.1:8002
   services:
   - rgw
   with_legacy: true
