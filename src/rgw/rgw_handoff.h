@@ -1,6 +1,21 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab ft=cpp
 
+/**
+ * @file rgw_handoff.cc
+ * @author André Lucas (alucas@akamai.com)
+ * @brief 'Handoff' S3 authentication engine.
+ * @version 0.1
+ * @date 2023-07-04
+ *
+ * Persistent 'helper' class for the Handoff authentication engine for S3.
+ * This allows us to keep items such as a pointer to the store abstraction
+ * layer and a gRPC channel around between requests.
+ *
+ * HandoffHelper simply wraps HandoffHelperImpl. Keep the number of classes in
+ * this file to a strict minimum - most should be in rgw_handoff_impl.{h,cc}.
+ */
+
 #ifndef RGW_HANDOFF_H
 #define RGW_HANDOFF_H
 
@@ -72,164 +87,36 @@ public:
   }
 };
 
-class HandoffVerifyResult {
-  int result_;
-  long http_code_;
-  std::string query_url_;
-
-public:
-  HandoffVerifyResult()
-      : result_ { -1 }
-      , http_code_ { 0 }
-      , query_url_ { "" }
-  {
-  }
-  HandoffVerifyResult(int result, long http_code, std::string query_url = "")
-      : result_ { result }
-      , http_code_ { http_code }
-      , query_url_ { query_url }
-  {
-  }
-  // No copy or copy-assignment.
-  HandoffVerifyResult(HandoffVerifyResult& other) = delete;
-  HandoffVerifyResult& operator=(HandoffVerifyResult& other) = delete;
-  // Trivial move and move-assignment.
-  HandoffVerifyResult(HandoffVerifyResult&& other) = default;
-  HandoffVerifyResult& operator=(HandoffVerifyResult&& other) = default;
-
-  int result() const noexcept { return result_; }
-  long http_code() const noexcept { return http_code_; }
-  std::string query_url() const noexcept { return query_url_; }
-};
-
-class EAKParameters {
-
-private:
-  bool valid_;
-  std::string method_;
-  std::string bucket_name_;
-  std::string object_key_name_;
-
-  void valid_check() const
-  {
-    if (!valid()) {
-      throw new std::runtime_error("EAKParameters not valid");
-    }
-  }
-
-public:
-  EAKParameters(const DoutPrefixProvider* dpp, const req_state* s) noexcept;
-
-  // Standard copies and moves are fine.
-  EAKParameters(EAKParameters& other) = default;
-  EAKParameters& operator=(EAKParameters& other) = default;
-  EAKParameters(EAKParameters&& other) = default;
-  EAKParameters& operator=(EAKParameters&& other) = default;
-
-  /**
-   * @brief Return the validity of this EAKParameters object.
-   *
-   * If at construction time the request was well-formed and contained
-   * sufficient information to be used in an EAK request to the Authenticator,
-   * return true.
-   *
-   * Otherwise, return false.
-   *
-   * @return true The request can be used as the source of an EAK
-   * authentication operation.
-   * @return false The request cannot be used.
-   */
-  bool valid() const noexcept
-  {
-    return valid_;
-  }
-  /**
-   * @brief Return the HTTP method for a valid request. Throw if valid() is
-   * false.
-   *
-   * @return std::string The method.
-   * @throw std::runtime_error if !valid().
-   */
-  std::string method() const
-  {
-    valid_check();
-    return method_;
-  }
-  /**
-   * @brief Return the bucket name for a valid request. Throw if valid() is
-   * false.
-   *
-   * @return std::string The bucket name.
-   * @throw std::runtime_error if !valid().
-   */
-  std::string bucket_name() const
-  {
-    valid_check();
-    return bucket_name_;
-  }
-  /**
-   * @brief Return the object key name for a valid request. Throw if valid()
-   * is false.
-   *
-   * @return std::string The object key name.
-   * @throw std::runtime_error if !valid().
-   */
-  std::string object_key_name() const
-  {
-    valid_check();
-    return object_key_name_;
-  }
-
-  /**
-   * @brief Convert this EAKParameters object to string form.
-   *
-   * @return std::string A string representation of the object. Works fine for
-   * objects in the invalid state; this call is always safe.
-   */
-  std::string to_string() const noexcept;
-
-  /// Used to implement streaming.
-  friend std::ostream& operator<<(std::ostream& os, const EAKParameters& ep);
-};
-
-std::ostream& operator<<(std::ostream& os, const EAKParameters& ep);
-
 class HandoffHelperImpl; // Forward declaration.
 
 /**
  * @brief Support class for 'handoff' authentication.
  *
  * Used by rgw::auth::s3::HandoffEngine to implement authentication via an
- * external REST service.
+ * external REST service. Note this is essentially a wrapper class - the work
+ * is all done in rgw::HandoffHelperImpl, to keep the gRPC headers away from
+ * the rest of RGW.
  */
 class HandoffHelper {
 
-public:
-  // Signature of the alternative verify function,  used only for testing.
-  using VerifyFunc = std::function<HandoffVerifyResult(const DoutPrefixProvider*, const std::string&, ceph::bufferlist*, optional_yield)>;
-
 private:
+  /* There's some trouble taken to make a smart pointer to an incomplete
+   * object work properly. See notes around the destructor declaration and
+   * definition, it's subtle.
+   */
   std::unique_ptr<HandoffHelperImpl> impl_;
 
 public:
-  HandoffHelper();
-  /**
-   * @brief Construct a new Handoff Helper object with an alternative callout
-   * mechanism. Used by test harnesses.
-   *
-   * @param v A function to replace the HTTP client callout. This must mimic
-   * the inputs and outputs of the \p verify_standard() function.
+  /*
+   * Implementation note: We need to implement the constructor(s) and
+   * destructor when we know the size of HandoffHelperImpl. This means we
+   * implement in the .cc file, which _does_ include the impl header file.
+   * *Don't* include the impl header file in this .h, and don't switch to
+   * using the default implementation - it won't compile.
    */
-  HandoffHelper(VerifyFunc v);
 
-  /**
-   * @brief Destroy the Handoff Helper object. See notes.
-   *
-   * We need to implement this destructor when we know the size of
-   * HandoffHelperImpl. This means implementing it in rgw_handoff_impl.cc.
-   *
-   * (See https://www.fluentcpp.com/2017/09/22/make-pimpl-using-unique_ptr/).
-   */
+  HandoffHelper();
+
   ~HandoffHelper();
 
   /**
@@ -238,7 +125,8 @@ public:
    * @param store Pointer to the sal::Store object.
    * @return 0 on success, otherwise failure.
    *
-   * Currently a placeholder, there's no long-lived state at this time.
+   * Initialise the long-lived object. Calls HandoffHelperImpl::init() and
+   * returns its result.
    */
   int init(CephContext* const cct, rgw::sal::Store* store);
 
@@ -255,57 +143,7 @@ public:
    * parameters necessary to continue processing the request, e.g. the uid
    * associated with the access key.
    *
-   * Perform request authentication via the external authenticator.
-   *
-   * There is a mechanism for a test harness to replace the HTTP client
-   * portion of this function. Here we'll assume we're using the HTTP client
-   * to authenticate.
-   *
-   * - Extract the Authorization header from the environment. This will be
-   *   necessary to validate a v4 signature because we need some fields (date,
-   *   region, service, request type) for step 2 of the signature process.
-   *
-   * - If the Authorization header is absent, attempt to extract the relevant
-   *   information from query parameters to synthesize an Authorization
-   *   header. This is to support presigned URLs.
-   *
-   * - If the header indicates AWS Signature V2 authentication, but V2 is
-   *   disabled via configuration, return a failure immediately.
-   *
-   * - If required, introspect the request to obtain additional authentication
-   *   parameters that might be required by the external authenticator.
-   *
-   * - Construct a JSON payload for the authenticator in the prescribed
-   *   format.
-   *
-   * - At this point, call a test harness to perform authentication if one is
-   *   configured. Otherwise...
-   *
-   * - Fetch the authenticator URI from the context. This can't be trivially
-   *   cached, as we want to support changing it at runtime. However, future
-   *   enhancements may perform some time-based caching if performance
-   *   profiling shows this is a problem.
-   *
-   * - Append '/verify' to the authenticator URI.
-   *
-   * - Send the request to the authenticator using an RGWHTTPTransceiver. We
-   *   need the transceiver version as we'll be both sending a POST request
-   *   and reading the response body. (This is cribbed from the Keystone
-   *   code.)
-   *
-   * - If the request send itself fails (we'll handle failure return codes
-   *   presently), return EACCES immediately.
-   *
-   * - Parse the JSON response to obtain the human-readable message field,
-   *   even if the authentication response is a failure.
-   *
-   * - If the request returned 200, return success.
-   *
-   * - If the request returned 401, return ERR_SIGNATURE_NO_MATCH.
-   *
-   * - If the request returned 404, return ERR_INVALID_ACCESS_KEY.
-   *
-   * - If the request returned any other code, return EACCES.
+   * Simply calls the HandoffHelperImpl::auth() and returns its result.
    */
   HandoffAuthResult auth(const DoutPrefixProvider* dpp,
       const std::string_view& session_token,
