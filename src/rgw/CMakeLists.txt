@@ -311,6 +311,16 @@ if(WITH_RADOSGW_GRPC)
     ${CMAKE_SOURCE_DIR}/src/buf.yaml
   )
 
+  # The tools buf will need to generate source code. If support for a target
+  # is added in buf.gen.yaml, it will probably need added here. However, the
+  # Golang gRPC tools are separate and will need to be installed by some other
+  # means.
+  set(grpc_tools
+    protoc
+    grpc_cpp_plugin
+    grpc_python_plugin
+  )
+
   # This custom command is used to invoke buf to regenerate the gRPC and
   # protobuf sources whenever a source file (or buf config file) changes.
   #
@@ -328,7 +338,7 @@ if(WITH_RADOSGW_GRPC)
   add_custom_command(
     OUTPUT ${rgw_grpc_gen_sources} ${rgw_grpc_gen_test_sources}
     COMMAND env PATH=${CMAKE_BINARY_DIR}/bin:$$PATH buf generate --output ${CMAKE_BINARY_DIR}
-    DEPENDS protoc grpc_cpp_plugin ${rgw_grpc_proto} ${rgw_grpc_test_proto} ${buf_config_files}
+    DEPENDS ${grpc_tools} ${rgw_grpc_proto} ${rgw_grpc_test_proto} ${buf_config_files}
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src"
   )
 
