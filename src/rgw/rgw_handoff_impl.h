@@ -75,33 +75,22 @@ public:
 
 /****************************************************************************/
 
-class AuthClient {
+/**
+ * @brief gRPC client wrapper for rgw/auth/v1/AuthService.
+ *
+ */
+class AuthServiceClient {
 private:
   std::unique_ptr<AuthService::Stub> stub_;
 
 public:
-  AuthClient(std::shared_ptr<::grpc::Channel> channel)
+  AuthServiceClient(std::shared_ptr<::grpc::Channel> channel)
       : stub_(AuthService::NewStub(channel))
   {
   }
 
-  HandoffAuthResult Auth(const AuthRequest& req)
-  {
-    ::grpc::ClientContext context;
-    AuthResponse resp;
-
-    ::grpc::Status status = stub_->Auth(&context, req, &resp);
-    // Check for an error from gRPC itself.
-    if (!status.ok()) {
-      return HandoffAuthResult(500, status.error_message());
-    }
-    return parse_auth_response(req, &resp);
-  }
-
-  HandoffAuthResult parse_auth_response(const AuthRequest& req, const AuthResponse* resp)
-  {
-    return HandoffAuthResult(500, "XXX NOTIMPL");
-  }
+  HandoffAuthResult Auth(const AuthRequest& req);
+  HandoffAuthResult parse_auth_response(const AuthRequest& req, const AuthResponse* resp);
 };
 
 /****************************************************************************/
@@ -204,9 +193,9 @@ std::ostream& operator<<(std::ostream& os, const EAKParameters& ep);
  * @brief Support class for 'handoff' authentication.
  *
  * Used by rgw::auth::s3::HandoffEngine to implement authentication via an
- * external REST service.
+ * external Authenticator Service.
  *
- * In gRPC mode, holds common state.
+ * In gRPC mode, holds long-lived state.
  */
 class HandoffHelperImpl {
 
@@ -217,6 +206,12 @@ public:
 private:
   const std::optional<VerifyFunc> verify_func_;
   rgw::sal::Store* store_;
+
+  // If we want this to be runtime-changeable we will need the channel to be
+  // behind a mutex. Until that point, we know it will be initialised by
+  // init() before being called, and that it's safe to use without guard
+  // rails.
+  std::shared_ptr<grpc::Channel> channel_;
 
 public:
   HandoffHelperImpl() { }
@@ -311,6 +306,54 @@ public:
    * - If the request returned any other code, return EACCES.
    */
   HandoffAuthResult auth(const DoutPrefixProvider* dpp,
+      const std::string_view& session_token,
+      const std::string_view& access_key_id,
+      const std::string_view& string_to_sign,
+      const std::string_view& signature,
+      const req_state* const s,
+      optional_yield y);
+
+  /**
+   * @brief Implement the gRPC arm of auth().
+   *
+   * @param dpp DoutPrefixProvider.
+   * @param auth The authorization header, which may have been synthesized.
+   * @param eak_param Authorization parameters, if required.
+   * @param session_token Unused by Handoff.
+   * @param access_key_id The S3 access key.
+   * @param string_to_sign The canonicalised S3 signature input.
+   * @param signature The transaction signature provided by the user.
+   * @param s Pointer to the req_state.
+   * @param y An optional yield token.
+   * @return HandoffAuthResult The authentication result.
+   */
+  HandoffAuthResult _grpc_auth(const DoutPrefixProvider* dpp,
+      const std::string& auth,
+      const std::optional<EAKParameters>& eak_param,
+      const std::string_view& session_token,
+      const std::string_view& access_key_id,
+      const std::string_view& string_to_sign,
+      const std::string_view& signature,
+      const req_state* const s,
+      optional_yield y);
+
+  /**
+   * @brief Implement the HTTP arm of auth().
+   *
+   * @param dpp DoutPrefixProvider.
+   * @param auth The authorization header, which may have been synthesized.
+   * @param eak_param Authorization parameters, if required.
+   * @param session_token Unused by Handoff.
+   * @param access_key_id The S3 access key.
+   * @param string_to_sign The canonicalised S3 signature input.
+   * @param signature The transaction signature provided by the user.
+   * @param s Pointer to the req_state.
+   * @param y An optional yield token.
+   * @return HandoffAuthResult The authentication result.
+   */
+  HandoffAuthResult _http_auth(const DoutPrefixProvider* dpp,
+      const std::string& auth,
+      const std::optional<EAKParameters>& eak_param,
       const std::string_view& session_token,
       const std::string_view& access_key_id,
       const std::string_view& string_to_sign,
