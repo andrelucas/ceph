@@ -470,20 +470,31 @@ TEST(HandoffHelper, Init)
   ASSERT_EQ(hh.init(g_ceph_context, nullptr), 0);
 }
 
-class HandoffHelperTest : public ::testing::Test {
+/**
+ * @brief HTTP-mode HandoffHelperImpl end-to-end test fixture.
+ *
+ * Not using a parameterised test for HTTP and gRPC because I anticipate
+ * removing the HTTP mode at some point, and it will be a pain to unpick.
+ * Plus, the test harnesses for HTTP and gRPC are quite different.
+ */
+class HandoffHelperImplHTTPTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
+    dpp.get_cct()->_conf.set_val_or_die("rgw_handoff_enable_grpc", "false");
+    dpp.get_cct()->_conf.apply_changes(nullptr);
+    ASSERT_EQ(dpp.get_cct()->_conf->rgw_handoff_enable_grpc, false);
     ASSERT_EQ(hh.init(g_ceph_context, nullptr), 0);
   }
 
+  bool grpc_enabled;
   HandoffHelperImpl hh { verify_by_func };
   optional_yield y = null_yield;
   DoutPrefix dpp { g_ceph_context, ceph_subsys_rgw, "unittest " };
 };
 
 // Don't deref if cct->cio == nullptr.
-TEST_F(HandoffHelperTest, RegressNullCioPtr)
+TEST_F(HandoffHelperImplHTTPTest, RegressNullCioPtr)
 {
   auto t = sigpass_tests[0];
   RGWEnv rgw_env;
@@ -496,7 +507,7 @@ TEST_F(HandoffHelperTest, RegressNullCioPtr)
 
 // Fail properly when the Authorization header is absent and one can't be
 // synthesized.
-TEST_F(HandoffHelperTest, FailIfMissingAuthorizationHeader)
+TEST_F(HandoffHelperImplHTTPTest, FailIfMissingAuthorizationHeader)
 {
   TestClient cio;
 
@@ -510,7 +521,7 @@ TEST_F(HandoffHelperTest, FailIfMissingAuthorizationHeader)
   ASSERT_THAT(res.message(), testing::ContainsRegex("missing Authorization"));
 }
 
-TEST_F(HandoffHelperTest, SignatureV2CanBeDisabled)
+TEST_F(HandoffHelperImplHTTPTest, SignatureV2CanBeDisabled)
 {
   auto t = v2_sample;
 
@@ -527,6 +538,7 @@ TEST_F(HandoffHelperTest, SignatureV2CanBeDisabled)
   ASSERT_TRUE(res.is_ok());
 
   dpp.get_cct()->_conf->rgw_handoff_enable_signature_v2 = false;
+  dpp.get_cct()->_conf.apply_changes(nullptr);
   res = hh.auth(&dpp, "", t.access_key, string_to_sign, t.signature, &s, y);
   ASSERT_TRUE(res.is_err());
 
@@ -536,7 +548,7 @@ TEST_F(HandoffHelperTest, SignatureV2CanBeDisabled)
 }
 
 // Test working signatures with the verify_by_func handler above.
-TEST_F(HandoffHelperTest, HeaderHappyPath)
+TEST_F(HandoffHelperImplHTTPTest, HeaderHappyPath)
 {
   for (const auto& t : sigpass_tests) {
     TestClient cio;
@@ -554,7 +566,7 @@ TEST_F(HandoffHelperTest, HeaderHappyPath)
 }
 
 // Test deliberately broken signatures with the verify_by_func handler above.
-TEST_F(HandoffHelperTest, HeaderExpectBadSignature)
+TEST_F(HandoffHelperImplHTTPTest, HeaderExpectBadSignature)
 {
   for (const auto& t : sigfail_tests) {
     TestClient cio;
@@ -642,11 +654,35 @@ static HandoffHeaderSynthData synth_pass[] = {
 
 /* #endregion */
 
+/**
+ * @brief HandoffHelperImpl test fixture. Not for end-to-end tests!
+ */
+class HandoffHelperImplSubsysTest : public ::testing::Test {
+protected:
+  void SetUp() override
+  {
+    dpp.get_cct()->_conf.set_val_or_die("rgw_handoff_enable_grpc", "false");
+    dpp.get_cct()->_conf.apply_changes(nullptr);
+    ASSERT_EQ(dpp.get_cct()->_conf->rgw_handoff_enable_grpc, false);
+    ASSERT_EQ(hh.init(g_ceph_context, nullptr), 0);
+  }
+
+  static rgw::HandoffVerifyResult verify_throw(const DoutPrefixProvider* dpp, const std::string& request_json, ceph::bufferlist* resp_bl, [[maybe_unused]] optional_yield y)
+  {
+    throw new std::runtime_error("Should not get here");
+  }
+
+  bool grpc_enabled;
+  HandoffHelperImpl hh { verify_throw };
+  optional_yield y = null_yield;
+  DoutPrefix dpp { g_ceph_context, ceph_subsys_rgw, "unittest " };
+};
+
 // Make sure we're properly creating the Authorization: header from query
 // parameters. This is order-dependent; however every program I've tried it
 // with (s3cmd, aws s3 presign, the AWS presigned_url.py SDK example code)
 // respects this order.
-TEST_F(HandoffHelperTest, PresignedSynthesizeHeader)
+TEST_F(HandoffHelperImplSubsysTest, PresignedSynthesizeHeader)
 {
   for (auto const& t : synth_pass) {
 
@@ -709,7 +745,7 @@ static PresignedExpiryData expiry_unit[] = {
 
 // Presigned headers have an expiry time. If we're past that time, we
 // shouldn't even pass the request to the Authenticator.
-TEST_F(HandoffHelperTest, PresignedCheckExpiry)
+TEST_F(HandoffHelperImplSubsysTest, PresignedCheckExpiry)
 {
 
   for (auto const& t : expiry_unit) {
@@ -778,7 +814,7 @@ static EAKConstructTest eak_unit[] = {
 
 // #endregion
 
-TEST_F(HandoffHelperTest, EAKParamConstruct)
+TEST_F(HandoffHelperImplSubsysTest, EAKParamConstruct)
 {
   for (const auto& t : eak_unit) {
     RGWEnv rgw_env;
@@ -836,8 +872,8 @@ int main(int argc, char** argv)
   rgw_http_client_init(cct->get());
   rgw_setup_saved_curl_handles();
 
-  // // This will raise the library logging level to max.
-  // g_ceph_context->_conf->subsys.set_log_level(ceph_subsys_rgw, 20);
+  // This will raise the library logging level to max.
+  g_ceph_context->_conf->subsys.set_log_level(ceph_subsys_rgw, 20);
 
   ::testing::InitGoogleTest(&argc, argv);
   int r = RUN_ALL_TESTS();

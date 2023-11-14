@@ -5,6 +5,7 @@ package rgw.auth.v1;
 service AuthService
 {
   rpc Auth(AuthRequest) returns (AuthResponse);
+  rpc Status(StatusRequest) returns (StatusResponse);
 }
 
 enum RequestMethod {
@@ -23,7 +24,7 @@ message AuthorizationParameters
 
 message AuthRequest
 {
-  string string_to_sign = 1;
+  string string_to_sign_base64 = 1;
   string access_key_id = 2;
   string authorization_header = 3;
   AuthorizationParameters param = 4;
@@ -32,6 +33,7 @@ message AuthRequest
 enum AuthCode {
   AUTH_CODE_UNSPECIFIED = 0;
   AUTH_CODE_OK = 200;
+  AUTH_CODE_BAD_REQUEST = 400;
   AUTH_CODE_UNAUTHORIZED = 401;
   AUTH_CODE_FORBIDDEN = 403;
   AUTH_CODE_FAILURE = 500;
@@ -42,4 +44,14 @@ message AuthResponse
   string uid = 1;
   string message = 2;
   AuthCode code = 3;
+}
+
+message StatusRequest
+{
+  // Nothing.
+}
+
+message StatusResponse
+{
+  string server_description = 1;
 }
