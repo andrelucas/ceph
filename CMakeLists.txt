@@ -492,8 +492,8 @@ if(WITH_RADOSGW)
     set(gRPC_SSL_PROVIDER package CACHE INTERNAL "")
     set(gRPC_ZLIB_PROVIDER package CACHE INTERNAL "")
 
-    # Turn off everything but C++.
-    foreach(l in CSHARP NODE OBJECTIVE_C PHP PYTHON RUBY)
+    # Turn off everything but C++ and Python.
+    foreach(l in CSHARP NODE OBJECTIVE_C PHP RUBY)
       set("gRPC_BUILD_GRPC_${l}_PLUGIN" OFF CACHE INTERNAL "")
     endforeach(l)
 
