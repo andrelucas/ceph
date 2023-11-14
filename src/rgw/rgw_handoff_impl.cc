@@ -415,8 +415,10 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Store* store)
   ldout(cct, 20) << "HandoffHelperImpl::init" << dendl;
   store_ = store;
 
-  // XXX grpc::InsecureChannelCredentials()...
-  channel_ = grpc::CreateChannel(cct->_conf->rgw_handoff_grpc_uri, grpc::InsecureChannelCredentials());
+  if (cct->_conf->rgw_handoff_enable_grpc) {
+    // XXX grpc::InsecureChannelCredentials()...
+    channel_ = grpc::CreateChannel(cct->_conf->rgw_handoff_grpc_uri, grpc::InsecureChannelCredentials());
+  }
 
   return 0;
 }
