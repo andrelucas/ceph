@@ -4,10 +4,13 @@ package rgw.auth.v1;
 
 service AuthService
 {
+  // Given an S3 request, attempt to authenticate a user id.
   rpc Auth(AuthRequest) returns (AuthResponse);
+  // Simple ping-like service, useful for service liveness checks.
   rpc Status(StatusRequest) returns (StatusResponse);
 }
 
+// Types of S3 HTTP request, may be useful for authorization decisions.
 enum RequestMethod {
   REQUEST_METHOD_UNSPECIFIED = 0;
   REQUEST_METHOD_GET = 1;
@@ -15,6 +18,10 @@ enum RequestMethod {
   REQUEST_METHOD_POST = 3;
 }
 
+// Information about the request not normally provided to RGW authentication
+// engines, but required for authorization decisions and more advanced
+// authentication scenarios.
+//
 message AuthorizationParameters
 {
   RequestMethod method = 1;
@@ -22,35 +29,87 @@ message AuthorizationParameters
   string object_key_name = 3;
 }
 
+// An authentication request to the Auth() service call.
+//
+// This closely mirrors
+// the parameters passed to RGW external authentication 'engine' classes, but
+// with additional fields for Akamai-specific authentication and authorization
+// purposes.
+//
 message AuthRequest
 {
+  // The stringToSign as defined by AWS.
   string string_to_sign = 1;
+
+  // The access_key_id field. This is also present in the v4
+  // Authorization header, but not the v2 header, so it needs to be included.
   string access_key_id = 2;
+
+  // The Authorization header. Presigned URLs don't have these, but the RGW
+  // Handoff implementation synthesises one based on the query string
+  // parameters.
   string authorization_header = 3;
-  AuthorizationParameters param = 4;
+
+  // The x-amz-authorization-token header, if one is present.
+  string authorization_token_header = 5;
+
+  // Additional parameters we may have inferred from the request. Note that
+  // not all information about the query is known at authentication time, and
+  // there is a cost in both time and development complexity to prefetching
+  // this information.
+  optional AuthorizationParameters param = 4;
 }
 
+// AuthCode enumeration, for HTTP-like error responses. At the time of
+// creation these largely match HTTP semantics, but it's conceivable that
+// this may change over time as more specific failure modes become available.
+//
 enum AuthCode {
+  // Default value.
   AUTH_CODE_UNSPECIFIED = 0;
+  // User is authenticated, and the UID field in AuthResponse has a valid user
+  // id. AuthResponse.message may hold further information but its contents
+  // are likely to be uninformative.
   AUTH_CODE_OK = 200;
+  // There was a problem with the request. AuthResponse.message may hold more
+  // information about the specific problem.
   AUTH_CODE_BAD_REQUEST = 400;
+  // Authentication failed. The user's credentials were not verified. Message
+  // may hold more specific information.
   AUTH_CODE_UNAUTHORIZED = 401;
+  // Authorization failed for some reason other than failed authentication,
+  // e.g. some request parameters were missing or malformed. Message may hold
+  // more specific information.
   AUTH_CODE_FORBIDDEN = 403;
+  // Authorization failed for some external reason such as server failure.
+  // AuthResponse.message may hold more specific information.
   AUTH_CODE_FAILURE = 500;
 }
 
+// The Authentication service's response to an Auth() service call. The uid is
+// very important, as it provides a mapping from the request's access_key_id
+// to an actual user id.
+//
 message AuthResponse
 {
+  // The uid associated with the original request. RGW absolutely requires
+  // this to be properly set.
   string uid = 1;
+  // Optional information about the authentication process. Will most likely
+  // be logged, so must not include confidential information.
   string message = 2;
+  // Enumeration with the response status. Anything other than AUTH_CODE_OK
+  // will return a deny token to RGW.
   AuthCode code = 3;
 }
 
+// Request for the Status() rpc.
 message StatusRequest
 {
   // Nothing.
 }
 
+// Response for the Status() rpc.
 message StatusResponse
 {
   string server_description = 1;
