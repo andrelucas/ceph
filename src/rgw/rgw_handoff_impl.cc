@@ -637,7 +637,7 @@ bool HandoffHelperImpl::valid_presigned_time(const DoutPrefixProvider* dpp, cons
     AuthServiceClient client(channel_);
     rgw::auth::v1::AuthRequest req;
     req.set_access_key_id(std::string { access_key_id });
-    req.set_string_to_sign_base64(rgw::to_base64(string_to_sign));
+    req.set_string_to_sign(std::string { string_to_sign });
     req.set_authorization_header(auth);
     if (eak_param) {
       // XXX Set extended parameters in req.

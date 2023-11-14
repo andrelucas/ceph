@@ -24,7 +24,7 @@ message AuthorizationParameters
 
 message AuthRequest
 {
-  string string_to_sign_base64 = 1;
+  string string_to_sign = 1;
   string access_key_id = 2;
   string authorization_header = 3;
   AuthorizationParameters param = 4;
