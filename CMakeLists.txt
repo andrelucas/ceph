@@ -314,7 +314,7 @@ if(WITH_KRBD AND NOT WITH_RBD)
 endif()
 if(LINUX)
   if(WITH_LIBCEPHFS OR WITH_KRBD)
-    # keyutils is only used when talking to the Linux Kernel key store 
+    # keyutils is only used when talking to the Linux Kernel key store
     find_package(keyutils REQUIRED)
     set(HAVE_KEYUTILS ${KEYUTILS_FOUND})
   endif()
@@ -498,7 +498,7 @@ if(WITH_RADOSGW)
     endforeach(l)
 
     # See: https://grpc.io/blog/cmake-improvements/
-    # Note: 20231106 v1.55.4 is the latest that configures correctly, any
+    # Note: 20231106 v1.54.3 is the latest that configures correctly, any
     # later results in CMake errors.
     include(FetchContent)
     FetchContent_Declare(
@@ -577,8 +577,8 @@ option(PG_DEBUG_REFS "PG Ref debugging is enabled" OFF)
 
 option(WITH_TESTS "enable the build of ceph-test package scripts/binaries" ON)
 set(UNIT_TESTS_BUILT ${WITH_TESTS})
-set(CEPH_TEST_TIMEOUT 3600 CACHE STRING 
-  "Maximum time before a CTest gets killed" )
+set(CEPH_TEST_TIMEOUT 3600 CACHE STRING
+  "Maximum time before a CTest gets killed")
 
 # fio
 option(WITH_FIO "build with fio plugin enabled" OFF)
