@@ -212,6 +212,8 @@ HandoffAuthResult AuthServiceClient::parse_auth_response(const AuthRequest& req,
  * @param access_key_id The access key ID. This is the Credential= field of
  * the Authorization header, but RGW has already parsed it out for us.
  * @param auth The full Authorization header in the HTTP request.
+ * @param token The x-amz-authorization-token header, if present (otherwise
+ * empty).
  * @param eak_param Optional EAK parameters.
  * @return std::string The JSON request as a (pretty-printed) string.
  *
@@ -221,14 +223,20 @@ HandoffAuthResult AuthServiceClient::parse_auth_response(const AuthRequest& req,
  * the access secret key, but the authenticator process does.
  */
 static std::string PrepareHandoffRequest(const req_state* s,
-    const std::string_view& string_to_sign, const std::string_view& access_key_id,
-    const std::string_view& auth, const std::optional<EAKParameters>& eak_param)
+    const std::string_view& string_to_sign,
+    const std::string_view& access_key_id,
+    const std::string_view& auth,
+    const std::string_view& token,
+    const std::optional<EAKParameters>& eak_param)
 {
   JSONFormatter jf { true };
   jf.open_object_section(""); // root
   encode_json("stringToSign", rgw::to_base64(string_to_sign), &jf);
   encode_json("accessKeyId", std::string(access_key_id), &jf);
   encode_json("authorization", std::string(auth), &jf);
+  if (token != "") {
+    encode_json("authorization-token", std::string(token), &jf);
+  }
   if (eak_param && eak_param->valid()) {
     jf.open_object_section("eakParameters");
     encode_json("method", eak_param->method(), &jf);
@@ -543,6 +551,9 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp,
 {
 
   ldpp_dout(dpp, 10) << "HandoffHelperImpl::auth()" << dendl;
+  ldpp_dout(dpp, 20) << fmt::format("HandoffHelperImpl::auth(): access_key_id='{}' session_token='{}'",
+      access_key_id, session_token)
+                     << dendl;
 
   if (!s->cio) {
     return HandoffAuthResult(-EACCES, "Internal error (cio)");
@@ -624,7 +635,10 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp,
 {
   AuthServiceClient client(channel_);
   rgw::auth::v1::AuthRequest req;
+  // Fill in the request protobuf. Seem to have to create strings from
+  // string_view, which is a shame.
   req.set_access_key_id(std::string { access_key_id });
+  req.set_authorization_token_header(std::string { session_token });
   req.set_string_to_sign(std::string { string_to_sign });
   req.set_authorization_header(auth);
   if (eak_param) {
@@ -662,7 +676,7 @@ HandoffAuthResult HandoffHelperImpl::_http_auth(const DoutPrefixProvider* dpp,
   HandoffResponse resp;
 
   // Build our JSON request for the authenticator.
-  auto request_json = PrepareHandoffRequest(s, string_to_sign, access_key_id, auth, eak_param);
+  auto request_json = PrepareHandoffRequest(s, string_to_sign, access_key_id, auth, session_token, eak_param);
 
   ceph::bufferlist resp_bl;
 
