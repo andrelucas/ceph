@@ -50,7 +50,7 @@ message AuthRequest
   // parameters.
   string authorization_header = 3;
 
-  // The x-amz-authorization-token header, if one is present.
+  // The x-amz-authorization-token header, or an empty string.
   string authorization_token_header = 5;
 
   // Additional parameters we may have inferred from the request. Note that
