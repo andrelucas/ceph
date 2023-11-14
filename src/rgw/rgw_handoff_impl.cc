@@ -415,22 +415,8 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Store* store)
   ldout(cct, 20) << "HandoffHelperImpl::init" << dendl;
   store_ = store;
 
-  // XXX 20231114 Next up:
-  // - set up a persisted channel
-  // - call some actual authentication out
-  // - success
-
   // XXX grpc::InsecureChannelCredentials()...
   channel_ = grpc::CreateChannel(cct->_conf->rgw_handoff_grpc_uri, grpc::InsecureChannelCredentials());
-
-  // // XXX TEMP TEST CODE
-  // auto stub = AuthService::NewStub(channel_);
-  // grpc::ClientContext context;
-  // AuthRequest req;
-  // AuthResponse resp;
-  // auto status = stub->Auth(&context, req, &resp);
-  // ldout(cct, 0) << "XXX status " << status.error_code() << " " << status.error_message() << dendl;
-  // // XXX
 
   return 0;
 }
@@ -534,191 +520,191 @@ bool HandoffHelperImpl::valid_presigned_time(const DoutPrefixProvider* dpp, cons
   return true;
 }
 
-  bool HandoffHelperImpl::is_eak_credential(const std::string_view access_key_id)
-  {
-    using namespace std::string_view_literals;
+bool HandoffHelperImpl::is_eak_credential(const std::string_view access_key_id)
+{
+  using namespace std::string_view_literals;
 
-    if (access_key_id.compare(0, 4, "OTv1"sv) == 0)
-      return true;
-    else {
-      return false;
+  if (access_key_id.compare(0, 4, "OTv1"sv) == 0)
+    return true;
+  else {
+    return false;
+  }
+}
+
+HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp,
+    const std::string_view& session_token,
+    const std::string_view& access_key_id,
+    const std::string_view& string_to_sign,
+    const std::string_view& signature,
+    const req_state* const s,
+    optional_yield y)
+{
+
+  ldpp_dout(dpp, 10) << "HandoffHelperImpl::auth()" << dendl;
+
+  if (!s->cio) {
+    return HandoffAuthResult(-EACCES, "Internal error (cio)");
+  }
+
+  // The 'environment' of the request includes, amongst other things,
+  // all the headers, prefixed with 'HTTP_'. They also have header names
+  // uppercased and with underscores instead of hyphens.
+  auto envmap = s->cio->get_env().get_map();
+
+  // Retrieve the Authorization header which has a lot of fields we need.
+  std::string auth;
+  auto srch = envmap.find("HTTP_AUTHORIZATION");
+  if (srch != envmap.end()) {
+    auth = srch->second;
+    ldpp_dout(dpp, 20) << "HandoffHelperImpl::auth(): Authorization=" << auth << dendl;
+
+  } else {
+    // Attempt to create an Authorization header using query parameters.
+    auto maybe_auth = synthesize_auth_header(dpp, s);
+    if (maybe_auth) {
+      auth = std::move(*maybe_auth);
+      ldpp_dout(dpp, 20) << "Synthesized Authorization=" << auth << dendl;
+    } else {
+      ldpp_dout(dpp, 0) << "Handoff: Missing Authorization header and insufficient query parameters" << dendl;
+      return HandoffAuthResult(-EACCES, "Internal error (missing Authorization and insufficient query parameters)");
+    }
+    if (dpp->get_cct()->_conf->rgw_handoff_enable_presigned_expiry_check) {
+      // Belt-and-braces: Check the expiry time.
+      // Note that RGW won't (in v17.2.6) pass this to us; it checks the expiry
+      // time before even calling auth(). Let's not assume things.
+      if (!valid_presigned_time(dpp, s, time(nullptr))) {
+        ldpp_dout(dpp, 0) << "Handoff: presigned URL expiry check failed" << dendl;
+        return HandoffAuthResult(-EACCES, "Presigned URL expiry check failed");
+      }
     }
   }
 
-  HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp,
-      const std::string_view& session_token,
-      const std::string_view& access_key_id,
-      const std::string_view& string_to_sign,
-      const std::string_view& signature,
-      const req_state* const s,
-      optional_yield y)
-  {
-
-    ldpp_dout(dpp, 10) << "HandoffHelperImpl::auth()" << dendl;
-
-    if (!s->cio) {
-      return HandoffAuthResult(-EACCES, "Internal error (cio)");
-    }
-
-    // The 'environment' of the request includes, amongst other things,
-    // all the headers, prefixed with 'HTTP_'. They also have header names
-    // uppercased and with underscores instead of hyphens.
-    auto envmap = s->cio->get_env().get_map();
-
-    // Retrieve the Authorization header which has a lot of fields we need.
-    std::string auth;
-    auto srch = envmap.find("HTTP_AUTHORIZATION");
-    if (srch != envmap.end()) {
-      auth = srch->second;
-      ldpp_dout(dpp, 20) << "HandoffHelperImpl::auth(): Authorization=" << auth << dendl;
-
-    } else {
-      // Attempt to create an Authorization header using query parameters.
-      auto maybe_auth = synthesize_auth_header(dpp, s);
-      if (maybe_auth) {
-        auth = std::move(*maybe_auth);
-        ldpp_dout(dpp, 20) << "Synthesized Authorization=" << auth << dendl;
-      } else {
-        ldpp_dout(dpp, 0) << "Handoff: Missing Authorization header and insufficient query parameters" << dendl;
-        return HandoffAuthResult(-EACCES, "Internal error (missing Authorization and insufficient query parameters)");
-      }
-      if (dpp->get_cct()->_conf->rgw_handoff_enable_presigned_expiry_check) {
-        // Belt-and-braces: Check the expiry time.
-        // Note that RGW won't (in v17.2.6) pass this to us; it checks the expiry
-        // time before even calling auth(). Let's not assume things.
-        if (!valid_presigned_time(dpp, s, time(nullptr))) {
-          ldpp_dout(dpp, 0) << "Handoff: presigned URL expiry check failed" << dendl;
-          return HandoffAuthResult(-EACCES, "Presigned URL expiry check failed");
-        }
-      }
-    }
-
-    // We might have disabled V2 signatures.
-    if (!dpp->get_cct()->_conf->rgw_handoff_enable_signature_v2) {
-      if (ba::starts_with(auth, "AWS ")) {
-        ldpp_dout(dpp, 0) << "Handoff: V2 signatures are disabled, returning failure" << dendl;
-        return HandoffAuthResult(-EACCES, "Access denied (V2 signatures disabled)");
-      }
-    }
-
-    // Only do the extra work for EAK if we have to, i.e. the access key looks
-    // like an EAK variant.
-    //
-    std::optional<EAKParameters> eak_param;
-    if (is_eak_credential(access_key_id)) {
-      ldpp_dout(dpp, 20) << "Handoff: Gathering request info for EAK" << dendl;
-      eak_param = EAKParameters(dpp, s);
-      ldpp_dout(dpp, 20) << eak_param << dendl;
-      if (!(eak_param->valid())) {
-        // This shouldn't happen with a valid request. If it does, it's probably
-        // a bug.
-        ldpp_dout(dpp, 0) << "Handoff: EAK request info fetch failed (likely BUG)" << dendl;
-        return HandoffAuthResult(-EACCES, "Access denied (failed to fetch request info for EAK credential)");
-      }
-    }
-
-    if (dpp->get_cct()->_conf->rgw_handoff_enable_grpc) {
-      return _grpc_auth(dpp, auth, eak_param, session_token, access_key_id, string_to_sign, signature, s, y);
-    } else {
-      return _http_auth(dpp, auth, eak_param, session_token, access_key_id, string_to_sign, signature, s, y);
-    }
-  };
-
-  HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp,
-      const std::string& auth,
-      const std::optional<EAKParameters>& eak_param,
-      [[maybe_unused]] const std::string_view& session_token,
-      const std::string_view& access_key_id,
-      const std::string_view& string_to_sign,
-      const std::string_view& signature,
-      [[maybe_unused]] const req_state* const s,
-      [[maybe_unused]] optional_yield y)
-  {
-    AuthServiceClient client(channel_);
-    rgw::auth::v1::AuthRequest req;
-    req.set_access_key_id(std::string { access_key_id });
-    req.set_string_to_sign(std::string { string_to_sign });
-    req.set_authorization_header(auth);
-    if (eak_param) {
-      // XXX Set extended parameters in req.
-      ldpp_dout(dpp, 0) << "XXX EAK parameters not implemented" << dendl;
-    }
-    auto result = client.Auth(req);
-    if (!result.is_ok()) {
-      ldpp_dout(dpp, 0) << fmt::format("Handoff: gRPC request failed: {}", result.message()) << dendl;
-      return HandoffAuthResult(-EACCES, result.message());
-    }
-
-    // The client returns a fully-populated HandoffAuthResult, but we want to
-    // issue some helpful log messages before returning it.
-    if (result.is_ok()) {
-      ldpp_dout(dpp, 0) << fmt::format("Handoff: Success (uid='{}' for access_key_id='{}')", result.userid(), access_key_id) << dendl;
-    } else {
-      ldpp_dout(dpp, 0) << fmt::format("Handoff: Auth service returned failure (access_key_id='{}', code={}, message='{}')", result.code(), result.message()) << dendl;
-    }
-
-    return result;
-  }
-
-  HandoffAuthResult HandoffHelperImpl::_http_auth(const DoutPrefixProvider* dpp,
-      const std::string& auth,
-      const std::optional<EAKParameters>& eak_param,
-      [[maybe_unused]] const std::string_view& session_token,
-      const std::string_view& access_key_id,
-      const std::string_view& string_to_sign,
-      const std::string_view& signature,
-      [[maybe_unused]] const req_state* const s,
-      [[maybe_unused]] optional_yield y)
-  {
-    HandoffVerifyResult vres;
-    HandoffResponse resp;
-
-    // Build our JSON request for the authenticator.
-    auto request_json = PrepareHandoffRequest(s, string_to_sign, access_key_id, auth, eak_param);
-
-    ceph::bufferlist resp_bl;
-
-    // verify_func_ is initialised at construction time and is const, we *do
-    // not* need to synchronise access.
-    if (verify_func_) {
-      vres = (*verify_func_)(dpp, request_json, &resp_bl, y);
-    } else {
-      vres = verify_standard(dpp, request_json, &resp_bl, y);
-    }
-
-    if (vres.result() < 0) {
-      ldpp_dout(dpp, 0) << fmt::format("handoff verify HTTP request failed with exit code {} ({})", vres.result(), strerror(-vres.result()))
-                        << dendl;
-      return HandoffAuthResult(-EACCES, fmt::format("Handoff HTTP request failed with code {} ({})", vres.result(), strerror(-vres.result())));
-    }
-
-    // Parse the JSON response.
-    resp = ParseHandoffResponse(dpp, resp_bl);
-    if (!resp.success) {
-      // Neutral error, the authentication system itself is failing.
-      return HandoffAuthResult(-ERR_INTERNAL_ERROR, resp.message);
-    }
-
-    // Return an error, but only after attempting to parse the response
-    // for a useful error message.
-    auto status = vres.http_code();
-    ldpp_dout(dpp, 20) << fmt::format("fetch '{}' status {}", vres.query_url(), status) << dendl;
-
-    // These error code responses mimic rgw_auth_keystone.cc.
-    switch (status) {
-    case 200:
-      return HandoffAuthResult(resp.uid, resp.message);
-    case 401:
-      return HandoffAuthResult(-ERR_SIGNATURE_NO_MATCH, resp.message);
-    case 404:
-      return HandoffAuthResult(-ERR_INVALID_ACCESS_KEY, resp.message);
-    case RGWHTTPClient::HTTP_STATUS_NOSTATUS:
-      ldpp_dout(dpp, 5) << fmt::format("Handoff fetch '{}' unknown status {}", vres.query_url(), status) << dendl;
-      return HandoffAuthResult(-EACCES, resp.message);
-    default:
-      ldpp_dout(dpp, 0) << fmt::format("Handoff fetch '{}' returned unexpected HTTP status code {}", status) << dendl;
-      return HandoffAuthResult(-EACCES, resp.message);
+  // We might have disabled V2 signatures.
+  if (!dpp->get_cct()->_conf->rgw_handoff_enable_signature_v2) {
+    if (ba::starts_with(auth, "AWS ")) {
+      ldpp_dout(dpp, 0) << "Handoff: V2 signatures are disabled, returning failure" << dendl;
+      return HandoffAuthResult(-EACCES, "Access denied (V2 signatures disabled)");
     }
   }
+
+  // Only do the extra work for EAK if we have to, i.e. the access key looks
+  // like an EAK variant.
+  //
+  std::optional<EAKParameters> eak_param;
+  if (is_eak_credential(access_key_id)) {
+    ldpp_dout(dpp, 20) << "Handoff: Gathering request info for EAK" << dendl;
+    eak_param = EAKParameters(dpp, s);
+    ldpp_dout(dpp, 20) << eak_param << dendl;
+    if (!(eak_param->valid())) {
+      // This shouldn't happen with a valid request. If it does, it's probably
+      // a bug.
+      ldpp_dout(dpp, 0) << "Handoff: EAK request info fetch failed (likely BUG)" << dendl;
+      return HandoffAuthResult(-EACCES, "Access denied (failed to fetch request info for EAK credential)");
+    }
+  }
+
+  if (dpp->get_cct()->_conf->rgw_handoff_enable_grpc) {
+    return _grpc_auth(dpp, auth, eak_param, session_token, access_key_id, string_to_sign, signature, s, y);
+  } else {
+    return _http_auth(dpp, auth, eak_param, session_token, access_key_id, string_to_sign, signature, s, y);
+  }
+};
+
+HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp,
+    const std::string& auth,
+    const std::optional<EAKParameters>& eak_param,
+    [[maybe_unused]] const std::string_view& session_token,
+    const std::string_view& access_key_id,
+    const std::string_view& string_to_sign,
+    const std::string_view& signature,
+    [[maybe_unused]] const req_state* const s,
+    [[maybe_unused]] optional_yield y)
+{
+  AuthServiceClient client(channel_);
+  rgw::auth::v1::AuthRequest req;
+  req.set_access_key_id(std::string { access_key_id });
+  req.set_string_to_sign(std::string { string_to_sign });
+  req.set_authorization_header(auth);
+  if (eak_param) {
+    // XXX Set extended parameters in req.
+    ldpp_dout(dpp, 0) << "XXX EAK parameters not implemented" << dendl;
+  }
+  auto result = client.Auth(req);
+  if (!result.is_ok()) {
+    ldpp_dout(dpp, 0) << fmt::format("Handoff: gRPC request failed: {}", result.message()) << dendl;
+    return HandoffAuthResult(-EACCES, result.message());
+  }
+
+  // The client returns a fully-populated HandoffAuthResult, but we want to
+  // issue some helpful log messages before returning it.
+  if (result.is_ok()) {
+    ldpp_dout(dpp, 0) << fmt::format("Handoff: Success (uid='{}' for access_key_id='{}')", result.userid(), access_key_id) << dendl;
+  } else {
+    ldpp_dout(dpp, 0) << fmt::format("Handoff: Auth service returned failure (access_key_id='{}', code={}, message='{}')", result.code(), result.message()) << dendl;
+  }
+
+  return result;
+}
+
+HandoffAuthResult HandoffHelperImpl::_http_auth(const DoutPrefixProvider* dpp,
+    const std::string& auth,
+    const std::optional<EAKParameters>& eak_param,
+    [[maybe_unused]] const std::string_view& session_token,
+    const std::string_view& access_key_id,
+    const std::string_view& string_to_sign,
+    const std::string_view& signature,
+    [[maybe_unused]] const req_state* const s,
+    [[maybe_unused]] optional_yield y)
+{
+  HandoffVerifyResult vres;
+  HandoffResponse resp;
+
+  // Build our JSON request for the authenticator.
+  auto request_json = PrepareHandoffRequest(s, string_to_sign, access_key_id, auth, eak_param);
+
+  ceph::bufferlist resp_bl;
+
+  // verify_func_ is initialised at construction time and is const, we *do
+  // not* need to synchronise access.
+  if (verify_func_) {
+    vres = (*verify_func_)(dpp, request_json, &resp_bl, y);
+  } else {
+    vres = verify_standard(dpp, request_json, &resp_bl, y);
+  }
+
+  if (vres.result() < 0) {
+    ldpp_dout(dpp, 0) << fmt::format("handoff verify HTTP request failed with exit code {} ({})", vres.result(), strerror(-vres.result()))
+                      << dendl;
+    return HandoffAuthResult(-EACCES, fmt::format("Handoff HTTP request failed with code {} ({})", vres.result(), strerror(-vres.result())));
+  }
+
+  // Parse the JSON response.
+  resp = ParseHandoffResponse(dpp, resp_bl);
+  if (!resp.success) {
+    // Neutral error, the authentication system itself is failing.
+    return HandoffAuthResult(-ERR_INTERNAL_ERROR, resp.message);
+  }
+
+  // Return an error, but only after attempting to parse the response
+  // for a useful error message.
+  auto status = vres.http_code();
+  ldpp_dout(dpp, 20) << fmt::format("fetch '{}' status {}", vres.query_url(), status) << dendl;
+
+  // These error code responses mimic rgw_auth_keystone.cc.
+  switch (status) {
+  case 200:
+    return HandoffAuthResult(resp.uid, resp.message);
+  case 401:
+    return HandoffAuthResult(-ERR_SIGNATURE_NO_MATCH, resp.message);
+  case 404:
+    return HandoffAuthResult(-ERR_INVALID_ACCESS_KEY, resp.message);
+  case RGWHTTPClient::HTTP_STATUS_NOSTATUS:
+    ldpp_dout(dpp, 5) << fmt::format("Handoff fetch '{}' unknown status {}", vres.query_url(), status) << dendl;
+    return HandoffAuthResult(-EACCES, resp.message);
+  default:
+    ldpp_dout(dpp, 0) << fmt::format("Handoff fetch '{}' returned unexpected HTTP status code {}", status) << dendl;
+    return HandoffAuthResult(-EACCES, resp.message);
+  }
+}
 
 } // namespace rgw
