@@ -177,8 +177,6 @@ namespace ba = boost::algorithm;
 
 #define SSL_CHAR_CAST(x) reinterpret_cast<const unsigned char*>(x)
 
-static constexpr unsigned int SHA256_HASH_SIZE_BYTES = 32;
-
 // Wrap the rigmarole of hashing a buffer with OpenSSL.
 static std::optional<std::vector<uint8_t>> _hash_by(const std::vector<uint8_t>& key, const std::string& input, const std::string& hash_type)
 {

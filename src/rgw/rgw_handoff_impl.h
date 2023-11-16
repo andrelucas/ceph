@@ -62,8 +62,8 @@ public:
   {
   }
   // No copy or copy-assignment.
-  HandoffVerifyResult(HandoffVerifyResult& other) = delete;
-  HandoffVerifyResult& operator=(HandoffVerifyResult& other) = delete;
+  HandoffVerifyResult(const HandoffVerifyResult& other) = delete;
+  HandoffVerifyResult& operator=(const HandoffVerifyResult& other) = delete;
   // Trivial move and move-assignment.
   HandoffVerifyResult(HandoffVerifyResult&& other) = default;
   HandoffVerifyResult& operator=(HandoffVerifyResult&& other) = default;
@@ -114,8 +114,8 @@ public:
   EAKParameters(const DoutPrefixProvider* dpp, const req_state* s) noexcept;
 
   // Standard copies and moves are fine.
-  EAKParameters(EAKParameters& other) = default;
-  EAKParameters& operator=(EAKParameters& other) = default;
+  EAKParameters(const EAKParameters& other) = default;
+  EAKParameters& operator=(const EAKParameters& other) = default;
   EAKParameters(EAKParameters&& other) = default;
   EAKParameters& operator=(EAKParameters&& other) = default;
 
