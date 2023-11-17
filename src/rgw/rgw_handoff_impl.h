@@ -153,7 +153,15 @@ public:
 
 /****************************************************************************/
 
-class EAKParameters {
+/**
+ * @brief Gathered information about an inflight request that we want to sent
+ * to the Authentication service for verification.
+ *
+ * Normally these data are gathered later in the request and subject to
+ * internal policies, acls etc. We're giving the Authentication service a
+ * chance to see this information early.
+ */
+class AuthorizationParameters {
 
 private:
   bool valid_;
@@ -164,30 +172,30 @@ private:
   void valid_check() const
   {
     if (!valid()) {
-      throw new std::runtime_error("EAKParameters not valid");
+      throw new std::runtime_error("AuthorizationParameters not valid");
     }
   }
 
 public:
-  EAKParameters(const DoutPrefixProvider* dpp, const req_state* s) noexcept;
+  AuthorizationParameters(const DoutPrefixProvider* dpp, const req_state* s) noexcept;
 
   // Standard copies and moves are fine.
-  EAKParameters(const EAKParameters& other) = default;
-  EAKParameters& operator=(const EAKParameters& other) = default;
-  EAKParameters(EAKParameters&& other) = default;
-  EAKParameters& operator=(EAKParameters&& other) = default;
+  AuthorizationParameters(const AuthorizationParameters& other) = default;
+  AuthorizationParameters& operator=(const AuthorizationParameters& other) = default;
+  AuthorizationParameters(AuthorizationParameters&& other) = default;
+  AuthorizationParameters& operator=(AuthorizationParameters&& other) = default;
 
   /**
-   * @brief Return the validity of this EAKParameters object.
+   * @brief Return the validity of this AuthorizationParameters object.
    *
    * If at construction time the request was well-formed and contained
-   * sufficient information to be used in an EAK request to the Authenticator,
-   * return true.
+   * sufficient information to be used in an authorization request to the
+   * Authenticator, return true.
    *
    * Otherwise, return false.
    *
-   * @return true The request can be used as the source of an EAK
-   * authentication operation.
+   * @return true The request can be used as the source of an
+   * authorization-enhanced authentication operation.
    * @return false The request cannot be used.
    */
   bool valid() const noexcept
@@ -232,7 +240,7 @@ public:
   }
 
   /**
-   * @brief Convert this EAKParameters object to string form.
+   * @brief Convert this AuthorizationParameters object to string form.
    *
    * @return std::string A string representation of the object. Works fine for
    * objects in the invalid state; this call is always safe.
@@ -240,10 +248,10 @@ public:
   std::string to_string() const noexcept;
 
   /// Used to implement streaming.
-  friend std::ostream& operator<<(std::ostream& os, const EAKParameters& ep);
+  friend std::ostream& operator<<(std::ostream& os, const AuthorizationParameters& ep);
 };
 
-std::ostream& operator<<(std::ostream& os, const EAKParameters& ep);
+std::ostream& operator<<(std::ostream& os, const AuthorizationParameters& ep);
 
 /****************************************************************************/
 
@@ -358,7 +366,7 @@ public:
    *
    * @param dpp DoutPrefixProvider.
    * @param auth The authorization header, which may have been synthesized.
-   * @param eak_param Authorization parameters, if required.
+   * @param authorization_param Authorization parameters, if required.
    * @param session_token Unused by Handoff.
    * @param access_key_id The S3 access key.
    * @param string_to_sign The canonicalised S3 signature input.
@@ -388,7 +396,7 @@ public:
    */
   HandoffAuthResult _grpc_auth(const DoutPrefixProvider* dpp,
       const std::string& auth,
-      const std::optional<EAKParameters>& eak_param,
+      const std::optional<AuthorizationParameters>& authorization_param,
       const std::string_view& session_token,
       const std::string_view& access_key_id,
       const std::string_view& string_to_sign,
@@ -435,7 +443,7 @@ public:
    *
    * @param dpp DoutPrefixProvider.
    * @param auth The authorization header, which may have been synthesized.
-   * @param eak_param Authorization parameters, if required.
+   * @param authorization_param Authorization parameters, if required.
    * @param session_token Unused by Handoff.
    * @param access_key_id The S3 access key.
    * @param string_to_sign The canonicalised S3 signature input.
@@ -446,7 +454,7 @@ public:
    */
   HandoffAuthResult _http_auth(const DoutPrefixProvider* dpp,
       const std::string& auth,
-      const std::optional<EAKParameters>& eak_param,
+      const std::optional<AuthorizationParameters>& authorization_param,
       const std::string_view& session_token,
       const std::string_view& access_key_id,
       const std::string_view& string_to_sign,
@@ -499,19 +507,6 @@ public:
    * @return false The request has expired, or a check was not possible
    */
   bool valid_presigned_time(const DoutPrefixProvider* dpp, const req_state* s, time_t now);
-
-  /**
-   * @brief Return true if the supplied credential looks like an Extended
-   * Access Key.
-   *
-   * The EAK format is specified to have a small set of known prefix strings,
-   * to make them easy to detect. The prefixes are case-significant.
-   *
-   * @param access_key_id
-   * @return true The credential has a recognised EAK prefix.
-   * @return false The credential is a regular access key.
-   */
-  bool is_eak_credential(const std::string_view access_key_id);
 };
 
 } /* namespace rgw */

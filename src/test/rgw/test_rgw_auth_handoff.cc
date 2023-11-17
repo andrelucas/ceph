@@ -43,7 +43,7 @@
 
 namespace {
 
-/* #region(collapsed) TestData */
+/* #region TestData */
 
 // The information we need to use an access key.
 struct AccessKeyInfo {
@@ -182,7 +182,7 @@ HandoffQueryTestData presigned_pass_tests[] = {
 };
 
 /* #endregion */
-/* #region(collapsed) SupportCode */
+/* #region SupportCode */
 
 namespace ba = boost::algorithm;
 
@@ -914,7 +914,7 @@ TEST_F(HandoffHelperImplGRPCTest, HeaderExpectBadSignature)
 
 /* #endregion HandoffHelperImplGRPC tests */
 
-/* #region(collapsed) PresignedTestData */
+/* #region PresignedTestData */
 
 struct HandoffHeaderSynthData {
   std::string name;
@@ -1043,7 +1043,7 @@ TEST_F(HandoffHelperImplSubsysTest, PresignedSynthesizeHeader)
   }
 }
 
-/* #region(collapsed) PresignedExpiryData */
+/* #region PresignedExpiryData */
 
 struct PresignedExpiryData {
   std::string name;
@@ -1110,9 +1110,9 @@ TEST_F(HandoffHelperImplSubsysTest, PresignedCheckExpiry)
   }
 }
 
-// #region(collapsed) EAKParametersTestData
+/* #region AuthorizationParametersTestData */
 
-struct EAKConstructTest {
+struct AuthorizationConstructTest {
   std::string method;
   // Note that the r_uri is used as s->relative_uri. We don't have to worry
   // about URL encoding of the bucket and keys. Why? In
@@ -1127,7 +1127,7 @@ struct EAKConstructTest {
   std::string exp_object_key;
 };
 
-static EAKConstructTest eak_unit[] = {
+static AuthorizationConstructTest eak_unit[] = {
   // Simple get.
   { "GET", "/bucket/key", true, "GET", "bucket", "key" },
   // Simple put.
@@ -1140,12 +1140,12 @@ static EAKConstructTest eak_unit[] = {
   // Broken: No method.
   { "", "/bucket", false, "", "", "" },
   // Broken: No bucket or key.
-  { "GET", "/", false, "", "", "" },
+  { "GET", "/", true, "GET", "", "" },
 };
 
-// #endregion
+/* #endregion */
 
-TEST_F(HandoffHelperImplSubsysTest, EAKParamConstruct)
+TEST_F(HandoffHelperImplSubsysTest, AuthorizationParamConstruct)
 {
   for (const auto& t : eak_unit) {
     RGWEnv rgw_env;
@@ -1155,40 +1155,18 @@ TEST_F(HandoffHelperImplSubsysTest, EAKParamConstruct)
     s.info.method = t.method.c_str();
     s.relative_uri = t.r_uri;
 
-    auto eak = EAKParameters(&dpp, &s);
+    auto param = rgw::AuthorizationParameters(&dpp, &s);
     if (!t.expected_pass) {
-      EXPECT_FALSE(eak.valid()) << test_desc;
-      EXPECT_ANY_THROW(eak.method()) << test_desc;
-      EXPECT_ANY_THROW(eak.bucket_name()) << test_desc;
-      EXPECT_ANY_THROW(eak.object_key_name()) << test_desc;
+      EXPECT_FALSE(param.valid()) << test_desc;
+      EXPECT_ANY_THROW(param.method()) << test_desc;
+      EXPECT_ANY_THROW(param.bucket_name()) << test_desc;
+      EXPECT_ANY_THROW(param.object_key_name()) << test_desc;
     } else {
-      ASSERT_TRUE(eak.valid()) << test_desc;
-      EXPECT_EQ(eak.method(), t.exp_method) << test_desc;
-      EXPECT_EQ(eak.bucket_name(), t.exp_bucket) << test_desc;
-      EXPECT_EQ(eak.object_key_name(), t.exp_object_key) << test_desc;
+      ASSERT_TRUE(param.valid()) << test_desc;
+      EXPECT_EQ(param.method(), t.exp_method) << test_desc;
+      EXPECT_EQ(param.bucket_name(), t.exp_bucket) << test_desc;
+      EXPECT_EQ(param.object_key_name(), t.exp_object_key) << test_desc;
     }
-  }
-}
-
-TEST(HandoffHelperEak, IsEakCredential)
-{
-  struct EAKCredTest {
-    std::string input;
-    bool expected;
-  };
-
-  EAKCredTest tests[] = {
-    { "foo", false },
-    { "OTv1", true },
-    { "OTv", false },
-    { "otv1", false },
-  };
-
-  HandoffHelperImpl hh;
-
-  for (const auto& t : tests) {
-    auto desc = fmt::format("test: prefix {}, expects {}", t.input, t.expected);
-    EXPECT_EQ(hh.is_eak_credential(t.input), t.expected) << desc;
   }
 }
 
