@@ -542,14 +542,28 @@ bool HandoffHelperImpl::valid_presigned_time(const DoutPrefixProvider* dpp, cons
   return true;
 }
 
-bool HandoffHelperImpl::is_eak_credential(const std::string_view access_key_id)
+/**
+ * @brief For a given HTTP method in string form ("GET", "POST", etc.) return
+ * the corresponding rgw::auth::v1::RequestMethod enum value.
+ *
+ * @param method The HTTP method as a string view.
+ * @return rgw::auth::v1::RequestMethod the enum value, or
+ * REQUEST_METHOD_UNSPECIFIED if the method is not recognised.
+ */
+static rgw::auth::v1::RequestMethod method_to_reqmethod(const std::string_view& method)
 {
-  using namespace std::string_view_literals;
-
-  if (access_key_id.compare(0, 4, "OTv1"sv) == 0)
-    return true;
-  else {
-    return false;
+  if (method == "GET") {
+    return rgw::auth::v1::REQUEST_METHOD_GET;
+  } else if (method == "PUT") {
+    return rgw::auth::v1::REQUEST_METHOD_PUT;
+  } else if (method == "POST") {
+    return rgw::auth::v1::REQUEST_METHOD_POST;
+  } else if (method == "DELETE") {
+    return rgw::auth::v1::REQUEST_METHOD_DELETE;
+  } else if (method == "HEAD") {
+    return rgw::auth::v1::REQUEST_METHOD_HEAD;
+  } else {
+    return rgw::auth::v1::REQUEST_METHOD_UNSPECIFIED;
   }
 }
 

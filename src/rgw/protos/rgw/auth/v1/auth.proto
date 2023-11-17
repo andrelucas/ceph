@@ -16,6 +16,8 @@ enum RequestMethod {
   REQUEST_METHOD_GET = 1;
   REQUEST_METHOD_PUT = 2;
   REQUEST_METHOD_POST = 3;
+  REQUEST_METHOD_DELETE = 4;
+  REQUEST_METHOD_HEAD = 5;
 }
 
 // Information about the request not normally provided to RGW authentication
