@@ -78,18 +78,76 @@ public:
 /**
  * @brief gRPC client wrapper for rgw/auth/v1/AuthService.
  *
+ * Very thin wrapper around the gRPC client. Construct with a channel to
+ * create a stub. Call services via the corresponding methods, with sanitised
+ * return values.
  */
 class AuthServiceClient {
 private:
   std::unique_ptr<AuthService::Stub> stub_;
 
 public:
+  /**
+   * @brief Construct a new AuthServiceClient object associated with a
+   * grpc::Channel.
+   *
+   * @param channel pointer to the grpc::Channel object to be used.
+   */
   AuthServiceClient(std::shared_ptr<::grpc::Channel> channel)
       : stub_(AuthService::NewStub(channel))
   {
   }
 
+  /**
+   * @brief Call rgw::auth::v1::AuthService::Status() and return either the
+   * status server_description message, or std::nullopt in case of error.
+   *
+   * @param req The (empty) request protobuf message.
+   * @return std::optional<std::string> The server_description field of the
+   * response, or std::nullopt on error.
+   */
+  std::optional<std::string> Status(const StatusRequest& req);
+
+  /**
+   * @brief Call rgw::auth::v1::AuthService::Auth() and cast the result to
+   * HandoffAuthResult, suitable for HandoffHelperImpl::auth().
+   *
+   * On error, creates a HandoffAuthResult indicating a failure (500).
+   *
+   * Otherwise, calls parse_auth_response() to interpret the AuthResponse
+   * returned by the RPC.
+   *
+   * The alternative to interpreting the request status and result object
+   * would be either returning a bunch of connection status plus an
+   * AuthResponse object, or throwing exceptions on error. This feels like an
+   * easier API to use in our specific use case.
+   *
+   * @param req the filled-in authentication request protobuf
+   * (rgw::auth::v1::AuthRequest).
+   * @return HandoffAuthResult A completed auth result.
+   */
   HandoffAuthResult Auth(const AuthRequest& req);
+
+  /**
+   * @brief Given an Auth service request and response, construct a matching
+   * HandoffAuthResult ready to return from HandoffHelperImpl::auth().
+   *
+   * Called implicitly by Auth().
+   *
+   * All we have to do is map the AuthResponse \p code field (type
+   * rgw::auth::v1::AuthCode) onto suitable HTTP-like response codes expected
+   * by HandoffHelperImpl::auth(), and by extention HandoffHelper::auth(), and
+   * finally by HandoffEngine::authenticate()).
+   *
+   * Only a response with code AUTH_CODE_OK results in a successful
+   * authentication. Any other return value results in an authentication
+   * failure. Note that RGW may try other authentication engines; this is
+   * based on configuration and is not under the control of Handoff.
+   *
+   * @param req
+   * @param resp
+   * @return HandoffAuthResult
+   */
   HandoffAuthResult parse_auth_response(const AuthRequest& req, const AuthResponse* resp);
 };
 
@@ -214,6 +272,12 @@ private:
   std::shared_ptr<grpc::Channel> channel_;
 
 public:
+  /**
+   * @brief Construct a new HandoffHelperImpl object.
+   *
+   * This is the constructor to use for all except unit tests. Note no
+   * persisted state is set up; that's done by calling init().
+   */
   HandoffHelperImpl() { }
 
   ~HandoffHelperImpl() = default;
@@ -234,11 +298,19 @@ public:
    * @brief Initialise any long-lived state for this engine.
    * @param cct Pointer to the Ceph context.
    * @param store Pointer to the sal::Store object.
+   * @param grpc_uri Optional URI for the gRPC server. If empty (the default),
+   * config value rgw_handoff_grpc_uri is used.
    * @return 0 on success, otherwise failure.
    *
-   * Currently a placeholder, there's no long-lived state at this time.
+   * Store long-lived state.
+   *
+   * The \p store pointer isn't used at this time.
+   *
+   * In gRPC mode, a grpc::Channel is created and stored on the object for
+   * later use. This will manage the persistent connection(s) for all gRPC
+   * communications.
    */
-  int init(CephContext* const cct, rgw::sal::Store* store);
+  int init(CephContext* const cct, rgw::sal::Store* store, const std::string& grpc_uri = "");
 
   /**
    * @brief Authenticate the transaction using the Handoff engine.
@@ -255,10 +327,6 @@ public:
    *
    * Perform request authentication via the external authenticator.
    *
-   * There is a mechanism for a test harness to replace the HTTP client
-   * portion of this function. Here we'll assume we're using the HTTP client
-   * to authenticate.
-   *
    * - Extract the Authorization header from the environment. This will be
    *   necessary to validate a v4 signature because we need some fields (date,
    *   region, service, request type) for step 2 of the signature process.
@@ -273,8 +341,68 @@ public:
    * - If required, introspect the request to obtain additional authentication
    *   parameters that might be required by the external authenticator.
    *
-   * - Construct a JSON payload for the authenticator in the prescribed
-   *   format.
+   * - Depending on configuration, call either the gRPC arm (_grpc_auth()) or
+   *   the HTTP arm (_http_auth()) and return the result.
+   *
+   */
+  HandoffAuthResult auth(const DoutPrefixProvider* dpp,
+      const std::string_view& session_token,
+      const std::string_view& access_key_id,
+      const std::string_view& string_to_sign,
+      const std::string_view& signature,
+      const req_state* const s,
+      optional_yield y);
+
+  /**
+   * @brief Implement the gRPC arm of auth().
+   *
+   * @param dpp DoutPrefixProvider.
+   * @param auth The authorization header, which may have been synthesized.
+   * @param eak_param Authorization parameters, if required.
+   * @param session_token Unused by Handoff.
+   * @param access_key_id The S3 access key.
+   * @param string_to_sign The canonicalised S3 signature input.
+   * @param signature The transaction signature provided by the user.
+   * @param s Pointer to the req_state.
+   * @param y An optional yield token.
+   * @return HandoffAuthResult The authentication result.
+   *
+   * Implement a Handoff authentication request using gRPC.
+   *
+   * - Fill in the provided information in the request protobuf
+   *   (rgw::auth::v1::AuthRequest).
+   *
+   * - If authorization parameters are provided, fill those in in the protobuf
+   *   as well.
+   *
+   * - Send the request using an instance of rgw::AuthServiceClient. note that
+   *   AuthServiceClient::Auth() handles the translation of the response code
+   *   into a code suitable to be returned to RGW as the result of the engine
+   *   authenticate() call.
+   *
+   * - If the gRPC request itself failed, log the error and return 'access
+   *   denied'.
+   *
+   * - Log the authentication request's success or failure, and return the
+   *   result from AuthServiceClient::Auth().
+   */
+  HandoffAuthResult _grpc_auth(const DoutPrefixProvider* dpp,
+      const std::string& auth,
+      const std::optional<EAKParameters>& eak_param,
+      const std::string_view& session_token,
+      const std::string_view& access_key_id,
+      const std::string_view& string_to_sign,
+      const std::string_view& signature,
+      const req_state* const s,
+      optional_yield y);
+
+  /**
+   * @brief Implement the HTTP arm of auth().
+   *
+   * Implement a Handoff authentication request using REST.
+   *
+   * - Construct a JSON payload for the authenticator in the
+   *   prescribed format.
    *
    * - At this point, call a test harness to perform authentication if one is
    *   configured. Otherwise...
@@ -304,41 +432,6 @@ public:
    * - If the request returned 404, return ERR_INVALID_ACCESS_KEY.
    *
    * - If the request returned any other code, return EACCES.
-   */
-  HandoffAuthResult auth(const DoutPrefixProvider* dpp,
-      const std::string_view& session_token,
-      const std::string_view& access_key_id,
-      const std::string_view& string_to_sign,
-      const std::string_view& signature,
-      const req_state* const s,
-      optional_yield y);
-
-  /**
-   * @brief Implement the gRPC arm of auth().
-   *
-   * @param dpp DoutPrefixProvider.
-   * @param auth The authorization header, which may have been synthesized.
-   * @param eak_param Authorization parameters, if required.
-   * @param session_token Unused by Handoff.
-   * @param access_key_id The S3 access key.
-   * @param string_to_sign The canonicalised S3 signature input.
-   * @param signature The transaction signature provided by the user.
-   * @param s Pointer to the req_state.
-   * @param y An optional yield token.
-   * @return HandoffAuthResult The authentication result.
-   */
-  HandoffAuthResult _grpc_auth(const DoutPrefixProvider* dpp,
-      const std::string& auth,
-      const std::optional<EAKParameters>& eak_param,
-      const std::string_view& session_token,
-      const std::string_view& access_key_id,
-      const std::string_view& string_to_sign,
-      const std::string_view& signature,
-      const req_state* const s,
-      optional_yield y);
-
-  /**
-   * @brief Implement the HTTP arm of auth().
    *
    * @param dpp DoutPrefixProvider.
    * @param auth The authorization header, which may have been synthesized.

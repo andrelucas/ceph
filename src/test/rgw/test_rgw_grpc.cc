@@ -92,7 +92,7 @@ protected:
   // True if the server is actually running (in Wait()).
   std::atomic<bool> running = false;
   uint16_t server_port;
-  std::string server_address = "127.0.0.1:58000"; // XXX randomise!
+  std::string server_address;
   std::unique_ptr<grpc::Server> server;
 
   // Don't start the server - some tests might want a chance to see what
@@ -118,7 +118,7 @@ protected:
       return;
     }
     initialising = true;
-    server_thread = std::move(std::thread([this]() {
+    server_thread = std::thread([this]() {
       TestImpl service;
       grpc::ServerBuilder builder;
       builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
@@ -133,7 +133,9 @@ protected:
       initialising = false;
       server->Wait();
       running = false;
-    }));
+    });
+    while (initialising)
+      ;
   }
 
   void stop_server()
@@ -190,5 +192,5 @@ TEST_F(TestGrpcService, PingFailsWithNoServer)
   auto channel = grpc::CreateChannel(server_address, grpc::InsecureChannelCredentials());
   TestClient client { channel };
   auto message = client.Ping("foo");
-  EXPECT_FALSE(message.has_value()) << "Ping failed";
+  EXPECT_FALSE(message.has_value()) << "Ping succeeded when it should have failed";
 }

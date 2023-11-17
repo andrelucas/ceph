@@ -1,11 +1,20 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
+#include <absl/random/random.h>
 #include <boost/algorithm/hex.hpp>
 #include <boost/regex.hpp>
 #include <cstdint>
 #include <fmt/format.h>
 #include <gmock/gmock-matchers.h>
+#include <grpc/grpc.h>
+#include <grpcpp/channel.h>
+#include <grpcpp/client_context.h>
+#include <grpcpp/create_channel.h>
+#include <grpcpp/security/server_credentials.h>
+#include <grpcpp/server.h>
+#include <grpcpp/server_builder.h>
+#include <grpcpp/server_context.h>
 #include <gtest/gtest.h>
 #include <iostream>
 #include <openssl/evp.h>
@@ -25,6 +34,8 @@
 #include "rgw/rgw_handoff.h"
 #include "rgw/rgw_handoff_impl.h"
 #include "rgw/rgw_http_client.h"
+
+#include "rgw/auth/v1/auth.grpc.pb.h"
 
 /*
  * Tools tests.
@@ -213,11 +224,9 @@ static boost::regex re_v4_auth { "^AWS4-HMAC-SHA256\\sCredential=(?<accesskey>[0
 /* Given the inputs, generate an AWS v4 signature and return as an
  * optional<string>. In case of problems, return nullopt.
  *
- * This is the part the authenticator normally performs. Note
- * string_to_sign_b64 will be base64 encoded, as this is the way it's passed
- * to the authenticator backend by HandoffHelper.
+ * This is the part the authenticator normally performs.
  */
-static std::optional<std::string> verify_aws_v4_signature(std::string string_to_sign_b64, std::string access_key_id, std::string secret_key, std::string authorization)
+static std::optional<std::string> verify_aws_v4_signature(std::string string_to_sign, std::string access_key_id, std::string secret_key, std::string authorization)
 {
   // std::cerr << fmt::format("get_aws_v4_hash(): string_to_sign='{}' access_key_id='{}' secret_key='{}' authorization='{}'", string_to_sign, access_key_id, secret_key, authorization) << std::endl;
 
@@ -260,8 +269,7 @@ static std::optional<std::string> verify_aws_v4_signature(std::string string_to_
   }
 
   // Step 3.
-  auto s2s = rgw::from_base64(string_to_sign_b64);
-  auto sigbytes = _hash_by(*signingkey, s2s, "SHA256");
+  auto sigbytes = _hash_by(*signingkey, string_to_sign, "SHA256");
   if (!sigbytes) {
     return std::nullopt;
   }
@@ -287,9 +295,7 @@ static boost::regex re_v2_auth { "^AWS\\s(?<accesskey>[0-9a-f]+):"
 /* Given the inputs, generate an AWS v4 signature and return as an
  * optional<string>. In case of problems, return nullopt.
  *
- * This is the part the authenticator normally performs. Note string_to_sign
- * will be base64 encoded, as this is the way it's passed to the authenticator
- * backend by HandoffHelper.
+ * This is the part the authenticator normally performs.
  */
 static std::optional<std::string> verify_aws_v2_signature(std::string string_to_sign, std::string access_key_id, std::string secret_key, std::string authorization)
 {
@@ -313,8 +319,7 @@ static std::optional<std::string> verify_aws_v2_signature(std::string string_to_
   std::copy(initstr.begin(), initstr.end(), std::back_inserter(signingkey));
 
   // Step 3.
-  auto s2s = rgw::from_base64(string_to_sign);
-  auto sigbytes = _hash_by(signingkey, s2s, "SHA1");
+  auto sigbytes = _hash_by(signingkey, string_to_sign, "SHA1");
   if (!sigbytes) {
     return std::nullopt;
   }
@@ -360,11 +365,11 @@ static rgw::HandoffVerifyResult verify_by_func(const DoutPrefixProvider* dpp, co
     return rgw::HandoffVerifyResult(-EACCES, 401);
   }
 
-  std::string string_to_sign;
+  std::string string_to_sign_base64;
   std::string access_key_id;
   std::string authorization;
   try {
-    JSONDecoder::decode_json("stringToSign", string_to_sign, &parser, true);
+    JSONDecoder::decode_json("stringToSign", string_to_sign_base64, &parser, true);
     JSONDecoder::decode_json("accessKeyId", access_key_id, &parser, true);
     JSONDecoder::decode_json("authorization", authorization, &parser, true);
 
@@ -372,6 +377,8 @@ static rgw::HandoffVerifyResult verify_by_func(const DoutPrefixProvider* dpp, co
     std::cerr << "request parse error: " << err.what() << std::endl;
     return rgw::HandoffVerifyResult(-EACCES, 401);
   }
+
+  std::string string_to_sign = rgw::from_base64(string_to_sign_base64);
 
   auto info = info_for_credential(access_key_id);
   if (!info) {
@@ -425,6 +432,26 @@ public:
     return 0;
   }
 };
+
+static constexpr uint16_t port_base = 58000;
+static constexpr uint16_t port_range = 2000;
+
+/**
+ * @brief Return a random port on which to start a server.
+ *
+ * Return a random int in a range large enough to make collisions relatively
+ * unlikely.
+ *
+ * @return uint16_t a random port number in [port_base, port_base +
+ * port_range).
+ */
+static uint16_t random_port()
+{
+  absl::BitGen bitgen;
+  uint16_t rand = absl::Uniform(bitgen, 0u, port_range);
+  return port_base + rand;
+}
+
 /* #endregion */
 
 } // namespace
@@ -441,7 +468,8 @@ TEST(HandoffMeta, SigPositive)
   for (const auto& t : sigpass_tests) {
     auto info = info_for_credential(t.access_key);
     ASSERT_TRUE(info) << "No secret found for " << t.access_key;
-    auto sig = verify_aws_signature(t.ss_base64, t.access_key, (*info).secret, t.authorization);
+    auto s2s = rgw::from_base64(t.ss_base64);
+    auto sig = verify_aws_signature(s2s, t.access_key, (*info).secret, t.authorization);
     ASSERT_TRUE(sig);
   }
 }
@@ -451,7 +479,8 @@ TEST(HandoffMeta, SigNegative)
   for (const auto& t : sigpass_tests) {
     auto info = info_for_credential(t.access_key);
     ASSERT_TRUE(info) << "No secret found for " << t.access_key;
-    auto sig = verify_aws_signature("0" + t.ss_base64, t.access_key, (*info).secret, t.authorization);
+    auto s2s = rgw::from_base64(t.ss_base64);
+    auto sig = verify_aws_signature("0" + s2s, t.access_key, (*info).secret, t.authorization);
     ASSERT_FALSE(sig);
     sig = verify_aws_signature(t.ss_base64, t.access_key, (*info).secret + "0", t.authorization);
     ASSERT_FALSE(sig);
@@ -467,6 +496,8 @@ TEST(HandoffHelper, Init)
   HandoffHelper hh;
   ASSERT_EQ(hh.init(g_ceph_context, nullptr), 0);
 }
+
+/* #region HandoffHelperImplHTTP tests */
 
 /**
  * @brief HTTP-mode HandoffHelperImpl end-to-end test fixture.
@@ -485,7 +516,6 @@ protected:
     ASSERT_EQ(hh.init(g_ceph_context, nullptr), 0);
   }
 
-  bool grpc_enabled;
   HandoffHelperImpl hh { verify_by_func };
   optional_yield y = null_yield;
   DoutPrefix dpp { g_ceph_context, ceph_subsys_rgw, "unittest " };
@@ -541,6 +571,8 @@ TEST_F(HandoffHelperImplHTTPTest, SignatureV2CanBeDisabled)
   ASSERT_TRUE(res.is_err());
 
   dpp.get_cct()->_conf->rgw_handoff_enable_signature_v2 = true;
+  dpp.get_cct()->_conf.apply_changes(nullptr);
+
   res = hh.auth(&dpp, "", t.access_key, string_to_sign, t.signature, &s, y);
   ASSERT_TRUE(res.is_ok());
 }
@@ -580,6 +612,307 @@ TEST_F(HandoffHelperImplHTTPTest, HeaderExpectBadSignature)
     ASSERT_FALSE(res.is_ok()) << "should fail test '" << t.name << "'";
   }
 }
+
+/* #endregion HandoffHelperImplHTTP tests */
+
+/* #region HandoffHelperImplGRPC tests */
+
+class TestAuthImpl final : public rgw::auth::v1::AuthService::Service {
+
+  DoutPrefix dpp_ { g_ceph_context, ceph_subsys_rgw, "unittest gRPC server " };
+
+  // This is AuthService's ping equivalent.
+  grpc::Status Status(grpc::ServerContext* context, const rgw::auth::v1::StatusRequest* request, rgw::auth::v1::StatusResponse* response) override
+  {
+    response->set_server_description("TestAuthImpl");
+    return grpc::Status::OK;
+  }
+
+  // Very simple implementation of the auth service. XXX Isn't as careful with
+  // return codes as it could be, and returns no authorization-related codes.
+  grpc::Status Auth(grpc::ServerContext* context, const rgw::auth::v1::AuthRequest* request, rgw::auth::v1::AuthResponse* response) override
+  {
+    ldpp_dout(&dpp_, 20) << __func__ << ": enter" << dendl;
+
+    // Use our pre-canned authentication database.
+    auto info = info_for_credential(request->access_key_id());
+    if (!info) {
+      ldpp_dout(&dpp_, 20) << __func__ << ": exit CREDENTIALS NOT FOUND" << dendl;
+      response->set_message("CREDENTIALS NOT FOUND");
+      response->set_code(rgw::auth::v1::AUTH_CODE_UNAUTHORIZED);
+      return grpc::Status::OK;
+    }
+    auto sig = verify_aws_signature(request->string_to_sign(),
+        request->access_key_id(),
+        info->secret,
+        request->authorization_header());
+    if (!sig) {
+      ldpp_dout(&dpp_, 20) << __func__ << ": exit SIGNATURE MISMATCH" << dendl;
+      response->set_message("SIGNATURE NOT VERIFIED");
+      response->set_code(rgw::auth::v1::AUTH_CODE_UNAUTHORIZED);
+      return grpc::Status::OK;
+    }
+    response->set_message("OK");
+    response->set_uid(info->userid);
+    response->set_code(rgw::auth::v1::AUTH_CODE_OK);
+    ldpp_dout(&dpp_, 20) << __func__ << ": exit OK" << dendl;
+    return grpc::Status::OK;
+  }
+};
+
+/**
+ * @brief gRPC mode HandoffHelperImpl end-to-end test fixture.
+ *
+ * Not using a parameterised test for HTTP and gRPC because I anticipate
+ * removing the HTTP mode at some point, and it will be a pain to unpick
+ * later. Also, the harness classes are very different and it will become
+ * spaghettified if I try to combine them.
+ *
+ * However: As long as both HTTP and gRPC are in the codebase there is some
+ * duplication here in the tests themselves. At least they can reuse the test
+ * vectors.
+ *
+ * This test class has a harness that spins up a gRPC server on a random port,
+ * and configures the HandoffHelperImpl to use it. The tests then issue gRPC()
+ * calls against the helper.
+ *
+ * This has the virtue of being a somewhat faithful client-side test. The
+ * server side is rather simplistic, obviously; but that's probably ok.
+ *
+ * The fixture is cribbed from test_rgw_grpc.cc. It doesn't implicitly start
+ * the server, you have to call start_test(). This is so we can easily test
+ * behaviour when the server isn't started.
+ *
+ * The fixture _will_ call stop_server() in TearDown, that feels relatively
+ * safe.
+ */
+
+class HandoffHelperImplGRPCTest : public ::testing::Test {
+
+protected:
+  HandoffHelperImpl hh_;
+  optional_yield y_ = null_yield;
+  DoutPrefix dpp_ { g_ceph_context, ceph_subsys_rgw, "unittest " };
+
+  // gRPC server state start.
+  std::thread server_thread_;
+  // Used to prevent fast startup/shutdown problems. (The Null test.)
+  std::atomic<bool> initialising = false;
+  // True if the server is actually running (in Wait()).
+  std::atomic<bool> running = false;
+  uint16_t server_port_;
+  std::string server_address_;
+  std::unique_ptr<grpc::Server> server_;
+  // gRPC server state end.
+
+  // Don't start the server - some tests might want a chance to see what
+  // happens without a server.
+  void SetUp() override
+  {
+    server_port_ = random_port();
+    server_address_ = fmt::format("dns:127.0.0.1:{}", server_port_);
+
+    dpp_.get_cct()->_conf.set_val_or_die("rgw_handoff_enable_grpc", "true");
+    dpp_.get_cct()->_conf.apply_changes(nullptr);
+    ASSERT_EQ(dpp_.get_cct()->_conf->rgw_handoff_enable_grpc, true);
+    // Note init() can take the server address URI, it's normally defaulted to
+    // empty which means 'use the Ceph configuration'.
+    ASSERT_EQ(hh_.init(g_ceph_context, nullptr, server_address_), 0);
+  }
+
+  // Will stop the server. There's no situation where we want it left around.
+  void TearDown() override
+  {
+    stop_server();
+  }
+
+  // Fire up a gRPC server for TestImpl in a separate thread, setting some
+  // atomics in the instance to let other methods check on our progress.
+  //
+  void start_server()
+  {
+    if (initialising || running) {
+      return;
+    }
+    initialising = true;
+    server_thread_ = std::thread([this]() {
+      TestAuthImpl service;
+      grpc::ServerBuilder builder;
+      builder.AddListeningPort(server_address_, grpc::InsecureServerCredentials());
+      builder.RegisterService(&service);
+      server_ = builder.BuildAndStart();
+      if (!server_) {
+        fmt::print(stderr, "Failed to BuildAndStart() for {}\n", server_address_);
+        // Must clear this or start_server() will hang.
+        initialising = false;
+        return;
+      }
+      running = true;
+      initialising = false;
+      server_->Wait();
+      running = false;
+    });
+    while (initialising)
+      ;
+  }
+
+  void stop_server()
+  {
+    while (initialising)
+      ;
+    if (running && server_) {
+      server_->Shutdown();
+    }
+    if (server_thread_.joinable()) {
+      server_thread_.join();
+    }
+  }
+};
+
+// This just tests we can instantiate the test classes.
+TEST_F(HandoffHelperImplGRPCTest, Null)
+{
+}
+
+// Make sure start_server() is idempotent.
+TEST_F(HandoffHelperImplGRPCTest, MetaStart)
+{
+  start_server();
+  for (int n = 0; n < 1000; n++) {
+    start_server();
+  }
+  stop_server();
+}
+
+// Make sure stop_server() is idempotent.
+TEST_F(HandoffHelperImplGRPCTest, MetaStop)
+{
+  start_server();
+  for (int n = 0; n < 1000; n++) {
+    stop_server();
+  }
+}
+
+// Status() is essentially a ping.
+TEST_F(HandoffHelperImplGRPCTest, StatusWorksWithServer)
+{
+  start_server();
+  auto channel = grpc::CreateChannel(server_address_, grpc::InsecureChannelCredentials());
+  AuthServiceClient client { channel };
+  StatusRequest req;
+  auto desc = client.Status(req);
+  ASSERT_TRUE(desc.has_value()) << "Status() RPC failed";
+  ASSERT_EQ(*desc, "TestAuthImpl");
+}
+
+TEST_F(HandoffHelperImplGRPCTest, StatusFailsWithoutServer)
+{
+  auto channel = grpc::CreateChannel(server_address_, grpc::InsecureChannelCredentials());
+  AuthServiceClient client { channel };
+  StatusRequest req;
+  auto desc = client.Status(req);
+  ASSERT_FALSE(desc.has_value()) << "Status() RPC succeeded when it should have failed";
+}
+
+// Don't deref if cct->cio == nullptr.
+TEST_F(HandoffHelperImplGRPCTest, RegressNullCioPtr)
+{
+  auto t = sigpass_tests[0];
+  RGWEnv rgw_env;
+  req_state s { g_ceph_context, &rgw_env, 0 };
+  auto string_to_sign = rgw::from_base64(t.ss_base64);
+  auto res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
+  ASSERT_EQ(res.code(), -EACCES);
+  ASSERT_THAT(res.message(), testing::ContainsRegex("cio"));
+}
+
+// Fail properly when the Authorization header is absent and one can't be
+// synthesized.
+TEST_F(HandoffHelperImplGRPCTest, FailIfMissingAuthorizationHeader)
+{
+  TestClient cio;
+
+  auto t = sigpass_tests[0];
+  RGWEnv rgw_env;
+  req_state s { g_ceph_context, &rgw_env, 0 };
+  s.cio = &cio;
+  auto string_to_sign = rgw::from_base64(t.ss_base64);
+  auto res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
+  ASSERT_EQ(res.code(), -EACCES);
+  ASSERT_THAT(res.message(), testing::ContainsRegex("missing Authorization"));
+}
+
+TEST_F(HandoffHelperImplGRPCTest, SignatureV2CanBeDisabled)
+{
+  start_server();
+
+  auto t = v2_sample;
+
+  TestClient cio;
+  // Set headers in the cio's env, not rgw_env (below).
+  cio.get_env().set("HTTP_AUTHORIZATION", t.authorization);
+  ldpp_dout(&dpp_, 20) << fmt::format("Auth: {}", t.authorization) << dendl;
+
+  RGWEnv rgw_env;
+  req_state s { g_ceph_context, &rgw_env, 0 };
+  s.cio = &cio;
+  auto string_to_sign = rgw::from_base64(t.ss_base64);
+  auto res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
+  EXPECT_TRUE(res.is_ok());
+
+  dpp_.get_cct()->_conf->rgw_handoff_enable_signature_v2 = false;
+  dpp_.get_cct()->_conf.apply_changes(nullptr);
+  res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
+  EXPECT_TRUE(res.is_err());
+
+  dpp_.get_cct()->_conf->rgw_handoff_enable_signature_v2 = true;
+  dpp_.get_cct()->_conf.apply_changes(nullptr);
+
+  res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
+  EXPECT_TRUE(res.is_ok());
+}
+
+// Test working signatures with the verify_by_func handler above.
+TEST_F(HandoffHelperImplGRPCTest, HeaderHappyPath)
+{
+  start_server();
+
+  for (const auto& t : sigpass_tests) {
+    TestClient cio;
+    // Set headers in the cio's env, not rgw_env (below).
+    cio.get_env().set("HTTP_AUTHORIZATION", t.authorization);
+    ldpp_dout(&dpp_, 20) << fmt::format("Auth: {}", t.authorization) << dendl;
+
+    RGWEnv rgw_env;
+    req_state s { g_ceph_context, &rgw_env, 0 };
+    s.cio = &cio;
+    auto string_to_sign = rgw::from_base64(t.ss_base64);
+    auto res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
+    EXPECT_TRUE(res.is_ok()) << "should pass test '" << t.name << "'";
+  }
+}
+
+// Test deliberately broken signatures with the verify_by_func handler above.
+TEST_F(HandoffHelperImplGRPCTest, HeaderExpectBadSignature)
+{
+  start_server();
+
+  for (const auto& t : sigfail_tests) {
+    TestClient cio;
+    // Set headers in the cio's env, not rgw_env (below).
+    cio.get_env().set("HTTP_AUTHORIZATION", t.authorization);
+    ldpp_dout(&dpp_, 20) << fmt::format("Auth: {}", t.authorization) << dendl;
+
+    RGWEnv rgw_env;
+    req_state s { g_ceph_context, &rgw_env, 0 };
+    s.cio = &cio;
+    auto string_to_sign = rgw::from_base64(t.ss_base64);
+    auto res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
+    EXPECT_FALSE(res.is_ok()) << "should fail test '" << t.name << "'";
+  }
+}
+
+/* #endregion HandoffHelperImplGRPC tests */
 
 /* #region(collapsed) PresignedTestData */
 

@@ -41,8 +41,6 @@
 
 #define dout_subsys ceph_subsys_rgw
 
-namespace ba = boost::algorithm;
-
 namespace rgw {
 
 // This has to be here, in a .cc file where we know the size of

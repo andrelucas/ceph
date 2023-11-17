@@ -166,6 +166,19 @@ std::ostream& operator<<(std::ostream& os, const EAKParameters& ep)
  *
  ****************************************************************************/
 
+std::optional<std::string> AuthServiceClient::Status(const StatusRequest& req)
+{
+  ::grpc::ClientContext context;
+  StatusResponse resp;
+
+  ::grpc::Status status = stub_->Status(&context, req, &resp);
+  // Check for an error from gRPC itself.
+  if (!status.ok()) {
+    return std::nullopt;
+  }
+  return std::make_optional(resp.server_description());
+}
+
 HandoffAuthResult AuthServiceClient::Auth(const AuthRequest& req)
 {
   ::grpc::ClientContext context;
@@ -202,6 +215,8 @@ HandoffAuthResult AuthServiceClient::parse_auth_response(const AuthRequest& req,
 }
 
 /****************************************************************************/
+
+// HTTP request support.
 
 /**
  * @brief Prepare a JSON document to send to the authenticator HTTP endpoint.
@@ -249,8 +264,6 @@ static std::string PrepareHandoffRequest(const req_state* s,
   jf.flush(oss);
   return oss.str();
 }
-
-/****************************************************************************/
 
 /**
  * @brief Bundle the results from parsing the authenticator's JSON response.
@@ -301,8 +314,6 @@ static HandoffResponse ParseHandoffResponse(const DoutPrefixProvider* dpp, ceph:
   resp.success = true;
   return resp;
 }
-
-/****************************************************************************/
 
 static HandoffVerifyResult verify_standard(const DoutPrefixProvider* dpp, const std::string& request_json, bufferlist* resp_bl, optional_yield y)
 {
@@ -418,14 +429,15 @@ static std::optional<std::string> synthesize_v4_header(const DoutPrefixProvider*
  *
  ****************************************************************************/
 
-int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Store* store)
+int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Store* store, const std::string& grpc_uri)
 {
   ldout(cct, 20) << "HandoffHelperImpl::init" << dendl;
   store_ = store;
 
-  if (cct->_conf->rgw_handoff_enable_grpc) {
+  if (!grpc_uri.empty() || cct->_conf->rgw_handoff_enable_grpc) {
     // XXX grpc::InsecureChannelCredentials()...
-    channel_ = grpc::CreateChannel(cct->_conf->rgw_handoff_grpc_uri, grpc::InsecureChannelCredentials());
+    auto uri = grpc_uri.empty() ? cct->_conf->rgw_handoff_grpc_uri : grpc_uri;
+    channel_ = grpc::CreateChannel(uri, grpc::InsecureChannelCredentials());
   }
 
   return 0;
@@ -633,6 +645,12 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp,
     [[maybe_unused]] const req_state* const s,
     [[maybe_unused]] optional_yield y)
 {
+  // Quick confidence check of channel_.
+  if (!channel_) {
+    ldpp_dout(dpp, 0) << __PRETTY_FUNCTION__ << ": called with unset gRPC channel" << dendl;
+    return HandoffAuthResult(-EACCES, "Internal error (gRPC channel not set)");
+  }
+
   AuthServiceClient client(channel_);
   rgw::auth::v1::AuthRequest req;
   // Fill in the request protobuf. Seem to have to create strings from
