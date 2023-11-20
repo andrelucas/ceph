@@ -257,7 +257,7 @@ static std::string PrepareHandoffRequest(const req_state* s,
     encode_json("authorization-token", std::string(token), &jf);
   }
   if (authorization_param.has_value() && authorization_param->valid()) {
-    jf.open_object_section("eakParameters");
+    jf.open_object_section("authorizationParameters");
     encode_json("method", authorization_param->method(), &jf);
     encode_json("bucketName", authorization_param->bucket_name(), &jf);
     encode_json("objectKeyName", authorization_param->object_key_name(), &jf);
