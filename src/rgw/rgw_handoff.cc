@@ -43,6 +43,12 @@
 
 namespace rgw {
 
+std::ostream& operator<<(std::ostream& os, const HandoffAuthResult& r)
+{
+  os << r.to_string();
+  return os;
+}
+
 // This has to be here, in a .cc file where we know the size of
 // HandoffHelperImpl. It can't be in the header file. See
 // https://www.fluentcpp.com/2017/09/22/make-pimpl-using-unique_ptr/ .
