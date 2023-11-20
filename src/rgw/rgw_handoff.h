@@ -14,6 +14,8 @@
  *
  * HandoffHelper simply wraps HandoffHelperImpl. Keep the number of classes in
  * this file to a strict minimum - most should be in rgw_handoff_impl.{h,cc}.
+ *
+ * DO NOT INCLUDE "rgw_handoff_impl.h" from here!
  */
 
 #ifndef RGW_HANDOFF_H
@@ -40,27 +42,47 @@ namespace rgw {
  * authentication, or a failure code.
  */
 class HandoffAuthResult {
-  std::string userid_ = "";
-  int errorcode_ = 0;
-  std::string message_ = "";
-  bool is_err_ = false;
+public:
+  /**
+   * @brief Classification of error-type results, to help with logging.
+   */
+  enum class error_type {
+    NO_ERROR,
+    TRANSPORT_ERROR,
+    AUTH_ERROR,
+    INTERNAL_ERROR,
+  };
 
 public:
-  /// @brief Construct a success-type result. \p message is
-  /// human-readable status.
+  /**
+   * @brief Construct a success-type result.
+   *
+   * @param userid The user ID associated with the request.
+   * @param message human-readable status.
+   */
   HandoffAuthResult(const std::string& userid, const std::string& message)
       : userid_ { userid }
       , message_ { message }
-      , is_err_ { false } {};
-  /// @brief Construct a failure-type result with an error code.
-  /// \p message is human-readable status.
-  HandoffAuthResult(int errorcode, const std::string& message)
+      , is_err_ { false }
+      , err_type_ { error_type::NO_ERROR } {};
+
+  /**
+   * @brief Construct a success-type result. \p message is
+   *
+   * @param errorcode The HTTP error code.
+   * @param message human-readable status.
+   * @param err_type The error type enum, which will help give better error
+   * log messages.
+   */
+  HandoffAuthResult(int errorcode, const std::string& message, error_type err_type = error_type::AUTH_ERROR)
       : errorcode_ { errorcode }
       , message_ { message }
-      , is_err_ { true } {};
+      , is_err_ { true }
+      , err_type_ { err_type } {};
 
   bool is_err() const noexcept { return is_err_; }
   bool is_ok() const noexcept { return !is_err_; }
+  error_type err_type() const noexcept { return err_type_; }
   int code() const noexcept { return errorcode_; }
   std::string message() const noexcept { return message_; }
 
@@ -85,6 +107,16 @@ public:
       return fmt::format("userid='{}' message={}", userid_, message_);
     }
   }
+
+  friend std::ostream& operator<<(std::ostream& os, const HandoffAuthResult& ep);
+
+private:
+  std::string userid_
+      = "";
+  int errorcode_ = 0;
+  std::string message_ = "";
+  bool is_err_ = false;
+  error_type err_type_ = error_type::NO_ERROR;
 };
 
 class HandoffHelperImpl; // Forward declaration.
