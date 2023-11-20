@@ -146,7 +146,11 @@ AuthorizationParameters::AuthorizationParameters(const DoutPrefixProvider* dpp_i
 std::string AuthorizationParameters::to_string() const noexcept
 {
   if (valid()) {
-    return fmt::format("AuthorizationParameters(method={},bucket={},key={})", method(), bucket_name(), object_key_name());
+    return fmt::format(
+        "AuthorizationParameters(method={},bucket={},key_present={})",
+        method(),
+        bucket_name(),
+        object_key_name().empty() ? "false" : "true");
   } else {
     return "AuthorizationParameters(INVALID)";
   }
