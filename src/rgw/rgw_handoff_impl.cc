@@ -587,6 +587,13 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
   auto hdpp = HandoffDoutStateProvider(*dpp_in, s);
   // All the APIs expect a *DoutPrefixProvider.
   auto dpp = &hdpp;
+  // This is more for unit tests than production. When testing against
+  // synthetic requests, it's easy to not set the request up fully. This way
+  // we get a meaningful error instead of a crash.
+  if (!s->cio) {
+    ldpp_dout(dpp, 0) << "Invalid request state (cio==nullptr)" << dendl;
+    return HandoffAuthResult(-EACCES, "Internal error (cio)");
+  }
 
   ldpp_dout(dpp, 1) << fmt::format(
       "init: access_key_id='{}' session_token_present={} decoded_uri='{}' domain={}",
