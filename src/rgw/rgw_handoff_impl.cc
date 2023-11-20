@@ -587,6 +587,7 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
   auto hdpp = HandoffDoutStateProvider(*dpp_in, s);
   // All the APIs expect a *DoutPrefixProvider.
   auto dpp = &hdpp;
+
   // This is more for unit tests than production. When testing against
   // synthetic requests, it's easy to not set the request up fully. This way
   // we get a meaningful error instead of a crash.
@@ -736,9 +737,6 @@ HandoffAuthResult HandoffHelperImpl::_http_auth(const DoutPrefixProvider* dpp,
     [[maybe_unused]] const req_state* const s,
     [[maybe_unused]] optional_yield y)
 {
-  HandoffVerifyResult vres;
-  HandoffResponse resp;
-
   // Build our JSON request for the authenticator.
   auto request_json = PrepareHandoffRequest(s, string_to_sign, access_key_id, auth, session_token, authorization_param);
 
@@ -746,6 +744,7 @@ HandoffAuthResult HandoffHelperImpl::_http_auth(const DoutPrefixProvider* dpp,
 
   // verify_func_ is initialised at construction time and is const, we *do
   // not* need to synchronise access.
+  HandoffVerifyResult vres;
   if (verify_func_) {
     vres = (*verify_func_)(dpp, request_json, &resp_bl, y);
   } else {
@@ -755,14 +754,16 @@ HandoffAuthResult HandoffHelperImpl::_http_auth(const DoutPrefixProvider* dpp,
   if (vres.result() < 0) {
     ldpp_dout(dpp, 0) << fmt::format("handoff verify HTTP request failed with exit code {} ({})", vres.result(), strerror(-vres.result()))
                       << dendl;
-    return HandoffAuthResult(-EACCES, fmt::format("Handoff HTTP request failed with code {} ({})", vres.result(), strerror(-vres.result())));
+    return HandoffAuthResult(-EACCES,
+        fmt::format("Handoff HTTP request failed with code {} ({})", vres.result(), strerror(-vres.result())),
+        HandoffAuthResult::error_type::TRANSPORT_ERROR);
   }
 
   // Parse the JSON response.
-  resp = ParseHandoffResponse(dpp, resp_bl);
+  HandoffResponse resp = ParseHandoffResponse(dpp, resp_bl);
   if (!resp.success) {
     // Neutral error, the authentication system itself is failing.
-    return HandoffAuthResult(-ERR_INTERNAL_ERROR, resp.message);
+    return HandoffAuthResult(-ERR_INTERNAL_ERROR, resp.message, HandoffAuthResult::error_type::INTERNAL_ERROR);
   }
 
   // Return an error, but only after attempting to parse the response

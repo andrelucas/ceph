@@ -9,8 +9,11 @@
  *
  * Declarations for HandoffHelperImpl and related classes.
  *
- * Note we only include gRPC headers in the impl header. We don't want gRPC
- * headers being pulled into the rest of RGW.
+ * TRY REALLY HARD to not include this anywhere except handoff.cc and
+ * handoff_impl.cc. In particular, don't add it to rgw_handoff.h no matter how
+ * tempting that seems.
+ *
+ * This file pulls in the gRPC headers and we don't want that everywhere.
  */
 
 #ifndef RGW_HANDOFF_IMPL_H
@@ -103,6 +106,12 @@ public:
 
 /****************************************************************************/
 
+/**
+ * @brief The result of parsing the HTTP response from the Authenticator service.
+ *
+ * Used by the HTTP arm of auth() to encapsulate the various possible results
+ * from parsing the Authenticator's JSON.
+ */
 class HandoffVerifyResult {
   int result_;
   long http_code_;
@@ -302,12 +311,14 @@ public:
   /**
    * @brief Convert this AuthorizationParameters object to string form.
    *
+   * Note we don't dump the object key name - this might be a large string,
+   * might be full of invalid characters, or might be private.
+   *
    * @return std::string A string representation of the object. Works fine for
    * objects in the invalid state; this call is always safe.
    */
   std::string to_string() const noexcept;
 
-  /// Used to implement streaming.
   friend std::ostream& operator<<(std::ostream& os, const AuthorizationParameters& ep);
 };
 
