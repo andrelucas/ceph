@@ -914,6 +914,28 @@ TEST_F(HandoffHelperImplGRPCTest, HeaderExpectBadSignature)
   }
 }
 
+// Check the system doesn't fail if started with a non-functional auth server.
+TEST_F(HandoffHelperImplGRPCTest, ChannelRecoversFromDeadAtStartup)
+{
+  TestClient cio;
+
+  auto t = sigpass_tests[0];
+  cio.get_env().set("HTTP_AUTHORIZATION", t.authorization);
+  RGWEnv rgw_env;
+  req_state s { g_ceph_context, &rgw_env, 0 };
+  s.cio = &cio;
+  auto string_to_sign = rgw::from_base64(t.ss_base64);
+  auto res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
+  ASSERT_FALSE(res.is_ok()) << "should fail";
+  ASSERT_EQ(res.code(), -EACCES) << "should return -EACCES";
+  ASSERT_EQ(res.err_type(), HandoffAuthResult::error_type::TRANSPORT_ERROR) << "should return TRANSPORT_ERROR";
+
+  start_server();
+  res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
+  EXPECT_TRUE(res.is_ok()) << "should now succeed";
+  EXPECT_EQ(res.err_type(), HandoffAuthResult::error_type::NO_ERROR) << "should now show no error";
+}
+
 /* #endregion HandoffHelperImplGRPC tests */
 
 /* #region PresignedTestData */
