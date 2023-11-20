@@ -693,20 +693,23 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp_in
     req_param->set_bucket_name(authorization_param->bucket_name());
     req_param->set_object_key_name(authorization_param->object_key_name());
   }
-  // XXX XXX is_ok() is a bad api - we can't tell if the gRPC request itself
-  // failed, or if the service returned an error code.
+
+  ldpp_dout(dpp, 1) << "Sending gRPC request" << dendl;
   auto result = client.Auth(req);
-  if (!result.is_ok()) {
-    ldpp_dout(dpp, 0) << fmt::format("authentication failed: {}", result.message()) << dendl;
-    return HandoffAuthResult(-EACCES, result.message());
-  }
 
   // The client returns a fully-populated HandoffAuthResult, but we want to
   // issue some helpful log messages before returning it.
   if (result.is_ok()) {
-    ldpp_dout(dpp, 0) << fmt::format("Success (uid='{}' for access_key_id='{}')", result.userid(), access_key_id) << dendl;
+    ldpp_dout(dpp, 0) << fmt::format("Success (access_key_id='{}', uid='{}')", access_key_id, result.userid()) << dendl;
   } else {
-    ldpp_dout(dpp, 0) << fmt::format("Auth service returned failure (access_key_id='{}', code={}, message='{}')", result.code(), result.message()) << dendl;
+    if (result.err_type() == HandoffAuthResult::error_type::TRANSPORT_ERROR) {
+      ldpp_dout(dpp, 0) << fmt::format("authentication attempt failed: {}", result.message()) << dendl;
+    } else {
+      ldpp_dout(dpp, 0) << fmt::format(
+          "Authentication service returned failure (access_key_id='{}', code={}, message='{}')",
+          access_key_id, result.code(), result.message())
+                        << dendl;
+    }
   }
 
   return result;
