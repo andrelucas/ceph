@@ -188,10 +188,13 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthRequest& req)
   ::grpc::ClientContext context;
   AuthResponse resp;
 
+  // XXX
+  // auto state = channel_->GetState(true);
+
   ::grpc::Status status = stub_->Auth(&context, req, &resp);
   // Check for an error from gRPC itself.
   if (!status.ok()) {
-    return HandoffAuthResult(500, status.error_message());
+    return HandoffAuthResult(-EACCES, status.error_message(), HandoffAuthResult::error_type::TRANSPORT_ERROR);
   }
   return parse_auth_response(req, &resp);
 }
@@ -199,22 +202,23 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthRequest& req)
 HandoffAuthResult AuthServiceClient::parse_auth_response(const AuthRequest& req, const AuthResponse* resp)
 {
   namespace auth_v1 = rgw::auth::v1;
-  // Parse out the response codes and return HTTP codes. They should match,
-  // and on day one they do, but let's not assume that's always going to be
-  // the case.
+  // Parse out the response codes and return the codes expected by the caller.
+  // These codes match rgw_auth_keystone.cc (and the HTTP arm of this object).
   switch (resp->code()) {
   case auth_v1::AUTH_CODE_OK:
     return HandoffAuthResult(resp->uid(), resp->message());
   case auth_v1::AUTH_CODE_UNAUTHORIZED:
-    return HandoffAuthResult(403, resp->message());
+    return HandoffAuthResult(-ERR_SIGNATURE_NO_MATCH, resp->message());
+  case auth_v1::AUTH_CODE_NOTFOUND:
+    return HandoffAuthResult(-ERR_INVALID_ACCESS_KEY, resp->message());
   case auth_v1::AUTH_CODE_FAILURE:
-    return HandoffAuthResult(500, resp->message());
+    return HandoffAuthResult(-EACCES, resp->message());
   case auth_v1::AUTH_CODE_FORBIDDEN:
     /* fallthrough */
   case auth_v1::AUTH_CODE_UNSPECIFIED:
     /* fallthrough */
   default:
-    return HandoffAuthResult(401, resp->message());
+    return HandoffAuthResult(-EACCES, resp->message());
   }
 }
 

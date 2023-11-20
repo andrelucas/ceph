@@ -83,6 +83,8 @@ enum AuthCode {
   // e.g. some request parameters were missing or malformed. Message may hold
   // more specific information.
   AUTH_CODE_FORBIDDEN = 403;
+  // Authorization failed because the access key id could not be found.
+  AUTH_CODE_NOTFOUND = 404;
   // Authorization failed for some external reason such as server failure.
   // AuthResponse.message may hold more specific information.
   AUTH_CODE_FAILURE = 500;

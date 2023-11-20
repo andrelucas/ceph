@@ -153,6 +153,7 @@ public:
  */
 class AuthServiceClient {
 private:
+  std::shared_ptr<grpc::Channel> channel_;
   std::unique_ptr<AuthService::Stub> stub_;
 
 public:
@@ -163,7 +164,8 @@ public:
    * @param channel pointer to the grpc::Channel object to be used.
    */
   AuthServiceClient(std::shared_ptr<::grpc::Channel> channel)
-      : stub_(AuthService::NewStub(channel))
+      : channel_ { channel }
+      , stub_(AuthService::NewStub(channel))
   {
   }
 
