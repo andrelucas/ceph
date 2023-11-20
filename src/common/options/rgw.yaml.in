@@ -916,7 +916,7 @@ options:
   type: bool
   level: advanced
   desc: Should handoff re-check presigned URL expiry time.
-  default: true
+  default: false
   services:
   - rgw
   with_legacy: true
