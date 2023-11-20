@@ -43,6 +43,66 @@ namespace rgw {
 
 /****************************************************************************/
 
+/**
+ * @brief Implement DoutPrefixPipe for a simple prefix string.
+ *
+ * To add an additional string (which will be followed by ": ") to the
+ * existing log prefix, use:
+ *
+ * ```
+ * auto hdpp = HandoffDoutPrefixPipe(*dpp_in, foo);
+ * auto dpp = &hdpp;
+ * ```
+ *
+ * It will save time to create a DoutPrefixProvider*, as demonstrated by the
+ * unit tests it's quite jarring to have to use &dpp.
+ */
+class HandoffDoutPrefixPipe : public DoutPrefixPipe {
+  const std::string prefix_;
+
+public:
+  HandoffDoutPrefixPipe(const DoutPrefixProvider& dpp, const std::string& prefix)
+      : DoutPrefixPipe { dpp }
+      , prefix_ { fmt::format("{}: ", prefix) }
+  {
+  }
+  virtual void add_prefix(std::ostream& out) const override final
+  {
+    out << prefix_;
+  }
+};
+
+/**
+ * @brief Add request state as a prefix to the log message. This should be
+ * used to help support engineers correlate log messages.
+ *
+ * Pass in the request state.
+ *
+ * ```
+ * auto hdpp = HandoffDoutStateProvider(*dpp_in, s);
+ * auto dpp = &hdpp;
+ * ```
+ */
+class HandoffDoutStateProvider : public HandoffDoutPrefixPipe {
+
+public:
+  /**
+   * @brief Construct a new Handoff Dout Pipe Provider object with an existing
+   * provider and the request state.
+   *
+   * Use our HandoffDoutPrefixPipe implementation for implementation.
+   *
+   * @param dpp An existing DoutPrefixProvider reference.
+   * @param s The request state.
+   */
+  HandoffDoutStateProvider(const DoutPrefixProvider& dpp, const req_state* s)
+      : HandoffDoutPrefixPipe {
+        dpp, fmt::format("HandoffEngine trans_id={}", s->trans_id)
+      } {};
+};
+
+/****************************************************************************/
+
 class HandoffVerifyResult {
   int result_;
   long http_code_;
