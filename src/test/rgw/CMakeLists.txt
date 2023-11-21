@@ -209,7 +209,10 @@ add_ceph_unittest(unittest_rgw_url)
 target_link_libraries(unittest_rgw_url ${rgw_libs})
 
 # unittest_rgw_auth_handoff
-add_executable(unittest_rgw_auth_handoff test_rgw_auth_handoff.cc)
+add_executable(unittest_rgw_auth_handoff
+  test_rgw_auth_handoff.cc
+  test_rgw_grpc_util.h
+)
 add_ceph_unittest(unittest_rgw_auth_handoff)
 
 target_link_libraries(unittest_rgw_auth_handoff ${rgw_libs})
@@ -243,7 +246,7 @@ add_ceph_unittest(unittest_rgw_lua)
 target_link_libraries(unittest_rgw_lua ${rgw_libs} ${LUA_LIBRARIES})
 
 add_executable(unittest_rgw_grpc
-  test_rgw_grpc.cc
+  test_rgw_grpc.cc test_rgw_grpc_util.h
   $<TARGET_OBJECTS:unit-main>
 )
 add_ceph_unittest(unittest_rgw_grpc)
