@@ -345,6 +345,29 @@ static HandoffVerifyResult verify_standard(const DoutPrefixProvider* dpp, const 
 
 /****************************************************************************/
 
+// Instantiate HandoffConfigObserver<T> for HandoffHelperImpl.
+
+template <>
+const char** HandoffConfigObserver<HandoffHelperImpl>::get_tracked_conf_keys() const
+{
+  static const char* keys[] = {
+    "rgw_handoff_grpc_uri",
+    nullptr
+  };
+  return keys;
+}
+
+template <>
+void HandoffConfigObserver<HandoffHelperImpl>::handle_conf_change(const ConfigProxy& conf,
+    const std::set<std::string>& changed)
+{
+  if (changed.count("rgw_handoff_grpc_uri")) {
+    helper_.set_channel_uri(cct_, conf->rgw_handoff_grpc_uri);
+  }
+}
+
+/****************************************************************************/
+
 /**
  * @brief Create an AWS v2 authorization header from the request's URL
  * parameters.
@@ -440,16 +463,33 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Store* store, cons
 {
   ldout(cct, 20) << "HandoffHelperImpl::init" << dendl;
   store_ = store;
+  config_obs_.init(cct);
 
   if (!grpc_uri.empty() || cct->_conf->rgw_handoff_enable_grpc) {
     auto uri = grpc_uri.empty() ? cct->_conf->rgw_handoff_grpc_uri : grpc_uri;
 
-    std::lock_guard<chan_lock_t> g(m_channel_);
-    // XXX grpc::InsecureChannelCredentials()...
-    channel_ = grpc::CreateCustomChannel(uri, grpc::InsecureChannelCredentials(), channel_args_);
+    if (!set_channel_uri(cct, uri)) {
+      return -1; // The return value is ignored anyway (it's called by the HandoffEngine constructor).
+    }
   }
-
   return 0;
+}
+
+bool HandoffHelperImpl::set_channel_uri(CephContext* const cct, const std::string& new_uri)
+{
+  std::unique_lock<chan_lock_t> g(m_channel_);
+  ldout(cct, 1) << "HandoffHelperImpl::set_channel_uri(" << new_uri << ")" << dendl;
+  // XXX grpc::InsecureChannelCredentials()...
+  auto new_channel = grpc::CreateCustomChannel(new_uri, grpc::InsecureChannelCredentials(), channel_args_);
+  if (!new_channel) {
+    ldout(cct, 0) << "ERROR: Failed to create new gRPC channel for URI " << new_uri << dendl;
+    return false;
+  } else {
+    ldout(cct, 1) << "HandoffHelperImpl::set_channel_uri(" << new_uri << ") success" << dendl;
+    channel_ = std::move(new_channel);
+    channel_uri_ = new_uri;
+    return true;
+  }
 }
 
 std::optional<std::string> HandoffHelperImpl::synthesize_auth_header(
