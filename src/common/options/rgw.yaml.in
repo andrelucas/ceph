@@ -950,6 +950,8 @@ options:
     grpc::CreateCustomChannel() so may be in any format supported by the C++
     gRPC library.
   default: dns:127.0.0.1:8002
+  flags:
+  - runtime
   services:
   - rgw
   with_legacy: true

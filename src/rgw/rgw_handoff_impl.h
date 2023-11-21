@@ -35,6 +35,7 @@
 
 #include "common/async/yield_context.h"
 #include "common/ceph_context.h"
+#include "common/config_obs.h"
 #include "common/dout.h"
 #include "rgw/rgw_common.h"
 
@@ -343,6 +344,40 @@ std::ostream& operator<<(std::ostream& os, const AuthorizationParameters& ep);
 
 /****************************************************************************/
 
+template <typename T>
+class HandoffConfigObserver : public md_config_obs_t {
+public:
+  explicit HandoffConfigObserver(T& helper)
+      : helper_(helper)
+  {
+  }
+
+  ~HandoffConfigObserver()
+  {
+    if (cct_) {
+      cct_->_conf.remove_observer(this);
+    }
+  }
+
+  void init(CephContext* cct)
+  {
+    cct_ = cct;
+    cct_->_conf.add_observer(this);
+  }
+
+  // Config observer. See notes in src/common/config_obs.h and for
+  // ceph::md_config_obs_impl.
+  const char** get_tracked_conf_keys() const override;
+  void handle_conf_change(const ConfigProxy& conf,
+      const std::set<std::string>& changed) override;
+
+private:
+  T& helper_;
+  CephContext* cct_;
+};
+
+/****************************************************************************/
+
 /**
  * @brief Support class for 'handoff' authentication.
  *
@@ -359,6 +394,9 @@ public:
   using chan_lock_t = std::shared_mutex;
 
 private:
+  // Ceph configuration observer.
+  HandoffConfigObserver<HandoffHelperImpl> config_obs_;
+
   const std::optional<VerifyFunc> verify_func_;
   rgw::sal::Store* store_;
 
@@ -366,6 +404,7 @@ private:
   std::shared_mutex m_channel_;
   std::shared_ptr<grpc::Channel> channel_;
   grpc::ChannelArguments channel_args_;
+  std::string channel_uri_;
 
 public:
   /**
@@ -374,7 +413,10 @@ public:
    * This is the constructor to use for all except unit tests. Note no
    * persisted state is set up; that's done by calling init().
    */
-  HandoffHelperImpl() { }
+  HandoffHelperImpl()
+      : config_obs_(*this)
+  {
+  }
 
   ~HandoffHelperImpl() = default;
 
@@ -386,7 +428,8 @@ public:
    * the inputs and outputs of the \p verify_standard() function.
    */
   HandoffHelperImpl(VerifyFunc v)
-      : verify_func_ { v }
+      : config_obs_ { *this }
+      , verify_func_ { v }
   {
   }
 
@@ -407,6 +450,15 @@ public:
    * communications.
    */
   int init(CephContext* const cct, rgw::sal::Store* store, const std::string& grpc_uri = "");
+
+  /**
+   * @brief Set the gRPC channel URI.
+   *
+   * @param grpc_uri
+   * @return true on success.
+   * @return false on failure.
+   */
+  bool set_channel_uri(CephContext* const cct, const std::string& grpc_uri);
 
   /**
    * @brief Authenticate the transaction using the Handoff engine.
