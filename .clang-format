@@ -1,6 +1,0 @@
----
-BasedOnStyle: WebKit
-AccessModifierOffset: '-2'
-IndentWidth: '2'
-
-...
