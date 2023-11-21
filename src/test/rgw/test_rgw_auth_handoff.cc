@@ -435,25 +435,6 @@ public:
   }
 };
 
-static constexpr uint16_t port_base = 58000;
-static constexpr uint16_t port_range = 2000;
-
-/**
- * @brief Return a random port on which to start a server.
- *
- * Return a random int in a range large enough to make collisions relatively
- * unlikely.
- *
- * @return uint16_t a random port number in [port_base, port_base +
- * port_range).
- */
-static uint16_t random_port()
-{
-  absl::BitGen bitgen;
-  uint16_t rand = absl::Uniform(bitgen, 0u, port_range);
-  return port_base + rand;
-}
-
 /* #endregion */
 
 } // namespace
@@ -663,6 +644,122 @@ class TestAuthImpl final : public rgw::auth::v1::AuthService::Service {
 };
 
 /**
+ * @brief A stop-and-startable gRPC server for testing.
+ *
+ * @tparam T A gRPC server implementation class.
+ */
+template <typename T>
+class GRPCTestServer final {
+
+protected:
+  std::thread server_thread_;
+  // Used to prevent fast startup/shutdown problems. (The Null test.)
+  std::atomic<bool> initialising = false;
+  // True if the server is actually running (in Wait()).
+  std::atomic<bool> running = false;
+  uint16_t port_;
+  std::string address_;
+  std::unique_ptr<grpc::Server> server_;
+
+public:
+  /**
+   * @brief Construct a new GRPCTestServer object. Don't start the server,
+   *
+   * Some tests don't want the server to be running right away.
+   */
+  GRPCTestServer()
+  {
+    set_address("dns:127.0.0.1", random_port());
+  }
+
+  // Copying and moving this server makes no sense.
+  GRPCTestServer(const GRPCTestServer&) = delete;
+  GRPCTestServer(GRPCTestServer&&) = delete;
+  GRPCTestServer& operator=(const GRPCTestServer&) = delete;
+  GRPCTestServer&& operator=(const GRPCTestServer&&) = delete;
+
+  /**
+   * @brief Destroy the GRPCTestServer object and stop any running server.
+   *
+   */
+  virtual ~GRPCTestServer()
+  {
+    stop();
+  }
+
+  std::string address() { return address_; }
+  void set_address(const std::string& host, uint16_t port)
+  {
+    port_ = port;
+    address_ = fmt::format("dns:127.0.0.1:{}", port_);
+  }
+  uint16_t port() { return port_; }
+
+  /**
+   * @brief Start a gRPC server for T in a thread.
+   *
+   * Set some atomics in the instance so we can keep track of startup
+   * progress.
+   *
+   * It's safe to call this multiple times.
+   */
+  void start()
+  {
+    if (initialising || running) {
+      return;
+    }
+    initialising = true;
+    server_thread_ = std::thread([this]() {
+      T service;
+      grpc::ServerBuilder builder;
+      builder.AddListeningPort(address(), grpc::InsecureServerCredentials());
+      builder.RegisterService(&service);
+      server_ = builder.BuildAndStart();
+      if (!server_) {
+        fmt::print(stderr, "Failed to BuildAndStart() for {}\n", address());
+        // Must clear this or server().start() will hang.
+        initialising = false;
+        return;
+      }
+      running = true;
+      initialising = false;
+      fmt::print(stderr, "Calling server_->Wait() for {}\n", address());
+      server_->Wait();
+      running = false;
+    });
+    while (initialising)
+      ;
+  }
+
+  /**
+   * @brief Stop the server if it's running and join the server thread.
+   *
+   * It's safe to call this multiple times.
+   */
+  void stop()
+  {
+    while (initialising)
+      ;
+    if (running && server_) {
+      server_->Shutdown();
+    }
+    if (server_thread_.joinable()) {
+      server_thread_.join();
+    }
+  }
+
+  static constexpr uint16_t port_base = 58000;
+  static constexpr uint16_t port_range = 2000;
+
+  static uint16_t random_port()
+  {
+    absl::BitGen bitgen;
+    uint16_t rand = absl::Uniform(bitgen, 0u, port_range);
+    return port_base + rand;
+  }
+};
+
+/**
  * @brief gRPC mode HandoffHelperImpl end-to-end test fixture.
  *
  * Not using a parameterised test for HTTP and gRPC because I anticipate
@@ -674,8 +771,8 @@ class TestAuthImpl final : public rgw::auth::v1::AuthService::Service {
  * duplication here in the tests themselves. At least they can reuse the test
  * vectors.
  *
- * This test class has a harness that spins up a gRPC server on a random port,
- * and configures the HandoffHelperImpl to use it. The tests then issue gRPC()
+ * Use GRPCTestServer to implement the gRPC server on a random port, then
+ * configure the HandoffHelperImpl to use it. The tests then issue gRPC()
  * calls against the helper.
  *
  * This has the virtue of being a somewhat faithful client-side test. The
@@ -685,10 +782,9 @@ class TestAuthImpl final : public rgw::auth::v1::AuthService::Service {
  * the server, you have to call start_test(). This is so we can easily test
  * behaviour when the server isn't started.
  *
- * The fixture _will_ call stop_server() in TearDown, that feels relatively
+ * The fixture _will_ call server().stop() in TearDown, that feels relatively
  * safe.
  */
-
 class HandoffHelperImplGRPCTest : public ::testing::Test {
 
 protected:
@@ -696,80 +792,29 @@ protected:
   optional_yield y_ = null_yield;
   DoutPrefix dpp_ { g_ceph_context, ceph_subsys_rgw, "unittest " };
 
-  // gRPC server state start.
-  std::thread server_thread_;
-  // Used to prevent fast startup/shutdown problems. (The Null test.)
-  std::atomic<bool> initialising = false;
-  // True if the server is actually running (in Wait()).
-  std::atomic<bool> running = false;
-  uint16_t server_port_;
-  std::string server_address_;
-  std::unique_ptr<grpc::Server> server_;
-  // gRPC server state end.
+  // This manages the test gRPC server.
+  GRPCTestServer<TestAuthImpl> server_;
 
   // Don't start the server - some tests might want a chance to see what
   // happens without a server.
   void SetUp() override
   {
-    server_port_ = random_port();
-    server_address_ = fmt::format("dns:127.0.0.1:{}", server_port_);
-
     dpp_.get_cct()->_conf.set_val_or_die("rgw_handoff_enable_grpc", "true");
     dpp_.get_cct()->_conf.apply_changes(nullptr);
     ASSERT_EQ(dpp_.get_cct()->_conf->rgw_handoff_enable_grpc, true);
     // Note init() can take the server address URI, it's normally defaulted to
     // empty which means 'use the Ceph configuration'.
-    ASSERT_EQ(hh_.init(g_ceph_context, nullptr, server_address_), 0);
+    ASSERT_EQ(hh_.init(g_ceph_context, nullptr, server_.address()), 0);
   }
 
   // Will stop the server. There's no situation where we want it left around.
   void TearDown() override
   {
-    stop_server();
+    server().stop();
   }
 
-  // Fire up a gRPC server for TestImpl in a separate thread, setting some
-  // atomics in the instance to let other methods check on our progress.
-  //
-  void start_server()
-  {
-    if (initialising || running) {
-      return;
-    }
-    initialising = true;
-    server_thread_ = std::thread([this]() {
-      TestAuthImpl service;
-      grpc::ServerBuilder builder;
-      builder.AddListeningPort(server_address_, grpc::InsecureServerCredentials());
-      builder.RegisterService(&service);
-      server_ = builder.BuildAndStart();
-      if (!server_) {
-        fmt::print(stderr, "Failed to BuildAndStart() for {}\n", server_address_);
-        // Must clear this or start_server() will hang.
-        initialising = false;
-        return;
-      }
-      running = true;
-      initialising = false;
-      fmt::print(stderr, "Calling server_->Wait() for {}\n", server_address_);
-      server_->Wait();
-      running = false;
-    });
-    while (initialising)
-      ;
-  }
-
-  void stop_server()
-  {
-    while (initialising)
-      ;
-    if (running && server_) {
-      server_->Shutdown();
-    }
-    if (server_thread_.joinable()) {
-      server_thread_.join();
-    }
-  }
+  /// Return the gRPC server manager instance.
+  GRPCTestServer<TestAuthImpl>& server() { return server_; }
 };
 
 // This just tests we can instantiate the test classes.
@@ -777,30 +822,30 @@ TEST_F(HandoffHelperImplGRPCTest, Null)
 {
 }
 
-// Make sure start_server() is idempotent.
+// Make sure server().start() is idempotent.
 TEST_F(HandoffHelperImplGRPCTest, MetaStart)
 {
-  start_server();
+  server().start();
   for (int n = 0; n < 1000; n++) {
-    start_server();
+    server().start();
   }
-  stop_server();
+  server().stop();
 }
 
-// Make sure stop_server() is idempotent.
+// Make sure server().stop() is idempotent.
 TEST_F(HandoffHelperImplGRPCTest, MetaStop)
 {
-  start_server();
+  server().start();
   for (int n = 0; n < 1000; n++) {
-    stop_server();
+    server().stop();
   }
 }
 
 // Status() is essentially a ping.
 TEST_F(HandoffHelperImplGRPCTest, StatusWorksWithServer)
 {
-  start_server();
-  auto channel = grpc::CreateChannel(server_address_, grpc::InsecureChannelCredentials());
+  server().start();
+  auto channel = grpc::CreateChannel(server().address(), grpc::InsecureChannelCredentials());
   AuthServiceClient client { channel };
   StatusRequest req;
   auto desc = client.Status(req);
@@ -810,7 +855,7 @@ TEST_F(HandoffHelperImplGRPCTest, StatusWorksWithServer)
 
 TEST_F(HandoffHelperImplGRPCTest, StatusFailsWithoutServer)
 {
-  auto channel = grpc::CreateChannel(server_address_, grpc::InsecureChannelCredentials());
+  auto channel = grpc::CreateChannel(server().address(), grpc::InsecureChannelCredentials());
   AuthServiceClient client { channel };
   StatusRequest req;
   auto desc = client.Status(req);
@@ -847,7 +892,7 @@ TEST_F(HandoffHelperImplGRPCTest, FailIfMissingAuthorizationHeader)
 
 TEST_F(HandoffHelperImplGRPCTest, SignatureV2CanBeDisabled)
 {
-  start_server();
+  server().start();
 
   auto t = v2_sample;
 
@@ -878,7 +923,7 @@ TEST_F(HandoffHelperImplGRPCTest, SignatureV2CanBeDisabled)
 // Test working signatures with the verify_by_func handler above.
 TEST_F(HandoffHelperImplGRPCTest, HeaderHappyPath)
 {
-  start_server();
+  server().start();
 
   for (const auto& t : sigpass_tests) {
     TestClient cio;
@@ -898,7 +943,7 @@ TEST_F(HandoffHelperImplGRPCTest, HeaderHappyPath)
 // Test deliberately broken signatures with the verify_by_func handler above.
 TEST_F(HandoffHelperImplGRPCTest, HeaderExpectBadSignature)
 {
-  start_server();
+  server().start();
 
   for (const auto& t : sigfail_tests) {
     TestClient cio;
@@ -943,7 +988,7 @@ TEST_F(HandoffHelperImplGRPCTest, ChannelRecoversFromDeadAtStartup)
   ASSERT_EQ(res.code(), -EACCES) << "should return -EACCES";
   ASSERT_EQ(res.err_type(), HandoffAuthResult::error_type::TRANSPORT_ERROR) << "should return TRANSPORT_ERROR";
 
-  start_server();
+  server().start();
   std::this_thread::sleep_for(std::chrono::milliseconds(101));
   res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
   EXPECT_TRUE(res.is_ok()) << "should now succeed";
