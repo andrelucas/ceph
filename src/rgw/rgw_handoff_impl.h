@@ -24,6 +24,7 @@
 #include <fmt/format.h>
 #include <functional>
 #include <iosfwd>
+#include <shared_mutex>
 #include <string>
 
 #include <grpc/grpc.h>
@@ -153,20 +154,34 @@ public:
  */
 class AuthServiceClient {
 private:
-  std::shared_ptr<grpc::Channel> channel_;
   std::unique_ptr<AuthService::Stub> stub_;
 
 public:
   /**
-   * @brief Construct a new AuthServiceClient object associated with a
-   * grpc::Channel.
+   * @brief Construct a new Auth Service Client object. You must use set_stub
+   * before using any gRPC calls, or the object's behaviour is undefined.
+   */
+  AuthServiceClient() { }
+
+  /**
+   * @brief Construct a new AuthServiceClient object and initialise the gRPC
+   * stub.
    *
    * @param channel pointer to the grpc::Channel object to be used.
    */
-  AuthServiceClient(std::shared_ptr<::grpc::Channel> channel)
-      : channel_ { channel }
-      , stub_(AuthService::NewStub(channel))
+  explicit AuthServiceClient(std::shared_ptr<::grpc::Channel> channel)
+      : stub_(AuthService::NewStub(channel))
   {
+  }
+
+  /**
+   * @brief Set the gRPC stub for this object.
+   *
+   * @param channel the gRPC channel pointer.
+   */
+  void set_stub(std::shared_ptr<::grpc::Channel> channel)
+  {
+    stub_ = AuthService::NewStub(channel);
   }
 
   /**
@@ -341,16 +356,16 @@ class HandoffHelperImpl {
 public:
   // Signature of the alternative verify function,  used only for testing.
   using VerifyFunc = std::function<HandoffVerifyResult(const DoutPrefixProvider*, const std::string&, ceph::bufferlist*, optional_yield)>;
+  using chan_lock_t = std::shared_mutex;
 
 private:
   const std::optional<VerifyFunc> verify_func_;
   rgw::sal::Store* store_;
 
-  // If we want this to be runtime-changeable we will need the channel to be
-  // behind a mutex. Until that point, we know it will be initialised by
-  // init() before being called, and that it's safe to use without guard
-  // rails.
+  // The gRPC channel pointer needs to be behind a mutex.
+  std::shared_mutex m_channel_;
   std::shared_ptr<grpc::Channel> channel_;
+  grpc::ChannelArguments channel_args_;
 
 public:
   /**
@@ -478,6 +493,21 @@ public:
       optional_yield y);
 
   /**
+   * @brief Set custom gRPC channel arguments. Intended for testing.
+   *
+   * Keep this simple. If you set vtable args you'll need to worry about the
+   * lifetime of those is longer than the HandoffHelperImpl object that will
+   * store a copy of the ChannelArguments object.
+   *
+   * @param args A populated grpc::ChannelArguments object.
+   */
+  void set_channel_args(const grpc::ChannelArguments& args)
+  {
+    std::unique_lock l { m_channel_ };
+    channel_args_ = args;
+  }
+
+  /**
    * @brief Implement the HTTP arm of auth().
    *
    * Implement a Handoff authentication request using REST.
@@ -580,7 +610,8 @@ public:
    * @return false The request has expired, or a check was not possible
    */
   bool valid_presigned_time(const DoutPrefixProvider* dpp, const req_state* s, time_t now);
-};
+
+}; // class HandoffHelperImpl
 
 } /* namespace rgw */
 

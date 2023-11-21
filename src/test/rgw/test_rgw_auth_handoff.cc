@@ -751,6 +751,7 @@ protected:
       }
       running = true;
       initialising = false;
+      fmt::print(stderr, "Calling server_->Wait() for {}\n", server_address_);
       server_->Wait();
       running = false;
     });
@@ -919,6 +920,18 @@ TEST_F(HandoffHelperImplGRPCTest, ChannelRecoversFromDeadAtStartup)
 {
   TestClient cio;
 
+  // // This is hardcoded in the library, you can't set a reconnect delay less
+  // // than 100ms. (grpc src/core/ext/filters/client_channel/subchannel.sc
+  // // function ParseArgsForBackoffValues().)
+  // constexpr int INITIAL_RECONNECT_DELAY_MS = 100;
+
+  // grpc::ChannelArguments args;
+  // args.SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, 1);
+  // args.SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, 1);
+  // args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS, 1);
+  // args.SetInt("grpc.testing.fixed_fixed_reconnect_backoff_ms", 0);
+  // hh_.set_channel_args(args);
+
   auto t = sigpass_tests[0];
   cio.get_env().set("HTTP_AUTHORIZATION", t.authorization);
   RGWEnv rgw_env;
@@ -931,6 +944,7 @@ TEST_F(HandoffHelperImplGRPCTest, ChannelRecoversFromDeadAtStartup)
   ASSERT_EQ(res.err_type(), HandoffAuthResult::error_type::TRANSPORT_ERROR) << "should return TRANSPORT_ERROR";
 
   start_server();
+  std::this_thread::sleep_for(std::chrono::milliseconds(101));
   res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
   EXPECT_TRUE(res.is_ok()) << "should now succeed";
   EXPECT_EQ(res.err_type(), HandoffAuthResult::error_type::NO_ERROR) << "should now show no error";
