@@ -900,6 +900,9 @@ options:
   type: bool
   level: advanced
   desc: Enable handoff authentication via gRPC (rather than HTTP).
+  long_desc: If enabled, the handoff authentication service will be available via
+    gRPC. Otherwise, it will be available via HTTP. Both modes will most
+    likely require additional configuration.
   default: true
   services:
   - rgw
@@ -908,6 +911,9 @@ options:
   type: bool
   level: advanced
   desc: Enable automatic creation of new users authenticated via the handoff engine.
+  long_desc: If enabled, the handoff authentication service will automatically create
+    new users if they do not already exist. If not enabled, authenticated
+    requests for that user will fail.
   default: true
   services:
   - rgw
@@ -916,6 +922,9 @@ options:
   type: bool
   level: advanced
   desc: Should handoff re-check presigned URL expiry time.
+  long_desc: RGW in Ceph v17 checks the expiry time of presigned URLs before
+    even calling Handoff. If this should change in later Ceph versions,
+    enabling this feature may be necessary.
   default: false
   services:
   - rgw
@@ -924,6 +933,11 @@ options:
   type: bool
   level: advanced
   desc: Should handoff allow AWS Signature V2 verification.
+  long_desc: Some S3 clients will still issue Amazon V2 authentication
+    requests. s3cmd is one such client. If this option is false, V2 requests
+    (or presigned URLs that can only be successfully mapped to V2 requests)
+    will not be authenticated on this RGW. It is strongly recommended that you
+    leave this set to true.
   default: true
   services:
   - rgw
@@ -932,6 +946,9 @@ options:
   type: str
   level: advanced
   desc: URI for the S3 authentication handoff service via gRPC.
+  long_desc: The gRPC server address to use. This value is passed unchanged to
+    grpc::CreateCustomChannel() so may be in any format supported by the C++
+    gRPC library.
   default: dns:127.0.0.1:8002
   services:
   - rgw
@@ -940,6 +957,7 @@ options:
   type: str
   level: advanced
   desc: URI for the S3 authentication handoff service via HTTP.
+  long_desc: The HTTP(S) server to use.
   default: http://127.0.0.1:8001
   services:
   - rgw
@@ -947,7 +965,8 @@ options:
 - name: rgw_handoff_verify_ssl
   type: bool
   level: advanced
-  desc: Should RGW verify the authentication handoff service SSL certificate.
+  desc: Should handoff verify the remote HTTP server TLS certificate.
+  long_desc: In HTTP mode, verify the remote TLS certificate.
   default: true
   services:
   - rgw
