@@ -688,16 +688,6 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp_in
   auto hdpp = HandoffDoutPrefixPipe(*dpp_in, "grpc_auth");
   auto dpp = &hdpp;
 
-  AuthServiceClient client {}; // Uninitialised variant - must call set_stub().
-  {
-    std::shared_lock<std::shared_mutex> g(m_channel_);
-    // Quick confidence check of channel_.
-    if (!channel_) {
-      ldpp_dout(dpp, 0) << "Unset gRPC channel" << dendl;
-      return HandoffAuthResult(-EACCES, "Internal error (gRPC channel not set)");
-    }
-    client.set_stub(channel_);
-  }
   rgw::auth::v1::AuthRequest req;
   // Fill in the request protobuf. Seem to have to create strings from
   // string_view, which is a shame.
@@ -712,6 +702,18 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp_in
     req_param->set_object_key_name(authorization_param->object_key_name());
   }
 
+  // Get the gRPC client from under the channel lock. Hold the lock for as
+  // short a time as possible.
+  AuthServiceClient client {}; // Uninitialised variant - must call set_stub().
+  {
+    std::shared_lock<std::shared_mutex> g(m_channel_);
+    // Quick confidence check of channel_.
+    if (!channel_) {
+      ldpp_dout(dpp, 0) << "Unset gRPC channel" << dendl;
+      return HandoffAuthResult(-EACCES, "Internal error (gRPC channel not set)");
+    }
+    client.set_stub(channel_);
+  }
   ldpp_dout(dpp, 1) << "Sending gRPC request" << dendl;
   auto result = client.Auth(req);
 
