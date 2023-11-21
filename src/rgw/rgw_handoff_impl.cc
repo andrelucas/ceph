@@ -188,9 +188,6 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthRequest& req)
   ::grpc::ClientContext context;
   AuthResponse resp;
 
-  // XXX
-  // auto state = channel_->GetState(true);
-
   ::grpc::Status status = stub_->Auth(&context, req, &resp);
   // Check for an error from gRPC itself.
   if (!status.ok()) {
@@ -445,9 +442,11 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Store* store, cons
   store_ = store;
 
   if (!grpc_uri.empty() || cct->_conf->rgw_handoff_enable_grpc) {
-    // XXX grpc::InsecureChannelCredentials()...
     auto uri = grpc_uri.empty() ? cct->_conf->rgw_handoff_grpc_uri : grpc_uri;
-    channel_ = grpc::CreateChannel(uri, grpc::InsecureChannelCredentials());
+
+    std::lock_guard<chan_lock_t> g(m_channel_);
+    // XXX grpc::InsecureChannelCredentials()...
+    channel_ = grpc::CreateCustomChannel(uri, grpc::InsecureChannelCredentials(), channel_args_);
   }
 
   return 0;
@@ -689,13 +688,16 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp_in
   auto hdpp = HandoffDoutPrefixPipe(*dpp_in, "grpc_auth");
   auto dpp = &hdpp;
 
-  // Quick confidence check of channel_.
-  if (!channel_) {
-    ldpp_dout(dpp, 0) << "Unset gRPC channel" << dendl;
-    return HandoffAuthResult(-EACCES, "Internal error (gRPC channel not set)");
+  AuthServiceClient client {}; // Uninitialised variant - must call set_stub().
+  {
+    std::shared_lock<std::shared_mutex> g(m_channel_);
+    // Quick confidence check of channel_.
+    if (!channel_) {
+      ldpp_dout(dpp, 0) << "Unset gRPC channel" << dendl;
+      return HandoffAuthResult(-EACCES, "Internal error (gRPC channel not set)");
+    }
+    client.set_stub(channel_);
   }
-
-  AuthServiceClient client(channel_);
   rgw::auth::v1::AuthRequest req;
   // Fill in the request protobuf. Seem to have to create strings from
   // string_view, which is a shame.
