@@ -658,12 +658,17 @@ class TestAuthImpl final : public rgw::auth::v1::AuthService::Service {
  * configure the HandoffHelperImpl to use it. The tests then issue gRPC()
  * calls against the helper.
  *
- * This has the virtue of being a somewhat faithful client-side test. The
- * server side is rather simplistic, obviously; but that's probably ok.
+ * You *MUST* call helper_init() if you're going to use the HandoffHelperImpl
+ * at all! Otherwise the channel and store won't be set up. This isn't called
+ * automatically because sometimes we want to modify the channel configuration
+ * first.
  *
- * The fixture is cribbed from test_rgw_grpc.cc. It doesn't implicitly start
- * the server, you have to call start_test(). This is so we can easily test
- * behaviour when the server isn't started.
+ * It also doesn't implicitly start the server, you have to call start_test().
+ * This is so we can easily test behaviour when the server isn't started.
+ *
+ * This actual-server approach has the virtue of being a somewhat faithful
+ * client-side test. The server side is rather simplistic, obviously; but
+ * that's probably ok.
  *
  * The fixture _will_ call server().stop() in TearDown, that feels relatively
  * safe.
@@ -681,6 +686,10 @@ protected:
   // Don't start the server - some tests might want a chance to see what
   // happens without a server.
   void SetUp() override
+  {
+  }
+
+  void helper_init()
   {
     dpp_.get_cct()->_conf.set_val_or_die("rgw_handoff_enable_grpc", "true");
     dpp_.get_cct()->_conf.apply_changes(nullptr);
@@ -728,6 +737,7 @@ TEST_F(HandoffHelperImplGRPCTest, MetaStop)
 TEST_F(HandoffHelperImplGRPCTest, StatusWorksWithServer)
 {
   server().start();
+  helper_init();
   auto channel = grpc::CreateChannel(server().address(), grpc::InsecureChannelCredentials());
   AuthServiceClient client { channel };
   StatusRequest req;
@@ -738,6 +748,7 @@ TEST_F(HandoffHelperImplGRPCTest, StatusWorksWithServer)
 
 TEST_F(HandoffHelperImplGRPCTest, StatusFailsWithoutServer)
 {
+  helper_init();
   auto channel = grpc::CreateChannel(server().address(), grpc::InsecureChannelCredentials());
   AuthServiceClient client { channel };
   StatusRequest req;
@@ -748,6 +759,7 @@ TEST_F(HandoffHelperImplGRPCTest, StatusFailsWithoutServer)
 // Don't deref if cct->cio == nullptr.
 TEST_F(HandoffHelperImplGRPCTest, RegressNullCioPtr)
 {
+  helper_init();
   auto t = sigpass_tests[0];
   RGWEnv rgw_env;
   req_state s { g_ceph_context, &rgw_env, 0 };
@@ -761,6 +773,7 @@ TEST_F(HandoffHelperImplGRPCTest, RegressNullCioPtr)
 // synthesized.
 TEST_F(HandoffHelperImplGRPCTest, FailIfMissingAuthorizationHeader)
 {
+  helper_init();
   TestClient cio;
 
   auto t = sigpass_tests[0];
@@ -776,6 +789,7 @@ TEST_F(HandoffHelperImplGRPCTest, FailIfMissingAuthorizationHeader)
 TEST_F(HandoffHelperImplGRPCTest, SignatureV2CanBeDisabled)
 {
   server().start();
+  helper_init();
 
   auto t = v2_sample;
 
@@ -807,6 +821,7 @@ TEST_F(HandoffHelperImplGRPCTest, SignatureV2CanBeDisabled)
 TEST_F(HandoffHelperImplGRPCTest, HeaderHappyPath)
 {
   server().start();
+  helper_init();
 
   for (const auto& t : sigpass_tests) {
     TestClient cio;
@@ -827,6 +842,7 @@ TEST_F(HandoffHelperImplGRPCTest, HeaderHappyPath)
 TEST_F(HandoffHelperImplGRPCTest, HeaderExpectBadSignature)
 {
   server().start();
+  helper_init();
 
   for (const auto& t : sigfail_tests) {
     TestClient cio;
@@ -843,22 +859,27 @@ TEST_F(HandoffHelperImplGRPCTest, HeaderExpectBadSignature)
   }
 }
 
+// This is hardcoded in the library, you can't configure a reconnect delay
+// less than 100ms. (grpc src/core/ext/filters/client_channel/subchannel.sc
+// function ParseArgsForBackoffValues().) This allows five more milliseconds.
+//
+constexpr int SMALLEST_RECONNECT_DELAY_MS = 105;
+
 // Check the system doesn't fail if started with a non-functional auth server.
 TEST_F(HandoffHelperImplGRPCTest, ChannelRecoversFromDeadAtStartup)
 {
+  // Set everything to 1ms. As descrived for SMALLEST_RECONNECT_DELAY_MS,
+  // we'll still have to wait 100ms + a few more millis for any reconnect.
+  grpc::ChannelArguments args;
+  args.SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, 1);
+  args.SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, 1);
+  args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS, 1);
+  args.SetInt("grpc.testing.fixed_fixed_reconnect_backoff_ms", 0);
+  // Program the helper's channel.
+  hh_.set_channel_args(args);
+
+  helper_init();
   TestClient cio;
-
-  // // This is hardcoded in the library, you can't set a reconnect delay less
-  // // than 100ms. (grpc src/core/ext/filters/client_channel/subchannel.sc
-  // // function ParseArgsForBackoffValues().)
-  // constexpr int INITIAL_RECONNECT_DELAY_MS = 100;
-
-  // grpc::ChannelArguments args;
-  // args.SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, 1);
-  // args.SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, 1);
-  // args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS, 1);
-  // args.SetInt("grpc.testing.fixed_fixed_reconnect_backoff_ms", 0);
-  // hh_.set_channel_args(args);
 
   auto t = sigpass_tests[0];
   cio.get_env().set("HTTP_AUTHORIZATION", t.authorization);
@@ -872,7 +893,8 @@ TEST_F(HandoffHelperImplGRPCTest, ChannelRecoversFromDeadAtStartup)
   ASSERT_EQ(res.err_type(), HandoffAuthResult::error_type::TRANSPORT_ERROR) << "should return TRANSPORT_ERROR";
 
   server().start();
-  std::this_thread::sleep_for(std::chrono::milliseconds(101));
+  // Wait as short a time as the library allows.
+  std::this_thread::sleep_for(std::chrono::milliseconds(SMALLEST_RECONNECT_DELAY_MS));
   res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
   EXPECT_TRUE(res.is_ok()) << "should now succeed";
   EXPECT_EQ(res.err_type(), HandoffAuthResult::error_type::NO_ERROR) << "should now show no error";
