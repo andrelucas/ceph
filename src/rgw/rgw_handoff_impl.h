@@ -21,12 +21,13 @@
 
 #include "acconfig.h"
 
-#include <fmt/format.h>
 #include <functional>
 #include <iosfwd>
 #include <shared_mutex>
 #include <string>
+#include <unordered_map>
 
+#include <fmt/format.h>
 #include <grpc/grpc.h>
 #include <grpcpp/channel.h>
 #include <grpcpp/client_context.h>
@@ -255,6 +256,7 @@ private:
   std::string method_;
   std::string bucket_name_;
   std::string object_key_name_;
+  std::unordered_map<std::string, std::string> http_headers_;
 
   void valid_check() const
   {
@@ -337,8 +339,20 @@ public:
    */
   std::string to_string() const noexcept;
 
+  /**
+   * @brief Return a const reference to the map of HTTP headers.
+   *
+   * @return const std::unordered_map<std::string, std::string>& A read-only
+   * reference to the HTTP headers map.
+   */
+  const std::unordered_map<std::string, std::string>& http_headers() const
+  {
+    return http_headers_;
+  }
+
   friend std::ostream& operator<<(std::ostream& os, const AuthorizationParameters& ep);
-};
+
+}; // class AuthorizationParameters.
 
 std::ostream& operator<<(std::ostream& os, const AuthorizationParameters& ep);
 

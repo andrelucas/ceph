@@ -1053,7 +1053,6 @@ static PresignedExpiryData expiry_unit[] = {
 // shouldn't even pass the request to the Authenticator.
 TEST_F(HandoffHelperImplSubsysTest, PresignedCheckExpiry)
 {
-
   for (auto const& t : expiry_unit) {
 
     // We need a req_state struct to pass to synthesize_auth_header(), so
@@ -1126,11 +1125,17 @@ TEST_F(HandoffHelperImplSubsysTest, AuthorizationParamConstruct)
     RGWEnv rgw_env;
     req_state s { g_ceph_context, &rgw_env, 0 };
 
+    TestClient cio;
+    // Set a header that should be included in the params.
+    cio.get_env().set("HTTP_FOO", "bar");
+    s.cio = &cio;
+
     auto test_desc = fmt::format("for test: {} {} exp:{}", t.method, t.r_uri, t.expected_pass);
     s.info.method = t.method.c_str();
     s.relative_uri = t.r_uri;
 
     auto param = rgw::AuthorizationParameters(&dpp, &s);
+
     if (!t.expected_pass) {
       EXPECT_FALSE(param.valid()) << test_desc;
       EXPECT_ANY_THROW(param.method()) << test_desc;
@@ -1141,6 +1146,9 @@ TEST_F(HandoffHelperImplSubsysTest, AuthorizationParamConstruct)
       EXPECT_EQ(param.method(), t.exp_method) << test_desc;
       EXPECT_EQ(param.bucket_name(), t.exp_bucket) << test_desc;
       EXPECT_EQ(param.object_key_name(), t.exp_object_key) << test_desc;
+      // Any valid request should have the headers.
+      ASSERT_NE(param.http_headers().find("foo"), param.http_headers().end()) << test_desc;
+      EXPECT_EQ(param.http_headers().at("foo"), "bar") << test_desc;
     }
   }
 }
