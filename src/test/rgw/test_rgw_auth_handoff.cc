@@ -1182,8 +1182,10 @@ int main(int argc, char** argv)
   rgw_http_client_init(cct->get());
   rgw_setup_saved_curl_handles();
 
-  // This will raise the library logging level to max.
-  g_ceph_context->_conf->subsys.set_log_level(ceph_subsys_rgw, 20);
+  if (std::getenv("TEST_VERBOSE")) {
+    // This will raise the library logging level to max.
+    g_ceph_context->_conf->subsys.set_log_level(ceph_subsys_rgw, 20);
+  }
 
   ::testing::InitGoogleTest(&argc, argv);
   int r = RUN_ALL_TESTS();
