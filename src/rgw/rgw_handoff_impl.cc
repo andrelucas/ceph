@@ -81,10 +81,7 @@ AuthorizationParameters::AuthorizationParameters(const DoutPrefixProvider* dpp_i
   auto dpp = &hdpp;
   valid_ = false;
 
-  if (s == nullptr) {
-    ldpp_dout(dpp, 0) << "Invalid request pointer" << dendl;
-    return;
-  }
+  ceph_assert(s != nullptr); // Give a helpful error to unit tests.
 
   // Method should be set in the request.
   if (!s->info.method || *(s->info.method) == 0) {
@@ -659,13 +656,7 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
   // All the APIs expect a *DoutPrefixProvider.
   auto dpp = &hdpp;
 
-  // This is more for unit tests than production. When testing against
-  // synthetic requests, it's easy to not set the request up fully. This way
-  // we get a meaningful error instead of a crash.
-  if (s->cio == nullptr) {
-    ldpp_dout(dpp, 0) << "Invalid request state (cio==nullptr)" << dendl;
-    return HandoffAuthResult(-EACCES, "Internal error (cio)");
-  }
+  ceph_assert(s->cio != nullptr); // Give a helpful message to unit tests.
 
   ldpp_dout(dpp, 1) << fmt::format(
       "init: access_key_id='{}' session_token_present={} decoded_uri='{}' domain={}",
