@@ -6075,8 +6075,7 @@ rgw::HandoffHelper* rgw::auth::s3::HandoffEngine::handoff_helper = nullptr;
 
 void rgw::auth::s3::HandoffEngine::init(CephContext* const cct, rgw::sal::Store* store)
 {
-  if (! cct->_conf->rgw_s3_auth_use_handoff ||
-      cct->_conf->rgw_handoff_http_uri.empty()) {
+  if (!cct->_conf->rgw_s3_auth_use_handoff) {
     return;
   }
 
