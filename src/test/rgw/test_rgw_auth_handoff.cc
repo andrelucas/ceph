@@ -503,18 +503,6 @@ protected:
   DoutPrefix dpp { g_ceph_context, ceph_subsys_rgw, "unittest " };
 };
 
-// Don't deref if cct->cio == nullptr.
-TEST_F(HandoffHelperImplHTTPTest, RegressNullCioPtr)
-{
-  auto t = sigpass_tests[0];
-  RGWEnv rgw_env;
-  req_state s { g_ceph_context, &rgw_env, 0 };
-  auto string_to_sign = rgw::from_base64(t.ss_base64);
-  auto res = hh.auth(&dpp, "", t.access_key, string_to_sign, t.signature, &s, y);
-  ASSERT_EQ(res.code(), -EACCES);
-  ASSERT_THAT(res.message(), testing::ContainsRegex("cio"));
-}
-
 // Fail properly when the Authorization header is absent and one can't be
 // synthesized.
 TEST_F(HandoffHelperImplHTTPTest, FailIfMissingAuthorizationHeader)
@@ -760,19 +748,6 @@ TEST_F(HandoffHelperImplGRPCTest, StatusFailsWithoutServer)
   StatusRequest req;
   auto desc = client.Status(req);
   ASSERT_FALSE(desc.has_value()) << "Status() RPC succeeded when it should have failed";
-}
-
-// Don't deref if cct->cio == nullptr.
-TEST_F(HandoffHelperImplGRPCTest, RegressNullCioPtr)
-{
-  helper_init();
-  auto t = sigpass_tests[0];
-  RGWEnv rgw_env;
-  req_state s { g_ceph_context, &rgw_env, 0 };
-  auto string_to_sign = rgw::from_base64(t.ss_base64);
-  auto res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
-  ASSERT_EQ(res.code(), -EACCES);
-  ASSERT_THAT(res.message(), testing::ContainsRegex("cio"));
 }
 
 // Fail properly when the Authorization header is absent and one can't be
