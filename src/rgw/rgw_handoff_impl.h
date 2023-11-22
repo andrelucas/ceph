@@ -354,7 +354,7 @@ public:
 
   ~HandoffConfigObserver()
   {
-    if (cct_) {
+    if (cct_ && observer_added_) {
       cct_->_conf.remove_observer(this);
     }
   }
@@ -363,6 +363,7 @@ public:
   {
     cct_ = cct;
     cct_->_conf.add_observer(this);
+    observer_added_ = true;
   }
 
   // Config observer. See notes in src/common/config_obs.h and for
@@ -373,7 +374,8 @@ public:
 
 private:
   T& helper_;
-  CephContext* cct_;
+  CephContext* cct_ = nullptr;
+  bool observer_added_ = false;
 };
 
 /****************************************************************************/
@@ -399,6 +401,10 @@ private:
 
   const std::optional<HTTPVerifyFunc> http_verify_func_;
   rgw::sal::Store* store_;
+
+  bool grpc_mode_ = true;
+  bool presigned_expiry_check_ = false;
+  bool enable_signature_v2_ = true;
 
   // The gRPC channel pointer needs to be behind a mutex.
   std::shared_mutex m_channel_;
@@ -461,6 +467,15 @@ public:
    * @return false on failure.
    */
   bool set_channel_uri(CephContext* const cct, const std::string& grpc_uri);
+
+  /**
+   * @brief Configure support for AWS signature v2.
+   *
+   * I strongly recommend this remain enabled for broad client support.
+   *
+   * @param enabled Whether or not V2 signatures should be allowed.
+   */
+  void set_signature_v2(CephContext* const cct, bool enabled);
 
   /**
    * @brief Authenticate the transaction using the Handoff engine.

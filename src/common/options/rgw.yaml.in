@@ -939,6 +939,8 @@ options:
     will not be authenticated on this RGW. It is strongly recommended that you
     leave this set to true.
   default: true
+  flags:
+  - runtime
   services:
   - rgw
   with_legacy: true

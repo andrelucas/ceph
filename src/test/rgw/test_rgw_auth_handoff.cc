@@ -533,6 +533,9 @@ TEST_F(HandoffHelperImplHTTPTest, FailIfMissingAuthorizationHeader)
 
 TEST_F(HandoffHelperImplHTTPTest, SignatureV2CanBeDisabled)
 {
+  // // XXX I can't get the configuration observer to work in the harness.
+  // // Luckily there are methods on the helperimpl that I can call directly.
+
   auto t = v2_sample;
 
   TestClient cio;
@@ -544,17 +547,20 @@ TEST_F(HandoffHelperImplHTTPTest, SignatureV2CanBeDisabled)
   req_state s { g_ceph_context, &rgw_env, 0 };
   s.cio = &cio;
   auto string_to_sign = rgw::from_base64(t.ss_base64);
+  // This is what the config observer would call.
+  hh.set_signature_v2(dpp.get_cct(), true);
   auto res = hh.auth(&dpp, "", t.access_key, string_to_sign, t.signature, &s, y);
   ASSERT_TRUE(res.is_ok());
 
-  dpp.get_cct()->_conf->rgw_handoff_enable_signature_v2 = false;
-  dpp.get_cct()->_conf.apply_changes(nullptr);
+  // dpp.get_cct()->_conf->rgw_handoff_enable_signature_v2 = false;
+  // dpp.get_cct()->_conf.apply_changes(nullptr);
+  hh.set_signature_v2(dpp.get_cct(), false);
   res = hh.auth(&dpp, "", t.access_key, string_to_sign, t.signature, &s, y);
   ASSERT_TRUE(res.is_err());
 
-  dpp.get_cct()->_conf->rgw_handoff_enable_signature_v2 = true;
-  dpp.get_cct()->_conf.apply_changes(nullptr);
-
+  // dpp.get_cct()->_conf->rgw_handoff_enable_signature_v2 = true;
+  // dpp.get_cct()->_conf.apply_changes(nullptr);
+  hh.set_signature_v2(dpp.get_cct(), true);
   res = hh.auth(&dpp, "", t.access_key, string_to_sign, t.signature, &s, y);
   ASSERT_TRUE(res.is_ok());
 }
@@ -788,6 +794,9 @@ TEST_F(HandoffHelperImplGRPCTest, FailIfMissingAuthorizationHeader)
 
 TEST_F(HandoffHelperImplGRPCTest, SignatureV2CanBeDisabled)
 {
+  // // XXX I can't get the configuration observer to work in the harness.
+  // // Luckily there are methods on the helperimpl that I can call directly.
+
   server().start();
   helper_init();
 
@@ -802,17 +811,20 @@ TEST_F(HandoffHelperImplGRPCTest, SignatureV2CanBeDisabled)
   req_state s { g_ceph_context, &rgw_env, 0 };
   s.cio = &cio;
   auto string_to_sign = rgw::from_base64(t.ss_base64);
+  // This is what the config observer would call.
+  hh_.set_signature_v2(dpp_.get_cct(), true);
   auto res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
   EXPECT_TRUE(res.is_ok());
 
-  dpp_.get_cct()->_conf->rgw_handoff_enable_signature_v2 = false;
-  dpp_.get_cct()->_conf.apply_changes(nullptr);
+  // dpp_.get_cct()->_conf->rgw_handoff_enable_signature_v2 = false;
+  // dpp_.get_cct()->_conf.apply_changes(nullptr);
+  hh_.set_signature_v2(dpp_.get_cct(), false);
   res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
   EXPECT_TRUE(res.is_err());
 
-  dpp_.get_cct()->_conf->rgw_handoff_enable_signature_v2 = true;
-  dpp_.get_cct()->_conf.apply_changes(nullptr);
-
+  // dpp_.get_cct()->_conf->rgw_handoff_enable_signature_v2 = true;
+  // dpp_.get_cct()->_conf.apply_changes(nullptr);
+  hh_.set_signature_v2(dpp_.get_cct(), true);
   res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
   EXPECT_TRUE(res.is_ok());
 }
@@ -1166,6 +1178,7 @@ int main(int argc, char** argv)
   auto cct = global_init(NULL, args, CEPH_ENTITY_TYPE_CLIENT, CODE_ENVIRONMENT_UTILITY, CINIT_FLAG_NO_DEFAULT_CONFIG_FILE);
   common_init_finish(g_ceph_context);
 
+  // These can most likely go when HTTP mode is removed.
   rgw_http_client_init(cct->get());
   rgw_setup_saved_curl_handles();
 
@@ -1174,7 +1187,10 @@ int main(int argc, char** argv)
 
   ::testing::InitGoogleTest(&argc, argv);
   int r = RUN_ALL_TESTS();
+
+  // These can most likely go when HTTP mode is removed.
   rgw_release_all_curl_handles();
   rgw_http_client_cleanup();
+
   return r;
 }
