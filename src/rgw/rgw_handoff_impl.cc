@@ -351,6 +351,7 @@ template <>
 const char** HandoffConfigObserver<HandoffHelperImpl>::get_tracked_conf_keys() const
 {
   static const char* keys[] = {
+    "rgw_handoff_enable_signature_v2",
     "rgw_handoff_grpc_uri",
     nullptr
   };
@@ -361,8 +362,12 @@ template <>
 void HandoffConfigObserver<HandoffHelperImpl>::handle_conf_change(const ConfigProxy& conf,
     const std::set<std::string>& changed)
 {
+  dout(20) << __PRETTY_FUNCTION__ << dendl;
   if (changed.count("rgw_handoff_grpc_uri")) {
     helper_.set_channel_uri(cct_, conf->rgw_handoff_grpc_uri);
+  }
+  if (changed.count("rgw_handoff_enable_signature_v2")) {
+    helper_.set_signature_v2(cct_, conf->rgw_handoff_enable_signature_v2);
   }
 }
 
@@ -461,28 +466,45 @@ static std::optional<std::string> synthesize_v4_header(const DoutPrefixProvider*
 
 int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Store* store, const std::string& grpc_uri)
 {
-  ldout(cct, 20) << "HandoffHelperImpl::init" << dendl;
   store_ = store;
   config_obs_.init(cct);
 
+  // Set up some state variables based on configuration. Most of these are not
+  // runtime-alterable.
+
+  // rgw_handoff_enable_grpc is not runtime-alterable, but the URI is.
   if (!grpc_uri.empty() || cct->_conf->rgw_handoff_enable_grpc) {
+    ldout(cct, 1) << "HandoffHelperImpl::init(): Using gRPC mode" << dendl;
+    grpc_mode_ = true;
     auto uri = grpc_uri.empty() ? cct->_conf->rgw_handoff_grpc_uri : grpc_uri;
 
+    // Will use rgw_handoff_grpc_uri, which is runtime-alterable.
     if (!set_channel_uri(cct, uri)) {
-      return -1; // The return value is ignored anyway (it's called by the HandoffEngine constructor).
+      // This is unlikely, but no gRPC channel in gRPC mode is a fatal error.
+      throw new std::runtime_error("Failed to create initial gRPC channel");
     }
+  } else {
+    ldout(cct, 1) << "HandoffHelperImpl::init(): Using HTTP mode" << dendl;
+    grpc_mode_ = false;
   }
-  return 0;
+
+  // rgw_handoff_enable_presigned_expiry_check is not runtime-alterable.
+  presigned_expiry_check_ = cct->_conf->rgw_handoff_enable_presigned_expiry_check;
+  ldout(cct, 1) << "HandoffHelperImpl::init(): Presigned URL expiry check " << (presigned_expiry_check_ ? "enabled" : "disabled") << dendl;
+
+  // rgw_handoff_enable_signature_v2 is runtime-alterable.
+  set_signature_v2(cct, cct->_conf->rgw_handoff_enable_signature_v2);
+
+  return 0; // Return value is ignored.
 }
 
 bool HandoffHelperImpl::set_channel_uri(CephContext* const cct, const std::string& new_uri)
 {
   std::unique_lock<chan_lock_t> g(m_channel_);
-  ldout(cct, 1) << "HandoffHelperImpl::set_channel_uri(" << new_uri << ")" << dendl;
   // XXX grpc::InsecureChannelCredentials()...
   auto new_channel = grpc::CreateCustomChannel(new_uri, grpc::InsecureChannelCredentials(), channel_args_);
   if (!new_channel) {
-    ldout(cct, 0) << "ERROR: Failed to create new gRPC channel for URI " << new_uri << dendl;
+    ldout(cct, 0) << "ERROR: HandoffHelperImpl::set_channel_uri(): Failed to create new gRPC channel " << new_uri << dendl;
     return false;
   } else {
     ldout(cct, 1) << "HandoffHelperImpl::set_channel_uri(" << new_uri << ") success" << dendl;
@@ -490,6 +512,12 @@ bool HandoffHelperImpl::set_channel_uri(CephContext* const cct, const std::strin
     channel_uri_ = new_uri;
     return true;
   }
+}
+
+void HandoffHelperImpl::set_signature_v2(CephContext* const cct, bool enabled)
+{
+  ldout(cct, 1) << "HandoffHelperImpl: set_signature_v2(" << enabled << ")" << dendl;
+  enable_signature_v2_ = enabled;
 }
 
 std::optional<std::string> HandoffHelperImpl::synthesize_auth_header(
@@ -634,7 +662,7 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
   // This is more for unit tests than production. When testing against
   // synthetic requests, it's easy to not set the request up fully. This way
   // we get a meaningful error instead of a crash.
-  if (!s->cio) {
+  if (s->cio == nullptr) {
     ldpp_dout(dpp, 0) << "Invalid request state (cio==nullptr)" << dendl;
     return HandoffAuthResult(-EACCES, "Internal error (cio)");
   }
@@ -670,7 +698,7 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
       ldpp_dout(dpp, 0) << "Missing Authorization header and insufficient query parameters" << dendl;
       return HandoffAuthResult(-EACCES, "Internal error (missing Authorization and insufficient query parameters)");
     }
-    if (dpp->get_cct()->_conf->rgw_handoff_enable_presigned_expiry_check) {
+    if (presigned_expiry_check_) {
       // Belt-and-braces: Check the expiry time. Note that RGW won't (in
       // v17.2.6) pass this to authenticate() (and so auth()); it checks the
       // expiry time early. Let's not assume things.
@@ -682,7 +710,7 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
   }
 
   // We might have disabled V2 signatures.
-  if (!dpp->get_cct()->_conf->rgw_handoff_enable_signature_v2) {
+  if (!enable_signature_v2_) {
     if (ba::starts_with(auth, "AWS ")) {
       ldpp_dout(dpp, 0) << "V2 signatures are disabled, returning failure" << dendl;
       return HandoffAuthResult(-EACCES, "Access denied (V2 signatures disabled)");
@@ -708,7 +736,7 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
 
   // Depending on configuration, call the gRPC or HTTP arm to complete the
   // handoff.
-  if (dpp->get_cct()->_conf->rgw_handoff_enable_grpc) {
+  if (grpc_mode_) {
     return _grpc_auth(dpp, auth, authorization_param, session_token, access_key_id, string_to_sign, signature, s, y);
   } else {
     return _http_auth(dpp, auth, authorization_param, session_token, access_key_id, string_to_sign, signature, s, y);
