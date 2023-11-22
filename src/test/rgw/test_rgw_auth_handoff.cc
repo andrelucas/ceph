@@ -357,13 +357,13 @@ static std::optional<std::string> verify_aws_signature(std::string string_to_sig
 //
 // As the real function, we return our result struct appropriately filled, and
 // on success we put the reply markup for the caller in the bufferlist.
-static rgw::HandoffVerifyResult verify_by_func(const DoutPrefixProvider* dpp, const std::string& request_json, ceph::bufferlist* resp_bl, [[maybe_unused]] optional_yield y)
+static rgw::HandoffHTTPVerifyResult http_verify_by_func(const DoutPrefixProvider* dpp, const std::string& request_json, ceph::bufferlist* resp_bl, [[maybe_unused]] optional_yield y)
 {
 
   JSONParser parser;
   if (!parser.parse(request_json.c_str(), request_json.size())) {
     std::cerr << "Unable to parse request JSON" << std::endl;
-    return rgw::HandoffVerifyResult(-EACCES, 401);
+    return rgw::HandoffHTTPVerifyResult(-EACCES, 401);
   }
 
   std::string string_to_sign_base64;
@@ -376,14 +376,14 @@ static rgw::HandoffVerifyResult verify_by_func(const DoutPrefixProvider* dpp, co
 
   } catch (const JSONDecoder::err& err) {
     std::cerr << "request parse error: " << err.what() << std::endl;
-    return rgw::HandoffVerifyResult(-EACCES, 401);
+    return rgw::HandoffHTTPVerifyResult(-EACCES, 401);
   }
 
   std::string string_to_sign = rgw::from_base64(string_to_sign_base64);
 
   auto info = info_for_credential(access_key_id);
   if (!info) {
-    return rgw::HandoffVerifyResult(-EACCES, 404);
+    return rgw::HandoffHTTPVerifyResult(-EACCES, 404);
   }
   auto secret = (*info).secret;
   // std::cerr << fmt::format("verify_by_func(): string_to_sign='{}' access_key_id='{}' secret_key='{}' authorization='{}'", string_to_sign, access_key_id, secret, authorization) << std::endl;
@@ -393,7 +393,7 @@ static rgw::HandoffVerifyResult verify_by_func(const DoutPrefixProvider* dpp, co
   if (gen_signature.has_value()) {
     message = "OK";
   } else {
-    return rgw::HandoffVerifyResult(-EACCES, 401);
+    return rgw::HandoffHTTPVerifyResult(-EACCES, 401);
   }
 
   // We only need to create the response body if we're about to return
@@ -409,7 +409,7 @@ static rgw::HandoffVerifyResult verify_by_func(const DoutPrefixProvider* dpp, co
 
   resp_bl->append(oss.str());
 
-  return rgw::HandoffVerifyResult(0, 200);
+  return rgw::HandoffHTTPVerifyResult(0, 200);
 }
 
 // Minimal client for req_state.
@@ -498,7 +498,7 @@ protected:
     ASSERT_EQ(hh.init(g_ceph_context, nullptr), 0);
   }
 
-  HandoffHelperImpl hh { verify_by_func };
+  HandoffHelperImpl hh { http_verify_by_func };
   optional_yield y = null_yield;
   DoutPrefix dpp { g_ceph_context, ceph_subsys_rgw, "unittest " };
 };
@@ -986,7 +986,7 @@ protected:
     ASSERT_EQ(hh.init(g_ceph_context, nullptr), 0);
   }
 
-  static rgw::HandoffVerifyResult verify_throw(const DoutPrefixProvider* dpp, const std::string& request_json, ceph::bufferlist* resp_bl, [[maybe_unused]] optional_yield y)
+  static rgw::HandoffHTTPVerifyResult verify_throw(const DoutPrefixProvider* dpp, const std::string& request_json, ceph::bufferlist* resp_bl, [[maybe_unused]] optional_yield y)
   {
     throw new std::runtime_error("Should not get here");
   }

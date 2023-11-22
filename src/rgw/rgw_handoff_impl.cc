@@ -320,7 +320,7 @@ static HandoffResponse ParseHandoffResponse(const DoutPrefixProvider* dpp, ceph:
   return resp;
 }
 
-static HandoffVerifyResult verify_standard(const DoutPrefixProvider* dpp, const std::string& request_json, bufferlist* resp_bl, optional_yield y)
+static HandoffHTTPVerifyResult http_verify_standard(const DoutPrefixProvider* dpp, const std::string& request_json, bufferlist* resp_bl, optional_yield y)
 {
   auto cct = dpp->get_cct();
 
@@ -340,7 +340,7 @@ static HandoffVerifyResult verify_standard(const DoutPrefixProvider* dpp, const 
   ldpp_dout(dpp, 20) << fmt::format("fetch '{}': POST '{}'", query_url, request_json) << dendl;
   auto ret = verify.process(y);
 
-  return HandoffVerifyResult { ret, verify.get_http_status(), query_url };
+  return HandoffHTTPVerifyResult { ret, verify.get_http_status(), query_url };
 }
 
 /****************************************************************************/
@@ -792,11 +792,11 @@ HandoffAuthResult HandoffHelperImpl::_http_auth(const DoutPrefixProvider* dpp,
 
   // verify_func_ is initialised at construction time and is const, we *do
   // not* need to synchronise access.
-  HandoffVerifyResult vres;
-  if (verify_func_) {
-    vres = (*verify_func_)(dpp, request_json, &resp_bl, y);
+  HandoffHTTPVerifyResult vres;
+  if (http_verify_func_) {
+    vres = (*http_verify_func_)(dpp, request_json, &resp_bl, y);
   } else {
-    vres = verify_standard(dpp, request_json, &resp_bl, y);
+    vres = http_verify_standard(dpp, request_json, &resp_bl, y);
   }
 
   if (vres.result() < 0) {
