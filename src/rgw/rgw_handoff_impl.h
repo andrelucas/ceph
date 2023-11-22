@@ -114,30 +114,30 @@ public:
  * Used by the HTTP arm of auth() to encapsulate the various possible results
  * from parsing the Authenticator's JSON.
  */
-class HandoffVerifyResult {
+class HandoffHTTPVerifyResult {
   int result_;
   long http_code_;
   std::string query_url_;
 
 public:
-  HandoffVerifyResult()
+  HandoffHTTPVerifyResult()
       : result_ { -1 }
       , http_code_ { 0 }
       , query_url_ { "" }
   {
   }
-  HandoffVerifyResult(int result, long http_code, std::string query_url = "")
+  HandoffHTTPVerifyResult(int result, long http_code, std::string query_url = "")
       : result_ { result }
       , http_code_ { http_code }
       , query_url_ { query_url }
   {
   }
   // No copy or copy-assignment.
-  HandoffVerifyResult(const HandoffVerifyResult& other) = delete;
-  HandoffVerifyResult& operator=(const HandoffVerifyResult& other) = delete;
+  HandoffHTTPVerifyResult(const HandoffHTTPVerifyResult& other) = delete;
+  HandoffHTTPVerifyResult& operator=(const HandoffHTTPVerifyResult& other) = delete;
   // Trivial move and move-assignment.
-  HandoffVerifyResult(HandoffVerifyResult&& other) = default;
-  HandoffVerifyResult& operator=(HandoffVerifyResult&& other) = default;
+  HandoffHTTPVerifyResult(HandoffHTTPVerifyResult&& other) = default;
+  HandoffHTTPVerifyResult& operator=(HandoffHTTPVerifyResult&& other) = default;
 
   int result() const noexcept { return result_; }
   long http_code() const noexcept { return http_code_; }
@@ -390,14 +390,14 @@ class HandoffHelperImpl {
 
 public:
   // Signature of the alternative verify function,  used only for testing.
-  using VerifyFunc = std::function<HandoffVerifyResult(const DoutPrefixProvider*, const std::string&, ceph::bufferlist*, optional_yield)>;
+  using HTTPVerifyFunc = std::function<HandoffHTTPVerifyResult(const DoutPrefixProvider*, const std::string&, ceph::bufferlist*, optional_yield)>;
   using chan_lock_t = std::shared_mutex;
 
 private:
   // Ceph configuration observer.
   HandoffConfigObserver<HandoffHelperImpl> config_obs_;
 
-  const std::optional<VerifyFunc> verify_func_;
+  const std::optional<HTTPVerifyFunc> http_verify_func_;
   rgw::sal::Store* store_;
 
   // The gRPC channel pointer needs to be behind a mutex.
@@ -425,11 +425,11 @@ public:
    * mechanism. Used by test harnesses.
    *
    * @param v A function to replace the HTTP client callout. This must mimic
-   * the inputs and outputs of the \p verify_standard() function.
+   * the inputs and outputs of the \p http_verify_standard() function.
    */
-  HandoffHelperImpl(VerifyFunc v)
+  HandoffHelperImpl(HTTPVerifyFunc v)
       : config_obs_ { *this }
-      , verify_func_ { v }
+      , http_verify_func_ { v }
   {
   }
 
@@ -453,6 +453,8 @@ public:
 
   /**
    * @brief Set the gRPC channel URI.
+   *
+   * This is used by init() and by the config observer.
    *
    * @param grpc_uri
    * @return true on success.
