@@ -26,9 +26,17 @@ enum RequestMethod {
 //
 message AuthorizationParameters
 {
+  // The HTTP request method.
   RequestMethod method = 1;
+
+  // The bucket name, or empty if none.
   string bucket_name = 2;
+
+  // The object key name, or empty if none.
   string object_key_name = 3;
+
+  // Request HTTP headers, as a map from header name to header value.
+  map<string, string> http_headers = 5;
 }
 
 // An authentication request to the Auth() service call.
@@ -116,5 +124,6 @@ message StatusRequest
 // Response for the Status() rpc.
 message StatusResponse
 {
+  // A arbitrary string describing the server implementation.
   string server_description = 1;
 }
