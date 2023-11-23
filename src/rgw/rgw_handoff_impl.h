@@ -19,8 +19,6 @@
 #ifndef RGW_HANDOFF_IMPL_H
 #define RGW_HANDOFF_IMPL_H
 
-#include "acconfig.h"
-
 #include <functional>
 #include <iosfwd>
 #include <shared_mutex>
@@ -35,7 +33,6 @@
 #include <grpcpp/security/server_credentials.h>
 
 #include "common/async/yield_context.h"
-#include "common/ceph_context.h"
 #include "common/config_obs.h"
 #include "common/dout.h"
 #include "rgw/rgw_common.h"
@@ -423,7 +420,7 @@ private:
   // The gRPC channel pointer needs to be behind a mutex.
   std::shared_mutex m_channel_;
   std::shared_ptr<grpc::Channel> channel_;
-  grpc::ChannelArguments channel_args_;
+  std::optional<grpc::ChannelArguments> channel_args_;
   std::string channel_uri_;
 
 public:
@@ -474,7 +471,9 @@ public:
   /**
    * @brief Set the gRPC channel URI.
    *
-   * This is used by init() and by the config observer.
+   * This is used by init() and by the config observer. If no channel
+   * arguments have been set via set_channel_args(), this will set them to the
+   * default values (via get_default_channel_args).
    *
    * @param grpc_uri
    * @return true on success.
@@ -576,7 +575,23 @@ public:
       optional_yield y);
 
   /**
+   * @brief Get our default grpc::ChannelArguments value.
+   *
+   * When calling set_channel_args(), you should first call this function to
+   * get application defaults, and then modify the settings you need.
+   *
+   * Currently the backoff timers are set here, based on configuration
+   * variables. These are runtime-alterable, but have sensible defaults.
+   *
+   * @return grpc::ChannelArguments A default set of channel arguments.
+   */
+  grpc::ChannelArguments get_default_channel_args(CephContext* const cct);
+
+  /**
    * @brief Set custom gRPC channel arguments. Intended for testing.
+   *
+   * You should modify the default channel arguments obtained with
+   * get_default_channel_args(). Don't start from scratch.
    *
    * Keep this simple. If you set vtable args you'll need to worry about the
    * lifetime of those is longer than the HandoffHelperImpl object that will
@@ -584,10 +599,10 @@ public:
    *
    * @param args A populated grpc::ChannelArguments object.
    */
-  void set_channel_args(const grpc::ChannelArguments& args)
+  void set_channel_args(CephContext* const cct, grpc::ChannelArguments& args)
   {
     std::unique_lock l { m_channel_ };
-    channel_args_ = args;
+    channel_args_ = std::make_optional(args);
   }
 
   /**

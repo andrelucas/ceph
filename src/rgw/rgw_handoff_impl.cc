@@ -43,9 +43,14 @@
 
 #include "include/ceph_assert.h"
 
+#include "common/debug.h"
 #include "common/dout.h"
-#include "rgw/rgw_http_client_curl.h"
+#include "rgw/rgw_b64.h"
+#include "rgw/rgw_client_io.h"
+#include "rgw/rgw_common.h"
+#include "rgw/rgw_http_client.h"
 
+#define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rgw
 
 namespace ba = boost::algorithm;
@@ -372,6 +377,9 @@ const char** HandoffConfigObserver<HandoffHelperImpl>::get_tracked_conf_keys() c
 {
   static const char* keys[] = {
     "rgw_handoff_enable_signature_v2",
+    "rgw_handoff_grpc_arg_initial_reconnect_backoff_ms",
+    "rgw_handoff_grpc_arg_max_reconnect_backoff_ms",
+    "rgw_handoff_grpc_arg_min_reconnect_backoff_ms",
     "rgw_handoff_grpc_uri",
     nullptr
   };
@@ -382,7 +390,14 @@ template <>
 void HandoffConfigObserver<HandoffHelperImpl>::handle_conf_change(const ConfigProxy& conf,
     const std::set<std::string>& changed)
 {
-  dout(20) << __PRETTY_FUNCTION__ << dendl;
+  dout(20) << "HandoffConfigObserver::" << __func__ << dendl;
+
+  // You should bundle any gRPC arguments changes into this first block.
+  if (changed.count("rgw_handoff_grpc_arg_initial_reconnect_backoff_ms") || changed.count("rgw_handoff_grpc_arg_max_reconnect_backoff_ms") || changed.count("rgw_handoff_grpc_arg_min_reconnect_backoff_ms")) {
+    auto args = helper_.get_default_channel_args(cct_);
+    helper_.set_channel_args(cct_, args);
+  }
+  // The gRPC channel change needs to come after the arguments setting, if any.
   if (changed.count("rgw_handoff_grpc_uri")) {
     helper_.set_channel_uri(cct_, conf->rgw_handoff_grpc_uri);
   }
@@ -487,6 +502,8 @@ static std::optional<std::string> synthesize_v4_header(const DoutPrefixProvider*
 int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Store* store, const std::string& grpc_uri)
 {
   store_ = store;
+
+  ceph_assert(cct != nullptr);
   config_obs_.init(cct);
 
   // Set up some state variables based on configuration. Most of these are not
@@ -499,6 +516,8 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Store* store, cons
     auto uri = grpc_uri.empty() ? cct->_conf->rgw_handoff_grpc_uri : grpc_uri;
 
     // Will use rgw_handoff_grpc_uri, which is runtime-alterable.
+    // set_channel_uri() will fetch default channel args if none have been set
+    // beforehand.
     if (!set_channel_uri(cct, uri)) {
       // This is unlikely, but no gRPC channel in gRPC mode is a fatal error.
       throw new std::runtime_error("Failed to create initial gRPC channel");
@@ -510,7 +529,7 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Store* store, cons
 
   // rgw_handoff_enable_presigned_expiry_check is not runtime-alterable.
   presigned_expiry_check_ = cct->_conf->rgw_handoff_enable_presigned_expiry_check;
-  ldout(cct, 1) << "HandoffHelperImpl::init(): Presigned URL expiry check " << (presigned_expiry_check_ ? "enabled" : "disabled") << dendl;
+  ldout(cct, 5) << "HandoffHelperImpl::init(): Presigned URL expiry check " << (presigned_expiry_check_ ? "enabled" : "disabled") << dendl;
 
   // rgw_handoff_enable_signature_v2 is runtime-alterable.
   set_signature_v2(cct, cct->_conf->rgw_handoff_enable_signature_v2);
@@ -518,13 +537,36 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Store* store, cons
   return 0; // Return value is ignored.
 }
 
+grpc::ChannelArguments HandoffHelperImpl::get_default_channel_args(CephContext* const cct)
+{
+  grpc::ChannelArguments args;
+
+  // Set our default backoff parameters. These are runtime-alterable.
+  args.SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, cct->_conf->rgw_handoff_grpc_arg_initial_reconnect_backoff_ms);
+  args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS, cct->_conf->rgw_handoff_grpc_arg_max_reconnect_backoff_ms);
+  args.SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, cct->_conf->rgw_handoff_grpc_arg_min_reconnect_backoff_ms);
+  ldout(cct, 20) << fmt::format(FMT_STRING("HandoffHelperImpl::{}: reconnect_backoff(ms): initial/min/max={}/{}/{}"),
+      __func__,
+      cct->_conf->rgw_handoff_grpc_arg_initial_reconnect_backoff_ms,
+      cct->_conf->rgw_handoff_grpc_arg_min_reconnect_backoff_ms,
+      cct->_conf->rgw_handoff_grpc_arg_max_reconnect_backoff_ms)
+                 << dendl;
+
+  return grpc::ChannelArguments();
+}
+
 bool HandoffHelperImpl::set_channel_uri(CephContext* const cct, const std::string& new_uri)
 {
   std::unique_lock<chan_lock_t> g(m_channel_);
+  if (!channel_args_) {
+    auto args = get_default_channel_args(cct);
+    // Don't use set_channel_args(), which takes lock m_channel_.
+    channel_args_ = std::make_optional(std::move(args));
+  }
   // XXX grpc::InsecureChannelCredentials()...
-  auto new_channel = grpc::CreateCustomChannel(new_uri, grpc::InsecureChannelCredentials(), channel_args_);
+  auto new_channel = grpc::CreateCustomChannel(new_uri, grpc::InsecureChannelCredentials(), *channel_args_);
   if (!new_channel) {
-    ldout(cct, 0) << "ERROR: HandoffHelperImpl::set_channel_uri(): Failed to create new gRPC channel " << new_uri << dendl;
+    ldout(cct, 0) << "HandoffHelperImpl::set_channel_uri(): ERROR: Failed to create new gRPC channel " << new_uri << dendl;
     return false;
   } else {
     ldout(cct, 1) << "HandoffHelperImpl::set_channel_uri(" << new_uri << ") success" << dendl;
@@ -536,7 +578,7 @@ bool HandoffHelperImpl::set_channel_uri(CephContext* const cct, const std::strin
 
 void HandoffHelperImpl::set_signature_v2(CephContext* const cct, bool enabled)
 {
-  ldout(cct, 1) << "HandoffHelperImpl: set_signature_v2(" << enabled << ")" << dendl;
+  ldout(cct, 1) << "HandoffHelperImpl: set_signature_v2(" << (enabled ? "true" : "false") << ")" << dendl;
   enable_signature_v2_ = enabled;
 }
 

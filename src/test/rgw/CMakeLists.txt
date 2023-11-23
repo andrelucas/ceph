@@ -214,7 +214,6 @@ add_executable(unittest_rgw_auth_handoff
   test_rgw_grpc_util.h
 )
 add_ceph_unittest(unittest_rgw_auth_handoff)
-
 target_link_libraries(unittest_rgw_auth_handoff ${rgw_libs})
 
 add_executable(ceph_test_rgw_gc_log test_rgw_gc_log.cc $<TARGET_OBJECTS:unit-main>)

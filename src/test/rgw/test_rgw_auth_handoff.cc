@@ -25,7 +25,10 @@
 #include "common/ceph_argparse.h"
 #include "common/ceph_json.h"
 #include "common/dout.h"
+#include "common/strtol.h"
+#include "global/global_context.h"
 #include "global/global_init.h"
+#include "include/ceph_assert.h"
 #include "rgw/rgw_b64.h"
 #include "rgw/rgw_client_io.h"
 #include "rgw/rgw_handoff.h"
@@ -436,8 +439,6 @@ public:
 
 /* #endregion */
 
-} // namespace
-
 using namespace rgw;
 
 /*
@@ -847,7 +848,7 @@ TEST_F(HandoffHelperImplGRPCTest, HeaderExpectBadSignature)
 }
 
 // This is hardcoded in the library, you can't configure a reconnect delay
-// less than 100ms. (grpc src/core/ext/filters/client_channel/subchannel.sc
+// less than 100ms. (grpc src/core/ext/filters/client_channel/subchannel.cc
 // function ParseArgsForBackoffValues().) This allows five more milliseconds.
 //
 constexpr int SMALLEST_RECONNECT_DELAY_MS = 105;
@@ -855,15 +856,18 @@ constexpr int SMALLEST_RECONNECT_DELAY_MS = 105;
 // Check the system doesn't fail if started with a non-functional auth server.
 TEST_F(HandoffHelperImplGRPCTest, ChannelRecoversFromDeadAtStartup)
 {
+  ceph_assert(g_ceph_context != nullptr);
   // Set everything to 1ms. As descrived for SMALLEST_RECONNECT_DELAY_MS,
   // we'll still have to wait 100ms + a few more millis for any reconnect.
-  grpc::ChannelArguments args;
+  auto args = hh_.get_default_channel_args(g_ceph_context);
   args.SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, 1);
   args.SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, 1);
   args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS, 1);
-  args.SetInt("grpc.testing.fixed_fixed_reconnect_backoff_ms", 0);
+  // // This is an alternate means of setting the reconnect delay, but it too
+  // // bounded below at 100ms by the library.
+  // args.SetInt("grpc.testing.fixed_fixed_reconnect_backoff_ms", 0);
   // Program the helper's channel.
-  hh_.set_channel_args(args);
+  hh_.set_channel_args(dpp_.get_cct(), args);
 
   helper_init();
   TestClient cio;
@@ -967,9 +971,9 @@ class HandoffHelperImplSubsysTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
-    dpp.get_cct()->_conf.set_val_or_die("rgw_handoff_enable_grpc", "false");
-    dpp.get_cct()->_conf.apply_changes(nullptr);
-    ASSERT_EQ(dpp.get_cct()->_conf->rgw_handoff_enable_grpc, false);
+    // dpp.get_cct()->_conf.set_val_or_die("rgw_handoff_enable_grpc", "false");
+    // dpp.get_cct()->_conf.apply_changes(nullptr);
+    ASSERT_EQ(dpp.get_cct()->_conf->rgw_handoff_enable_grpc, true);
     ASSERT_EQ(hh.init(g_ceph_context, nullptr), 0);
   }
 
@@ -1153,6 +1157,8 @@ TEST_F(HandoffHelperImplSubsysTest, AuthorizationParamConstruct)
   }
 }
 
+} // namespace rgw
+
 // main() cribbed from test_http_manager.cc
 
 int main(int argc, char** argv)
@@ -1165,9 +1171,13 @@ int main(int argc, char** argv)
   rgw_http_client_init(cct->get());
   rgw_setup_saved_curl_handles();
 
-  if (std::getenv("TEST_VERBOSE")) {
-    // This will raise the library logging level to max.
-    g_ceph_context->_conf->subsys.set_log_level(ceph_subsys_rgw, 20);
+  // Let the caller change the library debug level.
+  if (std::getenv("TEST_DEBUG")) {
+    std::string err;
+    int level = strict_strtol(std::getenv("TEST_DEBUG"), 10, &err);
+    if (err.empty()) {
+      g_ceph_context->_conf->subsys.set_log_level(ceph_subsys_rgw, std::min(level, 30));
+    }
   }
 
   ::testing::InitGoogleTest(&argc, argv);
