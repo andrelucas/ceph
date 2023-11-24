@@ -505,6 +505,7 @@ if(WITH_RADOSGW)
       gRPC
       GIT_REPOSITORY https://github.com/grpc/grpc
       GIT_TAG v1.54.3
+      GIT_SHALLOW ON
     )
     set(FETCHCONTENT_QUIET OFF)
     FetchContent_MakeAvailable(gRPC)
