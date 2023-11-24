@@ -363,22 +363,23 @@ if(WITH_RADOSGW_GRPC)
 
   # For the main library, generate rgw_grpc_genobj with the compiled gRPC and
   # protobuf code.
-  add_library(rgw_grpc_genobj ${rgw_grpc_gen_sources})
-  target_link_libraries(rgw_grpc_genobj PUBLIC grpc++)
-  target_include_directories(rgw_grpc_genobj PUBLIC "${BUFGEN_DIRECTORY}")
-
-  # For unit tests, generate rgw_grpc_test_genobj with the compiled gRPC and
-  # protobuf code.
-  add_library(rgw_grpc_test_genobj ${rgw_grpc_gen_test_sources})
-  target_link_libraries(rgw_grpc_test_genobj PUBLIC grpc++)
-  target_include_directories(rgw_grpc_test_genobj PUBLIC "${BUFGEN_DIRECTORY}")
+  add_library(rgw_grpc_genobj
+    ${rgw_grpc_gen_sources}
+    ${rgw_grpc_gen_test_sources}
+  )
+  target_link_libraries(rgw_grpc_genobj
+    PRIVATE grpc++
+  )
+  target_include_directories(rgw_grpc_genobj
+    PUBLIC "${BUFGEN_DIRECTORY}"
+  )
 
   # Make sure libraries and binary tools are built, as well as the gRPC
   # and protobuf compiled code. Tests will need to specify
   # rgw_grpc_test_genobj themselves - don't link these into the main library.
   add_dependencies(rgw_common rgw_grpc_genobj)
 
-  target_link_libraries(rgw_common PUBLIC grpc++ rgw_grpc_genobj)
+  target_link_libraries(rgw_common PUBLIC rgw_grpc_genobj grpc++)
 endif()
 
 set(rgw_a_srcs

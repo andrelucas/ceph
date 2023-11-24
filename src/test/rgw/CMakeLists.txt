@@ -250,7 +250,6 @@ add_executable(unittest_rgw_grpc
 )
 add_ceph_unittest(unittest_rgw_grpc)
 target_link_libraries(unittest_rgw_grpc
-  rgw_grpc_test_genobj
   ${UNITTEST_LIB}
   ${rgw_libs}
 )
