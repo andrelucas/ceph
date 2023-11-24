@@ -161,11 +161,22 @@ AuthorizationParameters::AuthorizationParameters(const DoutPrefixProvider* dpp_i
 std::string AuthorizationParameters::to_string() const noexcept
 {
   if (valid()) {
+    std::string hdr;
+    if (http_headers_.empty()) {
+      hdr = "none";
+    } else {
+      std::vector<std::string> h;
+      for (const auto& kv : http_headers_) {
+        h.emplace_back(fmt::format(FMT_STRING("{}{},"), kv.first, kv.second));
+      }
+      hdr = fmt::format(FMT_STRING("[{}]"), fmt::join(h, ","));
+    }
     return fmt::format(
-        "AuthorizationParameters(method={},bucket={},key_present={})",
+        FMT_STRING("AuthorizationParameters(method={},bucket={},key_present={},http_headers={})"),
         method(),
         bucket_name(),
-        object_key_name().empty() ? "false" : "true");
+        object_key_name().empty() ? "false" : "true",
+        hdr);
   } else {
     return "AuthorizationParameters(INVALID)";
   }
