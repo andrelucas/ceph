@@ -9,10 +9,7 @@
  *
  */
 
-#include <chrono>
-#include <iostream>
 #include <memory>
-#include <thread>
 
 #include <absl/random/random.h>
 #include <fmt/format.h>
@@ -25,7 +22,6 @@
 
 #include "test_rgw_grpc_util.h"
 
-#include "rgw/auth/v1/auth.grpc.pb.h"
 #include "rgw/test/v1/test_rgw_grpc.grpc.pb.h"
 
 using namespace ::rgw::test::v1;
