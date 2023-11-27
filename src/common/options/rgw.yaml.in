@@ -896,6 +896,32 @@ options:
   services:
   - rgw
   with_legacy: true
+- name: rgw_handoff_authparam_always
+  type: bool
+  level: advanced
+  desc: Always pass authorization parameters to the authentication service.
+  long_desc: If enabled, the authentication service will always be passed
+    authorization parameters by Handoff, regardless of the details of the
+    request.
+  default: true
+  services:
+  - rgw
+  flags:
+  - runtime
+  with_legacy: true
+- name: rgw_handoff_authparam_withtoken
+  type: bool
+  level: advanced
+  desc: Send authorization parameters on receipt of an authorization token.
+  long_desc: If enabled, the authentication service will be passed
+    authorization parameters by Handoff if the request contains an
+    authorization token. Otherwise no authz parameters will be sent.
+  default: false
+  services:
+  - rgw
+  flags:
+  - runtime
+  with_legacy: true
 - name: rgw_handoff_enable_grpc
   type: bool
   level: advanced
