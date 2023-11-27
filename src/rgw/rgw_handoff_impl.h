@@ -355,14 +355,55 @@ std::ostream& operator<<(std::ostream& os, const AuthorizationParameters& ep);
 
 /****************************************************************************/
 
+enum class AuthParamMode {
+  NEVER,
+  WITHTOKEN,
+  ALWAYS
+};
+
+/**
+ * @brief Config Observer utility class for HandoffHelperImpl.
+ *
+ * This is constructed so as to make it feasible to mock the ConfigObserver
+ * interface. We can construct an instance of this class with a mocked helper,
+ * just so long as that mocked helper implements the proper signature. There's
+ * no way to formally specify the required signatures in advance in C++,
+ * compile-time polymorphism means running the SFINAE gauntlet.
+ *
+ * As of 20231127, T must implement (with the same signature as
+ * HandoffHelperImpl):
+ *   - get_default_channel_args()
+ *   - set_channel_args()
+ *   - set_channel_uri()
+ *   - set_signature_v2()
+ *   - set_authorization_mode()
+ *
+ * or it won't compile.
+ *
+ * @tparam T The HandoffHelperImpl-like class. The class has to implement the
+ * same configuration mutation methods as HandoffHelperImpl.
+ */
 template <typename T>
-class HandoffConfigObserver : public md_config_obs_t {
+class HandoffConfigObserver final : public md_config_obs_t {
 public:
+  /**
+   * @brief Construct a new Handoff Config Observer object with a
+   * backreference to the owning HandoffHelperImpl.
+   *
+   * @param helper
+   */
   explicit HandoffConfigObserver(T& helper)
       : helper_(helper)
   {
   }
 
+  // Don't allow a default construction without the helper_.
+  HandoffConfigObserver() = delete;
+
+  /**
+   * @brief Destructor. Remove the observer from the Ceph configuration system.
+   *
+   */
   ~HandoffConfigObserver()
   {
     if (cct_ && observer_added_) {
@@ -377,11 +418,60 @@ public:
     observer_added_ = true;
   }
 
+  /**
+   * @brief Read config and return the resultant AuthParamMode in effect.
+   *
+   * @param conf ConfigProxy reference.
+   * @return AuthParamMode the mode in effect based on system config.
+   */
+  AuthParamMode get_authorization_mode(const ConfigProxy& conf) const
+  {
+    if (conf->rgw_handoff_authparam_always) {
+      return AuthParamMode::ALWAYS;
+    } else if (conf->rgw_handoff_authparam_withtoken) {
+      return AuthParamMode::WITHTOKEN;
+    } else {
+      return AuthParamMode::NEVER;
+    }
+  }
+
   // Config observer. See notes in src/common/config_obs.h and for
   // ceph::md_config_obs_impl.
-  const char** get_tracked_conf_keys() const override;
+
+  const char** get_tracked_conf_keys() const
+  {
+    static const char* keys[] = {
+      "rgw_handoff_authparam_always",
+      "rgw_handoff_authparam_withtoken",
+      "rgw_handoff_enable_signature_v2",
+      "rgw_handoff_grpc_arg_initial_reconnect_backoff_ms",
+      "rgw_handoff_grpc_arg_max_reconnect_backoff_ms",
+      "rgw_handoff_grpc_arg_min_reconnect_backoff_ms",
+      "rgw_handoff_grpc_uri",
+      nullptr
+    };
+    return keys;
+  }
+
   void handle_conf_change(const ConfigProxy& conf,
-      const std::set<std::string>& changed) override;
+      const std::set<std::string>& changed)
+  {
+    // You should bundle any gRPC arguments changes into this first block.
+    if (changed.count("rgw_handoff_grpc_arg_initial_reconnect_backoff_ms") || changed.count("rgw_handoff_grpc_arg_max_reconnect_backoff_ms") || changed.count("rgw_handoff_grpc_arg_min_reconnect_backoff_ms")) {
+      auto args = helper_.get_default_channel_args(cct_);
+      helper_.set_channel_args(cct_, args);
+    }
+    // The gRPC channel change needs to come after the arguments setting, if any.
+    if (changed.count("rgw_handoff_grpc_uri")) {
+      helper_.set_channel_uri(cct_, conf->rgw_handoff_grpc_uri);
+    }
+    if (changed.count("rgw_handoff_enable_signature_v2")) {
+      helper_.set_signature_v2(cct_, conf->rgw_handoff_enable_signature_v2);
+    }
+    if (changed.count("rgw_handoff_authparam_always") || changed.count("rgw_handoff_authparam_withtoken")) {
+      helper_.set_authorization_mode(cct_, get_authorization_mode(conf));
+    }
+  }
 
 private:
   T& helper_;
@@ -399,7 +489,7 @@ private:
  *
  * In gRPC mode, holds long-lived state.
  */
-class HandoffHelperImpl {
+class HandoffHelperImpl final {
 
 public:
   // Signature of the alternative verify function,  used only for testing.
@@ -410,12 +500,18 @@ private:
   // Ceph configuration observer.
   HandoffConfigObserver<HandoffHelperImpl> config_obs_;
 
+  // This is a test helper for the HTTP mode only.
   const std::optional<HTTPVerifyFunc> http_verify_func_;
+
+  // The store should be constant throughout the lifetime of the helper.
   rgw::sal::Store* store_;
 
-  bool grpc_mode_ = true;
-  bool presigned_expiry_check_ = false;
-  bool enable_signature_v2_ = true;
+  // These are used in place of constantly querying the ConfigProxy.
+  std::shared_mutex m_config_;
+  bool grpc_mode_ = true; // Not runtime-alterable.
+  bool presigned_expiry_check_ = false; // Not runtime-alterable.
+  bool enable_signature_v2_ = true; // Runtime-alterable.
+  AuthParamMode authorization_mode_ = AuthParamMode::ALWAYS; // Runtime-alterable.
 
   // The gRPC channel pointer needs to be behind a mutex.
   std::shared_mutex m_channel_;
@@ -491,6 +587,14 @@ public:
   void set_signature_v2(CephContext* const cct, bool enabled);
 
   /**
+   * @brief Set the authorization mode for subsequent requests.
+   *
+   * @param cct CephContext pointer.
+   * @param mode The authorization mode.
+   */
+  void set_authorization_mode(CephContext* const cct, AuthParamMode mode);
+
+  /**
    * @brief Authenticate the transaction using the Handoff engine.
    * @param dpp Debug prefix provider. Points to the Ceph context.
    * @param session_token Unused by Handoff.
@@ -504,6 +608,11 @@ public:
    * associated with the access key.
    *
    * Perform request authentication via the external authenticator.
+   *
+   * auth() runs with shared lock of m_config_, so runtime-alterable
+   * configuration isn't undefined during a single authentication.
+   * Modifications to the affected runtime parameters are performed under a
+   * unique lock of m_config_.
    *
    * - Extract the Authorization header from the environment. This will be
    *   necessary to validate a v4 signature because we need some fields (date,

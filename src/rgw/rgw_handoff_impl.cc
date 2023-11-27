@@ -36,6 +36,7 @@
 #include <fmt/format.h>
 #include <iostream>
 #include <optional>
+#include <rgw_handoff.h>
 #include <string>
 #include <string_view>
 
@@ -383,40 +384,6 @@ static HandoffHTTPVerifyResult http_verify_standard(const DoutPrefixProvider* dp
 
 // Instantiate HandoffConfigObserver<T> for HandoffHelperImpl.
 
-template <>
-const char** HandoffConfigObserver<HandoffHelperImpl>::get_tracked_conf_keys() const
-{
-  static const char* keys[] = {
-    "rgw_handoff_enable_signature_v2",
-    "rgw_handoff_grpc_arg_initial_reconnect_backoff_ms",
-    "rgw_handoff_grpc_arg_max_reconnect_backoff_ms",
-    "rgw_handoff_grpc_arg_min_reconnect_backoff_ms",
-    "rgw_handoff_grpc_uri",
-    nullptr
-  };
-  return keys;
-}
-
-template <>
-void HandoffConfigObserver<HandoffHelperImpl>::handle_conf_change(const ConfigProxy& conf,
-    const std::set<std::string>& changed)
-{
-  dout(20) << "HandoffConfigObserver::" << __func__ << dendl;
-
-  // You should bundle any gRPC arguments changes into this first block.
-  if (changed.count("rgw_handoff_grpc_arg_initial_reconnect_backoff_ms") || changed.count("rgw_handoff_grpc_arg_max_reconnect_backoff_ms") || changed.count("rgw_handoff_grpc_arg_min_reconnect_backoff_ms")) {
-    auto args = helper_.get_default_channel_args(cct_);
-    helper_.set_channel_args(cct_, args);
-  }
-  // The gRPC channel change needs to come after the arguments setting, if any.
-  if (changed.count("rgw_handoff_grpc_uri")) {
-    helper_.set_channel_uri(cct_, conf->rgw_handoff_grpc_uri);
-  }
-  if (changed.count("rgw_handoff_enable_signature_v2")) {
-    helper_.set_signature_v2(cct_, conf->rgw_handoff_enable_signature_v2);
-  }
-}
-
 /****************************************************************************/
 
 /**
@@ -545,6 +512,9 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Store* store, cons
   // rgw_handoff_enable_signature_v2 is runtime-alterable.
   set_signature_v2(cct, cct->_conf->rgw_handoff_enable_signature_v2);
 
+  // The authparam mode is runtime-alterable.
+  set_authorization_mode(cct, config_obs_.get_authorization_mode(cct->_conf));
+
   return 0; // Return value is ignored.
 }
 
@@ -589,6 +559,7 @@ bool HandoffHelperImpl::set_channel_uri(CephContext* const cct, const std::strin
 
 void HandoffHelperImpl::set_signature_v2(CephContext* const cct, bool enabled)
 {
+  std::unique_lock<std::shared_mutex> g(m_config_);
   ldout(cct, 1) << "HandoffHelperImpl: set_signature_v2(" << (enabled ? "true" : "false") << ")" << dendl;
   enable_signature_v2_ = enabled;
 }
@@ -607,9 +578,33 @@ std::optional<std::string> HandoffHelperImpl::synthesize_auth_header(
   return std::nullopt;
 }
 
+/**
+ * @brief Return a string representation of an AuthorizationMode enum value.
+ *
+ * @param mode the Authorization mode.
+ * @return std::string A string representation of \p mode.
+ */
+static std::string authorization_mode_to_string(AuthParamMode mode)
+{
+  switch (mode) {
+  case AuthParamMode::ALWAYS:
+    return "ALWAYS";
+  case AuthParamMode::WITHTOKEN:
+    return "WITHTOKEN";
+  case AuthParamMode::NEVER:
+    return "NEVER";
+  }
+}
+
+void HandoffHelperImpl::set_authorization_mode(CephContext* const cct, AuthParamMode mode)
+{
+  std::unique_lock<std::shared_mutex> g(m_config_);
+  ldout(cct, 1) << "HandoffHelperImpl: set_authorization_mode(" << authorization_mode_to_string(mode) << ")" << dendl;
+  authorization_mode_ = mode;
+}
+
 static std::optional<time_t> get_v4_presigned_expiry_time(const DoutPrefixProvider* dpp, const req_state* s)
 {
-
   auto& argmap = s->info.args;
   auto maybe_date = argmap.get_optional("x-amz-date");
   if (!maybe_date) {
@@ -747,6 +742,9 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
   // uppercased and with underscores instead of hyphens.
   auto envmap = s->cio->get_env().get_map();
 
+  // Make sure runtime configuration is defined throughout this method.
+  std::shared_lock<std::shared_mutex> g(m_config_);
+
   // Retrieve the Authorization header if present. Otherwise, attempt to
   // synthesize one from the provided query parameters.
   std::string auth;
@@ -786,19 +784,23 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
 
   std::optional<AuthorizationParameters> authorization_param;
 
-  // Unconditionally attempt to gather authorization parameters.
-  // XXX is this wise? should we _always_ do this?
-  authorization_param = AuthorizationParameters(dpp, s);
-  // Log the result. It's safe to dereference the optional, as the constructor
-  // always returns an object (though it may be invalid w.r.t. its valid()
-  // method).
-  ldpp_dout(dpp, 20) << *authorization_param << dendl;
+  // The user can control when we send authorization parameters. Making it
+  // runtime configurable makes it trivial to eliminate this feature as a
+  // cause of performance problems.
+  //
+  if (authorization_mode_ == AuthParamMode::ALWAYS || (authorization_mode_ == AuthParamMode::WITHTOKEN && !session_token.empty())) {
+    authorization_param = AuthorizationParameters(dpp, s);
+    // Log the result. It's safe to dereference the optional, as the constructor
+    // always returns an object (though it may be invalid w.r.t. its valid()
+    // method).
+    ldpp_dout(dpp, 20) << *authorization_param << dendl;
 
-  if (!(authorization_param->valid())) {
-    // This shouldn't happen with a valid request. If it does, log it and
-    // re-nullopt the authorization parameters.
-    ldpp_dout(dpp, 0) << "AuthorizationParameters not available" << dendl;
-    authorization_param = std::nullopt;
+    if (!(authorization_param->valid())) {
+      // This shouldn't happen with a valid request. If it does, log it and
+      // re-nullopt the authorization parameters.
+      ldpp_dout(dpp, 0) << "AuthorizationParameters not available" << dendl;
+      authorization_param = std::nullopt;
+    }
   }
 
   // Depending on configuration, call the gRPC or HTTP arm to complete the

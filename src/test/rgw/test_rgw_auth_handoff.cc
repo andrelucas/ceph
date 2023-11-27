@@ -1022,6 +1022,171 @@ TEST_F(HandoffHelperImplSubsysTest, PresignedSynthesizeHeader)
   }
 }
 
+/* #region HandoffConfigObserver */
+
+/**
+ * @brief Mock the chunks of HandoffHelperImpl we need to check that the
+ * config observer is working properly.
+ *
+ * See the notes on HandoffConfigObserver<T> for more details. This class
+ * allows us to instantiate a config observer and make sure it's responding
+ * correctly to configuration changes.
+ */
+class MockHelperForConfigObserver final {
+public:
+  MockHelperForConfigObserver()
+      : observer_(*this)
+  {
+  }
+  ~MockHelperForConfigObserver() = default;
+
+  int init(CephContext* const cct)
+  {
+    return 0;
+  }
+  grpc::ChannelArguments get_default_channel_args(CephContext* const cct)
+  {
+    return grpc::ChannelArguments();
+  }
+  void set_channel_args(CephContext* const cct, const grpc::ChannelArguments& args) { channel_args_set_ = true; }
+  void set_channel_uri(CephContext* const cct, const std::string& uri) { channel_uri_ = uri; }
+  void set_signature_v2(CephContext* const cct, bool enable) { signature_v2_ = enable; }
+  void set_authorization_mode(CephContext* const cct, AuthParamMode mode) { authparam_mode_ = mode; }
+
+public:
+  HandoffConfigObserver<MockHelperForConfigObserver> observer_;
+  AuthParamMode authparam_mode_;
+  bool signature_v2_;
+  bool channel_args_set_ = false;
+  std::string channel_uri_;
+};
+
+/**
+ * @brief Test that the config observer is hooked up properly for runtime
+ * changes to variables we care about.
+ */
+class TestHandoffConfigObserver : public ::testing::Test {
+
+protected:
+  void SetUp() override
+  {
+    ASSERT_EQ(dpp_.get_cct()->_conf->rgw_handoff_enable_grpc, true);
+    ASSERT_EQ(hh_.init(g_ceph_context), 0);
+  }
+
+  MockHelperForConfigObserver hh_;
+  DoutPrefix dpp_ { g_ceph_context, ceph_subsys_rgw, "unittest " };
+};
+
+TEST_F(TestHandoffConfigObserver, Null)
+{
+}
+
+TEST_F(TestHandoffConfigObserver, SignatureV2Mode)
+{
+  // Parameters we'll 'change'.
+  std::set<std::string> changed { "rgw_handoff_enable_signature_v2" };
+
+  auto cct = dpp_.get_cct();
+  auto conf = cct->_conf;
+
+  conf->rgw_handoff_enable_signature_v2 = true;
+  hh_.observer_.handle_conf_change(conf, changed);
+  EXPECT_EQ(hh_.signature_v2_, true);
+
+  conf->rgw_handoff_enable_signature_v2 = false;
+  hh_.observer_.handle_conf_change(conf, changed);
+  EXPECT_EQ(hh_.signature_v2_, false);
+}
+
+// Test that the config change propagates to the helper. We're not parsing the
+// individual arg setting, that would mean essentially recreating the helper's
+// code in the mock which is pointless.
+//
+// In all the test cases we'll call handle_conf_change() directly. I had
+// problems getting the observer to work reliably in unit tests, whether I
+// just relied on 'automatic' change application, or if I directly called
+// conf.apply_changes(). It doesn't really matter - what we're testing here is
+// that if handle_conf_change() is called properly, then the configuration
+// will flow through to the helperimpl.
+//
+TEST_F(TestHandoffConfigObserver, GRPCChannelArgs)
+{
+  // Parameters we'll 'change'.
+  std::set<std::string> changed;
+
+  std::set<std::string> param = {
+    "rgw_handoff_grpc_arg_initial_reconnect_backoff_ms",
+    "rgw_handoff_grpc_arg_min_reconnect_backoff_ms",
+    "rgw_handoff_grpc_arg_max_reconnect_backoff_ms"
+  };
+
+  auto cct = dpp_.get_cct();
+  auto conf = cct->_conf;
+
+  for (const auto& p : param) {
+    hh_.channel_args_set_ = false;
+
+    conf->set_value(p, Option::value_t(1001), 1);
+    changed.clear();
+    changed.emplace(p);
+    hh_.observer_.handle_conf_change(conf, changed);
+    ASSERT_TRUE(hh_.channel_args_set_);
+  }
+}
+
+TEST_F(TestHandoffConfigObserver, GRPCURI)
+{
+  // Parameters we'll 'change'.
+  std::set<std::string> changed { "rgw_handoff_grpc_uri" };
+
+  auto cct = dpp_.get_cct();
+  auto conf = cct->_conf;
+
+  conf->rgw_handoff_grpc_uri = "foo";
+  hh_.observer_.handle_conf_change(conf, changed);
+  ASSERT_EQ(hh_.channel_uri_, "foo");
+}
+
+TEST_F(TestHandoffConfigObserver, AuthParamMode)
+{
+  // Parameters we'll 'change'.
+  std::set<std::string> changed { "rgw_handoff_authparam_always", "rgw_handoff_authparam_withtoken" };
+
+  auto cct = dpp_.get_cct();
+  auto conf = cct->_conf;
+
+  // Default -> 'ALWAYS'.
+  conf->rgw_handoff_authparam_always = true;
+  conf->rgw_handoff_authparam_withtoken = false;
+  hh_.observer_.handle_conf_change(conf, changed);
+  // hh_.set_authorization_mode(cct, hh_.observer_.get_authorization_mode(conf));
+  EXPECT_EQ(hh_.observer_.get_authorization_mode(conf), AuthParamMode::ALWAYS);
+
+  // Both set -> 'ALWAYS'.
+  conf->rgw_handoff_authparam_always = true;
+  conf->rgw_handoff_authparam_withtoken = true;
+  hh_.observer_.handle_conf_change(conf, changed);
+  // hh_.set_authorization_mode(cct, hh_.observer_.get_authorization_mode(conf));
+  EXPECT_EQ(hh_.observer_.get_authorization_mode(conf), AuthParamMode::ALWAYS);
+
+  // Partial -> 'WITHTOKEN'.
+  conf->rgw_handoff_authparam_always = false;
+  conf->rgw_handoff_authparam_withtoken = true;
+  hh_.observer_.handle_conf_change(conf, changed);
+  // hh_.set_authorization_mode(cct, hh_.observer_.get_authorization_mode(conf));
+  EXPECT_EQ(hh_.observer_.get_authorization_mode(conf), AuthParamMode::WITHTOKEN);
+
+  // Never -> 'NEVER'.
+  conf->rgw_handoff_authparam_always = false;
+  conf->rgw_handoff_authparam_withtoken = false;
+  hh_.observer_.handle_conf_change(conf, changed);
+  // hh_.set_authorization_mode(cct, hh_.observer_.get_authorization_mode(conf));
+  EXPECT_EQ(hh_.observer_.get_authorization_mode(conf), AuthParamMode::NEVER);
+}
+
+/* #endregion HandoffConfigObserver */
+
 /* #region PresignedExpiryData */
 
 struct PresignedExpiryData {
