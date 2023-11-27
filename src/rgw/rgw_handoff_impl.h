@@ -571,6 +571,9 @@ public:
    * arguments have been set via set_channel_args(), this will set them to the
    * default values (via get_default_channel_args).
    *
+   * Do not call from auth() unless you _know_ you've not taken a lock on
+   * m_config_!
+   *
    * @param grpc_uri
    * @return true on success.
    * @return false on failure.
@@ -582,12 +585,18 @@ public:
    *
    * I strongly recommend this remain enabled for broad client support.
    *
+   * Do not call from auth() unless you _know_ you've not taken a lock on
+   * m_config_!
+   *
    * @param enabled Whether or not V2 signatures should be allowed.
    */
   void set_signature_v2(CephContext* const cct, bool enabled);
 
   /**
    * @brief Set the authorization mode for subsequent requests.
+   *
+   * Do not call from auth() unless you _know_ you've not taken a lock on
+   * m_config_!
    *
    * @param cct CephContext pointer.
    * @param mode The authorization mode.
@@ -705,6 +714,9 @@ public:
    * Keep this simple. If you set vtable args you'll need to worry about the
    * lifetime of those is longer than the HandoffHelperImpl object that will
    * store a copy of the ChannelArguments object.
+   *
+   * Do not call from auth() unless you _know_ you've not taken a lock on
+   * m_config_!
    *
    * @param args A populated grpc::ChannelArguments object.
    */
