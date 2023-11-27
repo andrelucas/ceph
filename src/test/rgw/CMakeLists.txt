@@ -216,6 +216,12 @@ add_executable(unittest_rgw_auth_handoff
 add_ceph_unittest(unittest_rgw_auth_handoff)
 target_link_libraries(unittest_rgw_auth_handoff ${rgw_libs})
 
+# unittest_rgw_storequery
+add_executable(unittest_rgw_storequery test_rgw_storequery.cc)
+add_ceph_unittest(unittest_rgw_storequery)
+
+target_link_libraries(unittest_rgw_storequery ${rgw_libs})
+
 add_executable(ceph_test_rgw_gc_log test_rgw_gc_log.cc $<TARGET_OBJECTS:unit-main>)
 target_link_libraries(ceph_test_rgw_gc_log ${rgw_libs} radostest-cxx)
 install(TARGETS ceph_test_rgw_gc_log DESTINATION ${CMAKE_INSTALL_BINDIR})

@@ -35,6 +35,7 @@
 #include "rgw_rest_s3website.h"
 #include "rgw_rest_pubsub.h"
 #include "rgw_auth_s3.h"
+#include "rgw_rest_storequery.h"
 #include "rgw_acl.h"
 #include "rgw_policy_s3.h"
 #include "rgw_user.h"
@@ -4434,6 +4435,20 @@ void RGWGetBucketPublicAccessBlock_ObjStore_S3::send_response()
 
 RGWOp *RGWHandler_REST_Service_S3::op_get()
 {
+  if (isSQEnabled) {
+    // Check for StoreQuery GET commands.
+    RGWHandler_REST_StoreQuery_S3 sq_handler(auth_registry, RGWSQHandlerType::Service);
+    sq_handler.init(store, s, s->cio);
+    try {
+      auto op = sq_handler.get_op();
+      if (op != nullptr) {
+        return op;
+      }
+    } catch (int) {
+      // If we threw an exception, we want processing to stop.
+      return nullptr;
+    }
+  }
   if (is_usage_op()) {
     return new RGWGetUsage_ObjStore_S3;
   } else {
@@ -4534,7 +4549,20 @@ RGWOp *RGWHandler_REST_Bucket_S3::op_get()
     return new RGWGetBucketMetaSearch_ObjStore_S3;
   }
 
-  if (is_acl_op()) {
+  if (enable_storequery) {
+    // Check for StoreQuery GET commands.
+    RGWHandler_REST_StoreQuery_S3 sq_handler(auth_registry, RGWSQHandlerType::Bucket);
+    sq_handler.init(store, s, s->cio);
+    try {
+      auto op = sq_handler.get_op();
+      if (op != nullptr) {
+        return op;
+      }
+    } catch (int) {
+      // If we threw an exception, we want processing to stop.
+      return nullptr;
+    }
+  } else if (is_acl_op()) {
     return new RGWGetACLs_ObjStore_S3;
   } else if (is_cors_op()) {
     return new RGWGetCORS_ObjStore_S3;
@@ -4684,7 +4712,20 @@ RGWOp *RGWHandler_REST_Obj_S3::get_obj_op(bool get_data)
 
 RGWOp *RGWHandler_REST_Obj_S3::op_get()
 {
-  if (is_acl_op()) {
+  if (enable_storequery_) {
+    // Check for StoreQuery GET commands.
+    RGWHandler_REST_StoreQuery_S3 sq_handler(auth_registry, RGWSQHandlerType::Obj);
+    sq_handler.init(store, s, s->cio);
+    try {
+      auto op = sq_handler.get_op();
+      if (op != nullptr) {
+        return op;
+      }
+    } catch (int) {
+      // If we threw an exception, we want processing to stop.
+      return nullptr;
+    }
+  } else if (is_acl_op()) {
     return new RGWGetACLs_ObjStore_S3;
   } else if (s->info.args.exists("uploadId")) {
     return new RGWListMultipart_ObjStore_S3;
@@ -5087,13 +5128,13 @@ RGWHandler_REST* RGWRESTMgr_S3::get_handler(rgw::sal::Store* store,
     }
   } else {
     if (s->init_state.url_bucket.empty()) {
-      handler = new RGWHandler_REST_Service_S3(auth_registry, enable_sts, enable_iam, enable_pubsub);
+      handler = new RGWHandler_REST_Service_S3(auth_registry, enable_sts, enable_iam, enable_pubsub, enable_storequery);
     } else if (!rgw::sal::Object::empty(s->object.get())) {
-      handler = new RGWHandler_REST_Obj_S3(auth_registry);
+      handler = new RGWHandler_REST_Obj_S3(auth_registry, enable_storequery);
     } else if (s->info.args.exist_obj_excl_sub_resource()) {
       return NULL;
     } else {
-      handler = new RGWHandler_REST_Bucket_S3(auth_registry, enable_pubsub);
+      handler = new RGWHandler_REST_Bucket_S3(auth_registry, enable_pubsub, enable_storequery);
     }
   }
 
