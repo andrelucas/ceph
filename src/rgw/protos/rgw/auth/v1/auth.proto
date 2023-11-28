@@ -37,6 +37,17 @@ message AuthorizationParameters
 
   // Request HTTP headers, as a map from header name to header value.
   map<string, string> http_headers = 5;
+
+  // The canonicalised request URI path. In RGW this is the `request_uri`
+  // field in struct req_info. Note that this is normalised; if the request
+  // was in virtual host form, the bucket name will have been prepended to
+  // this path.
+  string http_request_path = 6;
+
+  // The request query parameters as parsed by RGW in
+  // RGWHandler_REST_S3::init_from_header(). Note these are URL decoded
+  // already.
+  map<string, string> http_query_parameters = 7;
 }
 
 // An authentication request to the Auth() service call.
