@@ -254,6 +254,8 @@ private:
   std::string bucket_name_;
   std::string object_key_name_;
   std::unordered_map<std::string, std::string> http_headers_;
+  std::string http_request_path_;
+  std::unordered_map<std::string, std::string> http_query_params_;
 
   void valid_check() const
   {
@@ -344,7 +346,31 @@ public:
    */
   const std::unordered_map<std::string, std::string>& http_headers() const
   {
+    valid_check();
     return http_headers_;
+  }
+
+  /**
+   * @brief Return the http request path (req_info.request_uri).
+   *
+   * @return std::string the request path.
+   */
+  std::string http_request_path() const
+  {
+    valid_check();
+    return http_request_path_;
+  }
+
+  /**
+   * @brief Return a const reference to the map of HTTP query parameters.
+   *
+   * @return const std::unordered_map<std::string, std::string>& A read-only
+   * reference to the HTTP query parameters map.
+   */
+  const std::unordered_map<std::string, std::string>& http_query_params() const
+  {
+    valid_check();
+    return http_query_params_;
   }
 
   friend std::ostream& operator<<(std::ostream& os, const AuthorizationParameters& ep);
