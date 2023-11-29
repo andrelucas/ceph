@@ -1127,7 +1127,7 @@ TEST_F(TestHandoffConfigObserver, GRPCChannelArgs)
   for (const auto& p : param) {
     hh_.channel_args_set_ = false;
 
-    conf->set_value(p, Option::value_t(1001), 1);
+    conf.set_val_or_die(p, "1001");
     changed.clear();
     changed.emplace(p);
     hh_.observer_.handle_conf_change(conf, changed);
