@@ -42,6 +42,8 @@
 
 #include <time.h>
 
+#include "absl/strings/numbers.h"
+#include "absl/time/time.h"
 #include "include/ceph_assert.h"
 
 #include "common/dout.h"
@@ -632,7 +634,7 @@ void HandoffHelperImpl::set_authorization_mode(CephContext* const cct, AuthParam
   authorization_mode_ = mode;
 }
 
-static std::optional<time_t> get_v4_presigned_expiry_time(const DoutPrefixProvider* dpp, const req_state* s)
+static std::optional<time_t> get_v4_presigned_expiry_time(const DoutPrefixProvider* dpp, const req_state* s) noexcept
 {
   auto& argmap = s->info.args;
   auto maybe_date = argmap.get_optional("x-amz-date");
@@ -648,32 +650,25 @@ static std::optional<time_t> get_v4_presigned_expiry_time(const DoutPrefixProvid
   }
 
   std::string date = std::move(*maybe_date);
-  struct tm tm;
-  memset(&tm, 0, sizeof(struct tm));
-  char* p = strptime(date.c_str(), "%Y%m%dT%H%M%SZ", &tm);
-  if (p == nullptr || *p != 0) {
-    ldpp_dout(dpp, 0) << "Failed to parse x-amz-date parameter" << dendl;
-    return std::nullopt;
-  }
-  time_t param_time = mktime(&tm);
-  if (param_time == (time_t)-1) {
-    ldpp_dout(dpp, 0) << "Error converting x-amz-date to unix time: " << strerror(errno) << dendl;
-    return std::nullopt;
-  }
-
-  time_t expiry_time = param_time;
   std::string delta = std::move(*maybe_expires_delta);
-  try {
-    expiry_time += static_cast<time_t>(std::stoi(delta));
-  } catch (std::exception& _) {
-    ldpp_dout(dpp, 20) << "Failed to parse x-amz-expires" << dendl;
+
+  absl::Time param_time;
+  std::string err;
+  if (!absl::ParseTime("%E4Y%m%d%ET%H%M%S%Ez", date, &param_time, &err)) {
+    ldpp_dout(dpp, 0) << "Failed to parse x-amz-date time '" << date << "': " << err << dendl;
     return std::nullopt;
   }
-  ldpp_dout(dpp, 20) << __func__ << fmt::format(": x-amz-date {}, delta {} -> unix time {}, expiry time {}", date, delta, param_time, expiry_time) << dendl;
-  return std::make_optional(expiry_time);
+  int delta_seconds = 0;
+  if (!absl::SimpleAtoi(delta, &delta_seconds)) {
+    ldpp_dout(dpp, 20) << "Failed to parse x-amz-expires='" << delta << "'" << dendl;
+  }
+  auto expiry_time = param_time + absl::Seconds(delta_seconds);
+  auto expiry = absl::ToTimeT(expiry_time);
+  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: x-amz-date {}, delta {} -> expiry time {}"), __func__, date, delta, expiry) << dendl;
+  return std::make_optional(expiry);
 }
 
-static std::optional<time_t> get_v2_presigned_expiry_time(const DoutPrefixProvider* dpp, const req_state* s)
+static std::optional<time_t> get_v2_presigned_expiry_time(const DoutPrefixProvider* dpp, const req_state* s) noexcept
 {
   auto& argmap = s->info.args;
   auto maybe_expires = argmap.get_optional("Expires");
