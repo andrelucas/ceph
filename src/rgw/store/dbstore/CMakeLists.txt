@@ -17,7 +17,10 @@ set(dbstore_mgr_srcs
     )
 
 add_library(dbstore_lib ${dbstore_srcs})
-target_include_directories(dbstore_lib PUBLIC "${CMAKE_SOURCE_DIR}/src/fmt/include")
+## Commented out fmt includes: This is wrong if we're using the system fmtlib, which is installed by
+## install-deps.sh. If we're not using the system fmtlib, we build it and
+## install it ourselves, and we should use target_link_libraries(... fmt::fmt) instead.
+#target_include_directories(dbstore_lib PUBLIC "${CMAKE_SOURCE_DIR}/src/fmt/include")
 target_include_directories(dbstore_lib PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw")
 set(link_targets spawn)
 if(WITH_JAEGER)
