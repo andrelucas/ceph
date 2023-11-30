@@ -66,7 +66,7 @@ class HandoffDoutPrefixPipe : public DoutPrefixPipe {
 public:
   HandoffDoutPrefixPipe(const DoutPrefixProvider& dpp, const std::string& prefix)
       : DoutPrefixPipe { dpp }
-      , prefix_ { fmt::format("{}: ", prefix) }
+      , prefix_ { fmt::format(FMT_STRING("{}: "), prefix) }
   {
   }
   virtual void add_prefix(std::ostream& out) const override final
@@ -100,7 +100,7 @@ public:
    */
   HandoffDoutStateProvider(const DoutPrefixProvider& dpp, const req_state* s)
       : HandoffDoutPrefixPipe {
-        dpp, fmt::format("HandoffEngine trans_id={}", s->trans_id)
+        dpp, fmt::format(FMT_STRING("HandoffEngine trans_id={}"), s->trans_id)
       } {};
 };
 

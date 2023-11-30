@@ -728,9 +728,9 @@ bool HandoffHelperImpl::valid_presigned_time(const DoutPrefixProvider* dpp, cons
     ldpp_dout(dpp, 0) << "Unable to extract presigned URL expiry time from query parameters" << dendl;
     return false;
   }
-  ldpp_dout(dpp, 20) << fmt::format("Presigned URL last valid second {} now {}", *maybe_expiry_time, now) << dendl;
+  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("Presigned URL last valid second {} now {}"), *maybe_expiry_time, now) << dendl;
   if (*maybe_expiry_time < now) {
-    ldpp_dout(dpp, 0) << fmt::format("Presigned URL expired - last valid second {} now {}", *maybe_expiry_time, now) << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("Presigned URL expired - last valid second {} now {}"), *maybe_expiry_time, now) << dendl;
     return false;
   }
   return true;
@@ -778,8 +778,8 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
 
   ceph_assert(s->cio != nullptr); // Give a helpful message to unit tests.
 
-  ldpp_dout(dpp, 1) << fmt::format(
-      "init: access_key_id='{}' session_token_present={} decoded_uri='{}' domain={}",
+  ldpp_dout(dpp, 1) << fmt::format(FMT_STRING(
+                                       "init: access_key_id='{}' session_token_present={} decoded_uri='{}' domain={}"),
       access_key_id,
       session_token.empty() ? "false" : "true",
       s->decoded_uri,
@@ -927,13 +927,13 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp_in
   // The client returns a fully-populated HandoffAuthResult, but we want to
   // issue some helpful log messages before returning it.
   if (result.is_ok()) {
-    ldpp_dout(dpp, 0) << fmt::format("Success (access_key_id='{}', uid='{}')", access_key_id, result.userid()) << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("Success (access_key_id='{}', uid='{}')"), access_key_id, result.userid()) << dendl;
   } else {
     if (result.err_type() == HandoffAuthResult::error_type::TRANSPORT_ERROR) {
-      ldpp_dout(dpp, 0) << fmt::format("authentication attempt failed: {}", result.message()) << dendl;
+      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("authentication attempt failed: {}"), result.message()) << dendl;
     } else {
       ldpp_dout(dpp, 0) << fmt::format(
-          "Authentication service returned failure (access_key_id='{}', code={}, message='{}')",
+          FMT_STRING("Authentication service returned failure (access_key_id='{}', code={}, message='{}')"),
           access_key_id, result.code(), result.message())
                         << dendl;
     }
@@ -967,10 +967,10 @@ HandoffAuthResult HandoffHelperImpl::_http_auth(const DoutPrefixProvider* dpp,
   }
 
   if (vres.result() < 0) {
-    ldpp_dout(dpp, 0) << fmt::format("handoff verify HTTP request failed with exit code {} ({})", vres.result(), strerror(-vres.result()))
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("handoff verify HTTP request failed with exit code {} ({})"), vres.result(), strerror(-vres.result()))
                       << dendl;
     return HandoffAuthResult(-EACCES,
-        fmt::format("Handoff HTTP request failed with code {} ({})", vres.result(), strerror(-vres.result())),
+        fmt::format(FMT_STRING("Handoff HTTP request failed with code {} ({})"), vres.result(), strerror(-vres.result())),
         HandoffAuthResult::error_type::TRANSPORT_ERROR);
   }
 
@@ -984,7 +984,7 @@ HandoffAuthResult HandoffHelperImpl::_http_auth(const DoutPrefixProvider* dpp,
   // Return an error, but only after attempting to parse the response
   // for a useful error message.
   auto status = vres.http_code();
-  ldpp_dout(dpp, 20) << fmt::format("fetch '{}' status {}", vres.query_url(), status) << dendl;
+  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("fetch '{}' status {}"), vres.query_url(), status) << dendl;
 
   // These error code responses mimic rgw_auth_keystone.cc.
   switch (status) {
@@ -995,10 +995,10 @@ HandoffAuthResult HandoffHelperImpl::_http_auth(const DoutPrefixProvider* dpp,
   case 404:
     return HandoffAuthResult(-ERR_INVALID_ACCESS_KEY, resp.message);
   case RGWHTTPClient::HTTP_STATUS_NOSTATUS:
-    ldpp_dout(dpp, 5) << fmt::format("Handoff fetch '{}' unknown status {}", vres.query_url(), status) << dendl;
+    ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("Handoff fetch '{}' unknown status {}"), vres.query_url(), status) << dendl;
     return HandoffAuthResult(-EACCES, resp.message);
   default:
-    ldpp_dout(dpp, 0) << fmt::format("Handoff fetch '{}' returned unexpected HTTP status code {}", status) << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("Handoff fetch '{}' returned unexpected HTTP status code {}"), vres.query_url(), status) << dendl;
     return HandoffAuthResult(-EACCES, resp.message);
   }
 }

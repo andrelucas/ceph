@@ -102,9 +102,9 @@ public:
   std::string to_string() const noexcept
   {
     if (is_err()) {
-      return fmt::format("error={} message={}", errorcode_, message_);
+      return fmt::format(FMT_STRING("error={} message={}"), errorcode_, message_);
     } else {
-      return fmt::format("userid='{}' message={}", userid_, message_);
+      return fmt::format(FMT_STRING("userid='{}' message={}"), userid_, message_);
     }
   }
 
