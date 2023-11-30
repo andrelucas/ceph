@@ -262,6 +262,8 @@ if(WITH_RADOSGW_DBSTORE)
 endif()
 
 if(WITH_RADOSGW_GRPC)
+  target_link_libraries(rgw_common PUBLIC absl::strings absl::time)
+
   include(RGWgRPC)
 
   # This is all the machinery for dealing with generating gRPC and protobuf

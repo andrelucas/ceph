@@ -497,6 +497,9 @@ if(WITH_RADOSGW)
       set("gRPC_BUILD_GRPC_${l}_PLUGIN" OFF CACHE INTERNAL "")
     endforeach(l)
 
+    set(old_CMAKE_CXX_STANDARD ${CMAKE_CXX_STANDARD})
+    set(CMAKE_CXX_STANDARD 17)
+
     # See: https://grpc.io/blog/cmake-improvements/
     # Note: 20231106 v1.54.3 is the latest that configures correctly, any
     # later results in CMake errors.
@@ -509,6 +512,8 @@ if(WITH_RADOSGW)
     )
     set(FETCHCONTENT_QUIET OFF)
     FetchContent_MakeAvailable(gRPC)
+    set(CMAKE_CXX_STANDARD ${old_CMAKE_CXX_STANDARD})
+
   endif(WITH_RADOSGW_GRPC)
 endif (WITH_RADOSGW)
 
