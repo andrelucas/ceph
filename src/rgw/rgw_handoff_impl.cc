@@ -634,16 +634,29 @@ void HandoffHelperImpl::set_authorization_mode(CephContext* const cct, AuthParam
   authorization_mode_ = mode;
 }
 
+/**
+ * @brief Deduce the AWS V4 presigned URL expiry time.
+ *
+ * The V4 expiry calculation is more complex than V2. The request time is
+ * provided in the x-amz-date parameter, and the expiry time delta is provided
+ * in the x-amz-expires parameter. We have to parse the x-amz-date string into
+ * a time, then add the delta to get the expiry time.
+ *
+ * @param dpp DoutPrefixProvider.
+ * @param s The request.
+ * @return std::optional<time_t> The expiry time as a time_t value, or nullopt
+ * if the value could not be deduced.
+ */
 static std::optional<time_t> get_v4_presigned_expiry_time(const DoutPrefixProvider* dpp, const req_state* s) noexcept
 {
   auto& argmap = s->info.args;
   auto maybe_date = argmap.get_optional("x-amz-date");
   if (!maybe_date) {
-    ldpp_dout(dpp, 0) << "Missing x-amz-date parameter" << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}:  Missing x-amz-date parameter"), __func__) << dendl;
   }
   auto maybe_expires_delta = argmap.get_optional("x-amz-expires");
   if (!maybe_expires_delta) {
-    ldpp_dout(dpp, 0) << "Missing x-amz-expires parameter" << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: Missing x-amz-expires parameter"), __func__) << dendl;
   }
   if (!(maybe_date && maybe_expires_delta)) {
     return std::nullopt;
@@ -654,13 +667,16 @@ static std::optional<time_t> get_v4_presigned_expiry_time(const DoutPrefixProvid
 
   absl::Time param_time;
   std::string err;
+  // absl::ParseTime()'s format has some extensions to strftime(3). The %E4Y is
+  // a 4-digit year, %ET is the 'T' separator, and %Ez is the timezone spec
+  // which in Abseil can be the 'Z' indicating UTC.
   if (!absl::ParseTime("%E4Y%m%d%ET%H%M%S%Ez", date, &param_time, &err)) {
-    ldpp_dout(dpp, 0) << "Failed to parse x-amz-date time '" << date << "': " << err << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: Failed to parse x-amz-date time '{}': {}"), __func__, date, err) << dendl;
     return std::nullopt;
   }
   int delta_seconds = 0;
   if (!absl::SimpleAtoi(delta, &delta_seconds)) {
-    ldpp_dout(dpp, 20) << "Failed to parse x-amz-expires='" << delta << "'" << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: Failed to parse int from x-amz-expires='{}'"), __func__, delta) << dendl;
   }
   auto expiry_time = param_time + absl::Seconds(delta_seconds);
   auto expiry = absl::ToTimeT(expiry_time);
@@ -668,24 +684,33 @@ static std::optional<time_t> get_v4_presigned_expiry_time(const DoutPrefixProvid
   return std::make_optional(expiry);
 }
 
+/**
+ * @brief Extract the AWS V2 presigned URL expiry time.
+ *
+ * V2 expiry times are really straightforward - they're just a UNIX timestamp
+ * after which the request is invalid.
+ *
+ * @param dpp DoutPrefixProvider.
+ * @param s The request.
+ * @return std::optional<time_t> The expiry time as a time_t value, or nullopt
+ * if the value could not be extracted.
+ */
 static std::optional<time_t> get_v2_presigned_expiry_time(const DoutPrefixProvider* dpp, const req_state* s) noexcept
 {
   auto& argmap = s->info.args;
   auto maybe_expires = argmap.get_optional("Expires");
   if (!maybe_expires) {
-    ldpp_dout(dpp, 0) << "Missing Expiry parameter" << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: Missing Expires parameter"), __func__) << dendl;
     return std::nullopt;
   }
 
-  auto expiry_time_str = maybe_expires.value();
+  auto expiry_time_str = std::move(*maybe_expires);
   time_t expiry_time;
-  try {
-    expiry_time = std::stol(expiry_time_str, nullptr, 10);
-  } catch (std::exception& _) {
-    ldpp_dout(dpp, 0) << "Failed to parse presigned URL expiry time" << dendl;
-    return false;
+  if (!absl::SimpleAtoi(expiry_time_str, &expiry_time)) {
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("Failed to parse int from Expires='{}'"), __func__, expiry_time_str) << dendl;
+    return std::nullopt;
   }
-  ldpp_dout(dpp, 20) << __func__ << ": expiry time " << expiry_time << dendl;
+  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: expiry time "), __func__, expiry_time) << dendl;
   return std::make_optional(expiry_time);
 }
 
