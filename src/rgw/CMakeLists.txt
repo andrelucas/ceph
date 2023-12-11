@@ -61,6 +61,8 @@ set(librgw_common_srcs
   rgw_bucket.cc
   rgw_bucket_layout.cc
   rgw_bucket_sync.cc
+  rgw_bucketname.cc
+  rgw_bucketname_impl.cc
   rgw_cache.cc
   rgw_d3n_datacache.cc
   rgw_common.cc
@@ -275,6 +277,7 @@ if(WITH_RADOSGW_GRPC)
   # EDIT THIS to specify .proto source files. Omit the '.proto' suffix!
   set(grpc_source
     rgw/auth/v1/auth
+    rgw/bucketname/v1/bucketname
   )
 
   # EDIT THIS to specify test .proto source files. Omit the '.proto suffix!

@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package rgw.bucketname.v1;
+
+service BucketNameService
+{
+  rpc NewBucketNameAllocate(NewBucketNameAllocateRequest) returns (NewBucketNameAllocateResponse);
+  rpc NewBucketNameAbort(NewBucketNameAbortRequest) returns (NewBucketNameAbortResponse);
+  rpc NewBucketNameConfirm(NewBucketNameConfirmRequest) returns (NewBucketNameConfirmResponse);
+}
+
+message NewBucketNameAllocateRequest { }
+
+message NewBucketNameAllocateResponse
+{
+}
+
+message NewBucketNameAbortRequest { }
+
+message NewBucketNameAbortResponse
+{
+}
+
+message NewBucketNameConfirmRequest
+{
+}
+
+message NewBucketNameConfirmResponse
+{
+}
