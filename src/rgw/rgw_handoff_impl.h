@@ -536,6 +536,8 @@ private:
   std::shared_mutex m_config_;
   bool grpc_mode_ = true; // Not runtime-alterable.
   bool presigned_expiry_check_ = false; // Not runtime-alterable.
+  bool enable_anonymous_handoff_ = true; // Not runtime-alterable. XXX not configured yet.
+
   bool enable_signature_v2_ = true; // Runtime-alterable.
   AuthParamMode authorization_mode_ = AuthParamMode::ALWAYS; // Runtime-alterable.
 

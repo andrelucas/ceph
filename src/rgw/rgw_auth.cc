@@ -935,6 +935,9 @@ void rgw::auth::RoleApplier::modify_request_state(const DoutPrefixProvider *dpp,
 rgw::auth::Engine::result_t
 rgw::auth::AnonymousEngine::authenticate(const DoutPrefixProvider* dpp, const req_state* const s, optional_yield y) const
 {
+  // // XXX XXX
+  // return result_t::deny(-EPERM);
+
   if (! is_applicable(s)) {
     return result_t::deny(-EPERM);
   } else {

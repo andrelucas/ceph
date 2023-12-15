@@ -95,7 +95,7 @@ get_canon_resource(const DoutPrefixProvider *dpp, const char* const request_uri,
     if (iter == std::end(sub_resources)) {
       continue;
     }
-    
+
     if (initial) {
       dest.append("?");
       initial = false;
@@ -136,7 +136,7 @@ void rgw_create_s3_canonical_header(
     dest = method;
   }
   dest.append("\n");
-  
+
   if (content_md5) {
     dest.append(content_md5);
   }
@@ -982,6 +982,19 @@ get_v2_signature(CephContext* const cct,
   }
 }
 
+// XXX Copy get_v2_signature() and remove the guts.
+AWSEngine::VersionAbstractor::server_signature_t
+get_none_signature(CephContext* const cct,
+    [[maybe_unused]] const std::string& secret_key,
+    [[maybe_unused]] const AWSEngine::VersionAbstractor::string_to_sign_t& string_to_sign)
+{
+  char buf[1];
+  const int len = 0;
+  buf[0] = 0;
+  using srv_signature_t = AWSEngine::VersionAbstractor::server_signature_t;
+  return srv_signature_t(buf, len);
+}
+
 bool AWSv4ComplMulti::ChunkMeta::is_new_chunk_in_stream(size_t stream_pos) const
 {
   return stream_pos >= (data_offset_in_stream + data_length);
@@ -1154,7 +1167,7 @@ size_t AWSv4ComplMulti::recv_body(char* const buf, const size_t buf_max)
   size_t to_extract = \
     std::min(chunk_meta.get_data_size(stream_pos_was), buf_max);
   dout(30) << "AWSv4ComplMulti: stream_pos_was=" << stream_pos_was << ", to_extract=" << to_extract << dendl;
-  
+
   /* It's quite probable we have a couple of real data bytes stored together
    * with meta-data in the parsing_buf. We need to extract them and move to
    * the final buffer. This is a trade-off between frontend's read overhead

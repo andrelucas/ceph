@@ -1,9 +1,10 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab ft=cpp
 
-#include <errno.h>
 #include <array>
+#include <errno.h>
 #include <mutex>
+#include <rgw_common.h>
 #include <string.h>
 #include <string_view>
 
@@ -5400,8 +5401,10 @@ AWSGeneralAbstractor::get_auth_data(const req_state* const s) const
   } else if (version == AwsVersion::V4) {
     return get_auth_data_v4(s, route == AwsRoute::QUERY_STRING);
   } else {
-    /* FIXME(rzarzynski): handle anon user. */
-    throw -EINVAL;
+    // XXX
+    return get_auth_data_none(s);
+    // /* FIXME(rzarzynski): handle anon user. */
+    // throw -EINVAL;
   }
 }
 
@@ -5857,6 +5860,19 @@ AWSGeneralAbstractor::get_auth_data_v2(const req_state* const s) const
   };
 }
 
+// XXX copy get_auth_data_v2 and remove its guts.
+AWSEngine::VersionAbstractor::auth_data_t
+AWSGeneralAbstractor::get_auth_data_none(const req_state* const s) const
+{
+  return {
+    "",
+    "",
+    "",
+    "",
+    rgw::auth::s3::get_none_signature,
+    null_completer_factory
+  };
+}
 
 AWSEngine::VersionAbstractor::auth_data_t
 AWSBrowserUploadAbstractor::get_auth_data_v2(const req_state* const s) const
@@ -5921,18 +5937,18 @@ AWSEngine::authenticate(const DoutPrefixProvider* dpp, const req_state* const s,
   /* Small reminder: an ver_abstractor is allowed to throw! */
   const auto auth_data = ver_abstractor.get_auth_data(s);
 
-  if (auth_data.access_key_id.empty() || auth_data.client_signature.empty()) {
-    return result_t::deny(-EINVAL);
-  } else {
-    return authenticate(dpp,
-                        auth_data.access_key_id,
-		        auth_data.client_signature,
-			auth_data.session_token,
-			auth_data.string_to_sign,
-                        auth_data.signature_factory,
-			auth_data.completer_factory,
-			s, y);
-  }
+  // if (auth_data.access_key_id.empty() || auth_data.client_signature.empty()) {
+  //   return result_t::deny(-EINVAL);
+  // } else {
+  return authenticate(dpp,
+      auth_data.access_key_id,
+      auth_data.client_signature,
+      auth_data.session_token,
+      auth_data.string_to_sign,
+      auth_data.signature_factory,
+      auth_data.completer_factory,
+      s, y);
+  // }
 }
 
 } // namespace rgw::auth::s3
@@ -6132,14 +6148,25 @@ rgw::auth::s3::HandoffEngine::authenticate(
     return result_t::deny(-auth_result.code());
   }
 
-  // Pass a placeholder secret in the token. We don't need the actual secret key.
-  auto access_key_token = RGWToken(RGWToken::TOKEN_HANDOFF, auth_result.userid(), "NOTSPECIFIED");
-  // This will create an rgw::auth::RemoteApplier.
-  // The applier may create the user if it doesn't exist locally, however for
-  // Handoff this can be disabled via config if desired.
-  auto apl = apl_factory->create_apl_remote(cct, s, get_acl_strategy(),
-                                            get_creds_info(access_key_token));
-  return result_t::grant(std::move(apl), completer_factory(boost::none));
+  if (auth_result.is_anonymous()) {
+    RGWUserInfo user_info;
+    rgw_get_anon_user(user_info);
+
+    auto access_key_token = RGWToken(RGWToken::TOKEN_HANDOFF, user_info.user_id.id, "");
+
+    auto apl = apl_factory->create_apl_remote(cct, s, get_acl_strategy(), get_creds_info(access_key_token));
+    return result_t::grant(std::move(apl));
+
+  } else {
+    // Pass a placeholder secret in the token. We don't need the actual secret key.
+    auto access_key_token = RGWToken(RGWToken::TOKEN_HANDOFF, auth_result.userid(), "NOTSPECIFIED");
+    // This will create an rgw::auth::RemoteApplier.
+    // The applier may create the user if it doesn't exist locally, however for
+    // Handoff this can be disabled via config if desired.
+    auto apl = apl_factory->create_apl_remote(cct, s, get_acl_strategy(),
+        get_creds_info(access_key_token));
+    return result_t::grant(std::move(apl), completer_factory(boost::none));
+  }
 } /* rgw::auth::s3::HandoffEngine::authenticate */
 
 void rgw::auth::s3::HandoffEngine::shutdown() {

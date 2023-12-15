@@ -648,6 +648,12 @@ extern AWSEngine::VersionAbstractor::server_signature_t
 get_v2_signature(CephContext*,
                  const std::string& secret_key,
                  const AWSEngine::VersionAbstractor::string_to_sign_t& string_to_sign);
+
+extern AWSEngine::VersionAbstractor::server_signature_t
+get_none_signature(CephContext*,
+    const std::string& secret_key,
+    const AWSEngine::VersionAbstractor::string_to_sign_t& string_to_sign);
+
 } /* namespace s3 */
 } /* namespace auth */
 } /* namespace rgw */

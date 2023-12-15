@@ -47,6 +47,7 @@
 #include "include/ceph_assert.h"
 
 #include "common/dout.h"
+#include "rgw/auth/v1/auth.pb.h"
 #include "rgw/rgw_b64.h"
 #include "rgw/rgw_client_io.h"
 #include "rgw/rgw_common.h"
@@ -253,7 +254,11 @@ HandoffAuthResult AuthServiceClient::parse_auth_response(const AuthRequest& req,
   // These codes match rgw_auth_keystone.cc (and the HTTP arm of this object).
   switch (resp->code()) {
   case auth_v1::AUTH_CODE_OK:
-    return HandoffAuthResult(resp->uid(), resp->message());
+    if (resp->user_type() == rgw::auth::v1::AUTH_USER_TYPE_ANONYMOUS) {
+      return HandoffAuthResult(HandoffAuthResult::user_type::ANONYMOUS, resp->message());
+    } else {
+      return HandoffAuthResult(resp->uid(), resp->message());
+    }
   case auth_v1::AUTH_CODE_UNAUTHORIZED:
     return HandoffAuthResult(-ERR_SIGNATURE_NO_MATCH, resp->message());
   case auth_v1::AUTH_CODE_NOTFOUND:
@@ -808,26 +813,37 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
     if (maybe_auth) {
       auth = std::move(*maybe_auth);
       ldpp_dout(dpp, 20) << "Synthesized Authorization=" << auth << dendl;
-    } else {
-      ldpp_dout(dpp, 0) << "Missing Authorization header and insufficient query parameters" << dendl;
-      return HandoffAuthResult(-EACCES, "Internal error (missing Authorization and insufficient query parameters)");
-    }
-    if (presigned_expiry_check_) {
-      // Belt-and-braces: Check the expiry time. Note that RGW won't (in
-      // v17.2.6) pass this to authenticate() (and so auth()); it checks the
-      // expiry time early. Let's not assume things.
-      if (!valid_presigned_time(dpp, s, time(nullptr))) {
-        ldpp_dout(dpp, 0) << "Presigned URL expiry check failed" << dendl;
-        return HandoffAuthResult(-EACCES, "Presigned URL expiry check failed");
+
+      if (presigned_expiry_check_) {
+        // Belt-and-braces: Check the expiry time. Note that RGW won't (in
+        // v17.2.6) pass this to authenticate() (and so auth()); it checks the
+        // expiry time early. Let's not assume things.
+        if (!valid_presigned_time(dpp, s, time(nullptr))) {
+          ldpp_dout(dpp, 0) << "Presigned URL expiry check failed" << dendl;
+          return HandoffAuthResult(-EACCES, "Presigned URL expiry check failed");
+        }
       }
     }
   }
 
-  // We might have disabled V2 signatures.
-  if (!enable_signature_v2_) {
-    if (ba::starts_with(auth, "AWS ")) {
-      ldpp_dout(dpp, 0) << "V2 signatures are disabled, returning failure" << dendl;
-      return HandoffAuthResult(-EACCES, "Access denied (V2 signatures disabled)");
+  if (!auth.empty()) {
+    // We might have disabled V2 signatures.
+    if (!enable_signature_v2_) {
+      if (ba::starts_with(auth, "AWS ")) {
+        ldpp_dout(dpp, 0) << "V2 signatures are disabled, returning failure" << dendl;
+        return HandoffAuthResult(-EACCES, "Access denied (V2 signatures disabled)");
+      }
+    }
+  } else {
+    // We've not found or created an Authorization header, but if our
+    // configuration allows us to continue in 'anonymous' mode, we can still
+    // call handoff and see if we authorize the anonymous request.
+    if (!enable_anonymous_handoff_) {
+      ldpp_dout(dpp, 0) << "Missing Authorization header and insufficient query parameters" << dendl;
+      return HandoffAuthResult(-EACCES, "Internal error (missing Authorization and insufficient query parameters)");
+    } else {
+      ldpp_dout(dpp, 1) << "Authorization header information absent, will attempt anonymous handoff" << dendl;
+      ldpp_dout(dpp, 0) << "XXX XXX" << dendl;
     }
   }
 
@@ -877,10 +893,15 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp_in
   rgw::auth::v1::AuthRequest req;
   // Fill in the request protobuf. Seem to have to create strings from
   // string_view, which is a shame.
-  req.set_access_key_id(std::string { access_key_id });
-  req.set_authorization_token_header(std::string { session_token });
-  req.set_string_to_sign(std::string { string_to_sign });
-  req.set_authorization_header(auth);
+  if (access_key_id.empty()) {
+    req.set_user_type(rgw::auth::v1::AUTH_USER_TYPE_ANONYMOUS);
+  } else {
+    req.set_user_type(rgw::auth::v1::AUTH_USER_TYPE_UNSPECIFIED);
+    req.set_access_key_id(std::string { access_key_id });
+    req.set_authorization_token_header(std::string { session_token });
+    req.set_string_to_sign(std::string { string_to_sign });
+    req.set_authorization_header(auth);
+  }
 
   // If we got authorization parameters, fill them in.
   if (authorization_param) {
