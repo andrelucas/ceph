@@ -539,7 +539,8 @@ private:
   bool enable_signature_v2_ = true; // Runtime-alterable.
   AuthParamMode authorization_mode_ = AuthParamMode::ALWAYS; // Runtime-alterable.
 
-  // The gRPC channel pointer needs to be behind a mutex.
+  // The gRPC channel pointer needs to be behind a mutex. Changing channel_,
+  // channel_args_ or channel_uri_ must be under a unique lock of m_channel_.
   std::shared_mutex m_channel_;
   std::shared_ptr<grpc::Channel> channel_;
   std::optional<grpc::ChannelArguments> channel_args_;
