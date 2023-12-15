@@ -50,6 +50,25 @@ message AuthorizationParameters
   map<string, string> http_query_parameters = 7;
 }
 
+// The type of user in question. For a request, this is used to inform the
+// authentication service that the request being authorised is anonymous, i.e.
+// no authentication is possible or requested.
+//
+// For a response, this is used to inform RGW that the response is to an
+// anonymous request, and that no authentication was performed.
+//
+// This is used to check for logical errors; the caller should check that the
+// response type matches the request type, and fail the operation if they do
+// not match.
+//
+enum AuthUserType {
+  // This is the default, a regular user.
+  AUTH_USER_TYPE_UNSPECIFIED = 0;
+
+  // The user is anonymous, i.e. not authenticated, but may be authorised.
+  AUTH_USER_TYPE_ANONYMOUS = 1;
+}
+
 // An authentication request to the Auth() service call.
 //
 // This closely mirrors
@@ -59,6 +78,13 @@ message AuthorizationParameters
 //
 message AuthRequest
 {
+  // The user type. If AUTH_USER_TYPE_ANONYMOUS, then the request is
+  // (obviously) anonymous, so does not require authentication. In that case,
+  // the values of most other authentication parameters are irrelevant (and
+  // should be empty). However, AuthroizationParameters should still be sent,
+  // otherwise there's no value in using Handoff.
+  AuthUserType user_type = 6;
+
   // The stringToSign as defined by AWS.
   string string_to_sign = 1;
 
@@ -115,6 +141,11 @@ enum AuthCode {
 //
 message AuthResponse
 {
+  // The user type. Typically this will be AUTH_USER_TYPE_UNSPECIFIED for
+  // regular users, but anonymous requests will (unsurprisingly) have
+  // AUTH_USER_TYPE_ANONYMOUS.
+  AuthUserType user_type = 4;
+
   // The uid associated with the original request. RGW absolutely requires
   // this to be properly set.
   string uid = 1;
