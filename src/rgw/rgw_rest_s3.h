@@ -1145,7 +1145,7 @@ public:
  * in a separate class as it stands.
  */
 class HandoffEngine : public AWSEngine {
-  static rgw::HandoffHelper* handoff_helper;
+  static std::shared_ptr<HandoffHelper> handoff_helper;
   static std::mutex mtx;
 
   /**
