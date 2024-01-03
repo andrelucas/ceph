@@ -500,6 +500,10 @@ if(WITH_RADOSGW)
     set(old_CMAKE_CXX_STANDARD ${CMAKE_CXX_STANDARD})
     set(CMAKE_CXX_STANDARD 17)
 
+    # See: https://github.com/protocolbuffers/protobuf/issues/12185
+    set(old_ABSL_ENABLE_INSTALL ${ABSL_ENABLE_INSTALL})
+    set(ABSL_ENABLE_INSTALL ON CACHE INTERNAL "")
+
     # See: https://grpc.io/blog/cmake-improvements/
     # Note: 20231106 v1.54.3 is the latest that configures correctly, any
     # later results in CMake errors.
@@ -507,13 +511,14 @@ if(WITH_RADOSGW)
     FetchContent_Declare(
       gRPC
       GIT_REPOSITORY https://github.com/grpc/grpc
-      GIT_TAG v1.54.3
+      GIT_TAG v1.59.3
       GIT_SHALLOW ON
     )
     set(FETCHCONTENT_QUIET OFF)
     FetchContent_MakeAvailable(gRPC)
-    set(CMAKE_CXX_STANDARD ${old_CMAKE_CXX_STANDARD})
 
+    set(CMAKE_CXX_STANDARD ${old_CMAKE_CXX_STANDARD})
+    set(ABSL_ENABLE_INSTALL ${old_ABSL_ENABLE_INSTALL} CACHE INTERNAL "")
   endif(WITH_RADOSGW_GRPC)
 endif (WITH_RADOSGW)
 
