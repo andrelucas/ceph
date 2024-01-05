@@ -625,6 +625,7 @@ static std::string authorization_mode_to_string(AuthParamMode mode)
   case AuthParamMode::NEVER:
     return "NEVER";
   }
+  return "UNKNOWN";
 }
 
 void HandoffHelperImpl::set_authorization_mode(CephContext* const cct, AuthParamMode mode)
