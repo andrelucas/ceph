@@ -502,11 +502,14 @@ if(WITH_RADOSGW)
 
     # See: https://github.com/protocolbuffers/protobuf/issues/12185
     set(old_ABSL_ENABLE_INSTALL ${ABSL_ENABLE_INSTALL})
-    set(ABSL_ENABLE_INSTALL ON CACHE INTERNAL "")
+    set(ABSL_ENABLE_INSTALL ON)
 
     # See: https://grpc.io/blog/cmake-improvements/
-    # Note: 20231106 v1.54.3 is the latest that configures correctly, any
-    # later results in CMake errors.
+    # Note: As soon as we can rely on having CMake >= 3.25, add 'SYSTEM' to
+    # the list of FetchContent_Declare arguments, so the gRPC (and related)
+    # includes are added as system includes. This cuts down on the number of
+    # annoying and irrelevant compiler warnings you'll see.
+    #
     include(FetchContent)
     FetchContent_Declare(
       gRPC
@@ -518,7 +521,8 @@ if(WITH_RADOSGW)
     FetchContent_MakeAvailable(gRPC)
 
     set(CMAKE_CXX_STANDARD ${old_CMAKE_CXX_STANDARD})
-    set(ABSL_ENABLE_INSTALL ${old_ABSL_ENABLE_INSTALL} CACHE INTERNAL "")
+    set(ABSL_ENABLE_INSTALL ${old_ABSL_ENABLE_INSTALL})
+
   endif(WITH_RADOSGW_GRPC)
 endif (WITH_RADOSGW)
 
