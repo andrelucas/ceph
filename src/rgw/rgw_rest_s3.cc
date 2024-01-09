@@ -6059,12 +6059,17 @@ std::shared_ptr<rgw::HandoffHelper> rgw::auth::s3::HandoffEngine::handoff_helper
 
 void rgw::auth::s3::HandoffEngine::init(CephContext* const cct, rgw::sal::Store* store)
 {
+  static std::once_flag logged_presence;
   if (!cct->_conf->rgw_s3_auth_use_handoff) {
+    std::call_once(logged_presence, [&]() {
+      ldout(cct, 1) << "Akamai Handoff Authentication present but disabled" << dendl;
+    });
     return;
   }
 
   static std::once_flag hhinit;
   std::call_once(hhinit, [&]() {
+    ldout(cct, 1) << "Akamai Handoff Authentication present and enabled" << dendl;
     handoff_helper = std::make_shared<rgw::HandoffHelper>();
     handoff_helper->init(cct, store);
   });
