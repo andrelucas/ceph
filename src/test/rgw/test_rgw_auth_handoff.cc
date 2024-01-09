@@ -232,7 +232,7 @@ static boost::regex re_v4_auth { "^AWS4-HMAC-SHA256\\sCredential=(?<accesskey>[0
  */
 static std::optional<std::string> verify_aws_v4_signature(std::string string_to_sign, std::string access_key_id, std::string secret_key, std::string authorization)
 {
-  // std::cerr << fmt::format("get_aws_v4_hash(): string_to_sign='{}' access_key_id='{}' secret_key='{}' authorization='{}'", string_to_sign, access_key_id, secret_key, authorization) << std::endl;
+  // std::cerr << fmt::format(FMT_STRING("get_aws_v4_hash(): string_to_sign='{}' access_key_id='{}' secret_key='{}' authorization='{}'"), string_to_sign, access_key_id, secret_key, authorization) << std::endl;
 
   boost::smatch m;
   if (!boost::regex_match(authorization, m, re_v4_auth)) {
@@ -284,7 +284,7 @@ static std::optional<std::string> verify_aws_v4_signature(std::string string_to_
 
   // Compare the signature to that in the header.
   if (sigstr != hdrsig) {
-    std::cerr << fmt::format("signature mismatch got='{}' expected='{}'", sigstr, hdrsig) << std::endl;
+    std::cerr << fmt::format(FMT_STRING("signature mismatch got='{}' expected='{}'"), sigstr, hdrsig) << std::endl;
     return std::nullopt;
   }
 
@@ -303,7 +303,7 @@ static boost::regex re_v2_auth { "^AWS\\s(?<accesskey>[0-9a-f]+):"
  */
 static std::optional<std::string> verify_aws_v2_signature(std::string string_to_sign, std::string access_key_id, std::string secret_key, std::string authorization)
 {
-  // std::cerr << fmt::format("get_aws_v4_hash(): string_to_sign='{}' access_key_id='{}' secret_key='{}' authorization='{}'", string_to_sign, access_key_id, secret_key, authorization) << std::endl;
+  // std::cerr << fmt::format(FMT_STRING("get_aws_v4_hash(): string_to_sign='{}' access_key_id='{}' secret_key='{}' authorization='{}'"), string_to_sign, access_key_id, secret_key, authorization) << std::endl;
 
   boost::smatch m;
   if (!boost::regex_match(authorization, m, re_v2_auth)) {
@@ -335,7 +335,7 @@ static std::optional<std::string> verify_aws_v2_signature(std::string string_to_
 
   // Compare the signature to that in the header.
   if (sig_b64 != hdrsig) {
-    std::cerr << fmt::format("signature mismatch got='{}' expected='{}'", sig_b64, hdrsig) << std::endl;
+    std::cerr << fmt::format(FMT_STRING("signature mismatch got='{}' expected='{}'"), sig_b64, hdrsig) << std::endl;
     return std::nullopt;
   }
 
@@ -389,7 +389,7 @@ static rgw::HandoffHTTPVerifyResult http_verify_by_func(const DoutPrefixProvider
     return rgw::HandoffHTTPVerifyResult(-EACCES, 404);
   }
   auto secret = (*info).secret;
-  // std::cerr << fmt::format("verify_by_func(): string_to_sign='{}' access_key_id='{}' secret_key='{}' authorization='{}'", string_to_sign, access_key_id, secret, authorization) << std::endl;
+  // std::cerr << fmt::format(FMT_STRING("verify_by_func(): string_to_sign='{}' access_key_id='{}' secret_key='{}' authorization='{}'"), string_to_sign, access_key_id, secret, authorization) << std::endl;
 
   auto gen_signature = verify_aws_signature(string_to_sign, access_key_id, secret, authorization);
   std::string message;
@@ -530,7 +530,7 @@ TEST_F(HandoffHelperImplHTTPTest, SignatureV2CanBeDisabled)
   TestClient cio;
   // Set headers in the cio's env, not rgw_env (below).
   cio.get_env().set("HTTP_AUTHORIZATION", t.authorization);
-  ldpp_dout(&dpp, 20) << fmt::format("Auth: {}", t.authorization) << dendl;
+  ldpp_dout(&dpp, 20) << fmt::format(FMT_STRING("Auth: {}"), t.authorization) << dendl;
 
   RGWEnv rgw_env;
   req_state s { g_ceph_context, &rgw_env, 0 };
@@ -561,7 +561,7 @@ TEST_F(HandoffHelperImplHTTPTest, HeaderHappyPath)
     TestClient cio;
     // Set headers in the cio's env, not rgw_env (below).
     cio.get_env().set("HTTP_AUTHORIZATION", t.authorization);
-    ldpp_dout(&dpp, 20) << fmt::format("Auth: {}", t.authorization) << dendl;
+    ldpp_dout(&dpp, 20) << fmt::format(FMT_STRING("Auth: {}"), t.authorization) << dendl;
 
     RGWEnv rgw_env;
     req_state s { g_ceph_context, &rgw_env, 0 };
@@ -579,7 +579,7 @@ TEST_F(HandoffHelperImplHTTPTest, HeaderExpectBadSignature)
     TestClient cio;
     // Set headers in the cio's env, not rgw_env (below).
     cio.get_env().set("HTTP_AUTHORIZATION", t.authorization);
-    ldpp_dout(&dpp, 20) << fmt::format("Auth: {}", t.authorization) << dendl;
+    ldpp_dout(&dpp, 20) << fmt::format(FMT_STRING("Auth: {}"), t.authorization) << dendl;
 
     RGWEnv rgw_env;
     req_state s { g_ceph_context, &rgw_env, 0 };
@@ -781,7 +781,7 @@ TEST_F(HandoffHelperImplGRPCTest, SignatureV2CanBeDisabled)
   TestClient cio;
   // Set headers in the cio's env, not rgw_env (below).
   cio.get_env().set("HTTP_AUTHORIZATION", t.authorization);
-  ldpp_dout(&dpp_, 20) << fmt::format("Auth: {}", t.authorization) << dendl;
+  ldpp_dout(&dpp_, 20) << fmt::format(FMT_STRING("Auth: {}"), t.authorization) << dendl;
 
   RGWEnv rgw_env;
   req_state s { g_ceph_context, &rgw_env, 0 };
@@ -815,7 +815,7 @@ TEST_F(HandoffHelperImplGRPCTest, HeaderHappyPath)
     TestClient cio;
     // Set headers in the cio's env, not rgw_env (below).
     cio.get_env().set("HTTP_AUTHORIZATION", t.authorization);
-    ldpp_dout(&dpp_, 20) << fmt::format("Auth: {}", t.authorization) << dendl;
+    ldpp_dout(&dpp_, 20) << fmt::format(FMT_STRING("Auth: {}"), t.authorization) << dendl;
 
     RGWEnv rgw_env;
     req_state s { g_ceph_context, &rgw_env, 0 };
@@ -836,7 +836,7 @@ TEST_F(HandoffHelperImplGRPCTest, HeaderExpectBadSignature)
     TestClient cio;
     // Set headers in the cio's env, not rgw_env (below).
     cio.get_env().set("HTTP_AUTHORIZATION", t.authorization);
-    ldpp_dout(&dpp_, 20) << fmt::format("Auth: {}", t.authorization) << dendl;
+    ldpp_dout(&dpp_, 20) << fmt::format(FMT_STRING("Auth: {}"), t.authorization) << dendl;
 
     RGWEnv rgw_env;
     req_state s { g_ceph_context, &rgw_env, 0 };
@@ -1299,7 +1299,7 @@ TEST_F(HandoffHelperImplSubsysTest, AuthorizationParamConstruct)
     cio.get_env().set("HTTP_FOO", "bar");
     s.cio = &cio;
 
-    auto test_desc = fmt::format("for test: {} {} exp:{}", t.method, t.r_uri, t.expected_pass);
+    auto test_desc = fmt::format(FMT_STRING("for test: {} {} exp:{}"), t.method, t.r_uri, t.expected_pass);
     s.info.method = t.method.c_str();
     s.relative_uri = t.r_uri;
 

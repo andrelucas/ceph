@@ -66,7 +66,7 @@ class HandoffDoutPrefixPipe : public DoutPrefixPipe {
 public:
   HandoffDoutPrefixPipe(const DoutPrefixProvider& dpp, const std::string& prefix)
       : DoutPrefixPipe { dpp }
-      , prefix_ { fmt::format("{}: ", prefix) }
+      , prefix_ { fmt::format(FMT_STRING("{}: "), prefix) }
   {
   }
   virtual void add_prefix(std::ostream& out) const override final
@@ -100,7 +100,7 @@ public:
    */
   HandoffDoutStateProvider(const DoutPrefixProvider& dpp, const req_state* s)
       : HandoffDoutPrefixPipe {
-        dpp, fmt::format("HandoffEngine trans_id={}", s->trans_id)
+        dpp, fmt::format(FMT_STRING("HandoffEngine trans_id={}"), s->trans_id)
       } {};
 };
 
@@ -539,7 +539,8 @@ private:
   bool enable_signature_v2_ = true; // Runtime-alterable.
   AuthParamMode authorization_mode_ = AuthParamMode::ALWAYS; // Runtime-alterable.
 
-  // The gRPC channel pointer needs to be behind a mutex.
+  // The gRPC channel pointer needs to be behind a mutex. Changing channel_,
+  // channel_args_ or channel_uri_ must be under a unique lock of m_channel_.
   std::shared_mutex m_channel_;
   std::shared_ptr<grpc::Channel> channel_;
   std::optional<grpc::ChannelArguments> channel_args_;

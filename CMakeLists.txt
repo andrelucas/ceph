@@ -500,19 +500,28 @@ if(WITH_RADOSGW)
     set(old_CMAKE_CXX_STANDARD ${CMAKE_CXX_STANDARD})
     set(CMAKE_CXX_STANDARD 17)
 
+    # See: https://github.com/protocolbuffers/protobuf/issues/12185
+    set(old_ABSL_ENABLE_INSTALL ${ABSL_ENABLE_INSTALL})
+    set(ABSL_ENABLE_INSTALL ON)
+
     # See: https://grpc.io/blog/cmake-improvements/
-    # Note: 20231106 v1.54.3 is the latest that configures correctly, any
-    # later results in CMake errors.
+    # Note: As soon as we can rely on having CMake >= 3.25, add 'SYSTEM' to
+    # the list of FetchContent_Declare arguments, so the gRPC (and related)
+    # includes are added as system includes. This cuts down on the number of
+    # annoying and irrelevant compiler warnings you'll see.
+    #
     include(FetchContent)
     FetchContent_Declare(
       gRPC
       GIT_REPOSITORY https://github.com/grpc/grpc
-      GIT_TAG v1.54.3
+      GIT_TAG v1.59.3
       GIT_SHALLOW ON
     )
     set(FETCHCONTENT_QUIET OFF)
     FetchContent_MakeAvailable(gRPC)
+
     set(CMAKE_CXX_STANDARD ${old_CMAKE_CXX_STANDARD})
+    set(ABSL_ENABLE_INSTALL ${old_ABSL_ENABLE_INSTALL})
 
   endif(WITH_RADOSGW_GRPC)
 endif (WITH_RADOSGW)
@@ -717,9 +726,9 @@ add_custom_target(tests
   COMMENT "Building tests")
 enable_testing()
 set(CMAKE_CTEST_COMMAND ctest)
-add_custom_target(check
-  COMMAND ${CMAKE_CTEST_COMMAND}
-  DEPENDS tests)
+# add_custom_target(check
+#   COMMAND ${CMAKE_CTEST_COMMAND}
+#   DEPENDS tests)
 
 option(WITH_SYSTEMD "build with systemd support" ON)
 

@@ -625,6 +625,7 @@ static std::string authorization_mode_to_string(AuthParamMode mode)
   case AuthParamMode::NEVER:
     return "NEVER";
   }
+  return "UNKNOWN";
 }
 
 void HandoffHelperImpl::set_authorization_mode(CephContext* const cct, AuthParamMode mode)
@@ -634,16 +635,29 @@ void HandoffHelperImpl::set_authorization_mode(CephContext* const cct, AuthParam
   authorization_mode_ = mode;
 }
 
+/**
+ * @brief Deduce the AWS V4 presigned URL expiry time.
+ *
+ * The V4 expiry calculation is more complex than V2. The request time is
+ * provided in the x-amz-date parameter, and the expiry time delta is provided
+ * in the x-amz-expires parameter. We have to parse the x-amz-date string into
+ * a time, then add the delta to get the expiry time.
+ *
+ * @param dpp DoutPrefixProvider.
+ * @param s The request.
+ * @return std::optional<time_t> The expiry time as a time_t value, or nullopt
+ * if the value could not be deduced.
+ */
 static std::optional<time_t> get_v4_presigned_expiry_time(const DoutPrefixProvider* dpp, const req_state* s) noexcept
 {
   auto& argmap = s->info.args;
   auto maybe_date = argmap.get_optional("x-amz-date");
   if (!maybe_date) {
-    ldpp_dout(dpp, 0) << "Missing x-amz-date parameter" << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}:  Missing x-amz-date parameter"), __func__) << dendl;
   }
   auto maybe_expires_delta = argmap.get_optional("x-amz-expires");
   if (!maybe_expires_delta) {
-    ldpp_dout(dpp, 0) << "Missing x-amz-expires parameter" << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: Missing x-amz-expires parameter"), __func__) << dendl;
   }
   if (!(maybe_date && maybe_expires_delta)) {
     return std::nullopt;
@@ -654,13 +668,16 @@ static std::optional<time_t> get_v4_presigned_expiry_time(const DoutPrefixProvid
 
   absl::Time param_time;
   std::string err;
+  // absl::ParseTime()'s format has some extensions to strftime(3). The %E4Y is
+  // a 4-digit year, %ET is the 'T' separator, and %Ez is the timezone spec
+  // which in Abseil can be the 'Z' indicating UTC.
   if (!absl::ParseTime("%E4Y%m%d%ET%H%M%S%Ez", date, &param_time, &err)) {
-    ldpp_dout(dpp, 0) << "Failed to parse x-amz-date time '" << date << "': " << err << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: Failed to parse x-amz-date time '{}': {}"), __func__, date, err) << dendl;
     return std::nullopt;
   }
   int delta_seconds = 0;
   if (!absl::SimpleAtoi(delta, &delta_seconds)) {
-    ldpp_dout(dpp, 20) << "Failed to parse x-amz-expires='" << delta << "'" << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: Failed to parse int from x-amz-expires='{}'"), __func__, delta) << dendl;
   }
   auto expiry_time = param_time + absl::Seconds(delta_seconds);
   auto expiry = absl::ToTimeT(expiry_time);
@@ -668,24 +685,33 @@ static std::optional<time_t> get_v4_presigned_expiry_time(const DoutPrefixProvid
   return std::make_optional(expiry);
 }
 
+/**
+ * @brief Extract the AWS V2 presigned URL expiry time.
+ *
+ * V2 expiry times are really straightforward - they're just a UNIX timestamp
+ * after which the request is invalid.
+ *
+ * @param dpp DoutPrefixProvider.
+ * @param s The request.
+ * @return std::optional<time_t> The expiry time as a time_t value, or nullopt
+ * if the value could not be extracted.
+ */
 static std::optional<time_t> get_v2_presigned_expiry_time(const DoutPrefixProvider* dpp, const req_state* s) noexcept
 {
   auto& argmap = s->info.args;
   auto maybe_expires = argmap.get_optional("Expires");
   if (!maybe_expires) {
-    ldpp_dout(dpp, 0) << "Missing Expiry parameter" << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: Missing Expires parameter"), __func__) << dendl;
     return std::nullopt;
   }
 
-  auto expiry_time_str = maybe_expires.value();
+  auto expiry_time_str = std::move(*maybe_expires);
   time_t expiry_time;
-  try {
-    expiry_time = std::stol(expiry_time_str, nullptr, 10);
-  } catch (std::exception& _) {
-    ldpp_dout(dpp, 0) << "Failed to parse presigned URL expiry time" << dendl;
-    return false;
+  if (!absl::SimpleAtoi(expiry_time_str, &expiry_time)) {
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("Failed to parse int from Expires='{}'"), __func__, expiry_time_str) << dendl;
+    return std::nullopt;
   }
-  ldpp_dout(dpp, 20) << __func__ << ": expiry time " << expiry_time << dendl;
+  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: expiry time "), __func__, expiry_time) << dendl;
   return std::make_optional(expiry_time);
 }
 
@@ -703,9 +729,9 @@ bool HandoffHelperImpl::valid_presigned_time(const DoutPrefixProvider* dpp, cons
     ldpp_dout(dpp, 0) << "Unable to extract presigned URL expiry time from query parameters" << dendl;
     return false;
   }
-  ldpp_dout(dpp, 20) << fmt::format("Presigned URL last valid second {} now {}", *maybe_expiry_time, now) << dendl;
+  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("Presigned URL last valid second {} now {}"), *maybe_expiry_time, now) << dendl;
   if (*maybe_expiry_time < now) {
-    ldpp_dout(dpp, 0) << fmt::format("Presigned URL expired - last valid second {} now {}", *maybe_expiry_time, now) << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("Presigned URL expired - last valid second {} now {}"), *maybe_expiry_time, now) << dendl;
     return false;
   }
   return true;
@@ -753,8 +779,8 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
 
   ceph_assert(s->cio != nullptr); // Give a helpful message to unit tests.
 
-  ldpp_dout(dpp, 1) << fmt::format(
-      "init: access_key_id='{}' session_token_present={} decoded_uri='{}' domain={}",
+  ldpp_dout(dpp, 1) << fmt::format(FMT_STRING(
+                                       "init: access_key_id='{}' session_token_present={} decoded_uri='{}' domain={}"),
       access_key_id,
       session_token.empty() ? "false" : "true",
       s->decoded_uri,
@@ -902,13 +928,13 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp_in
   // The client returns a fully-populated HandoffAuthResult, but we want to
   // issue some helpful log messages before returning it.
   if (result.is_ok()) {
-    ldpp_dout(dpp, 0) << fmt::format("Success (access_key_id='{}', uid='{}')", access_key_id, result.userid()) << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("Success (access_key_id='{}', uid='{}')"), access_key_id, result.userid()) << dendl;
   } else {
     if (result.err_type() == HandoffAuthResult::error_type::TRANSPORT_ERROR) {
-      ldpp_dout(dpp, 0) << fmt::format("authentication attempt failed: {}", result.message()) << dendl;
+      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("authentication attempt failed: {}"), result.message()) << dendl;
     } else {
       ldpp_dout(dpp, 0) << fmt::format(
-          "Authentication service returned failure (access_key_id='{}', code={}, message='{}')",
+          FMT_STRING("Authentication service returned failure (access_key_id='{}', code={}, message='{}')"),
           access_key_id, result.code(), result.message())
                         << dendl;
     }
@@ -942,10 +968,10 @@ HandoffAuthResult HandoffHelperImpl::_http_auth(const DoutPrefixProvider* dpp,
   }
 
   if (vres.result() < 0) {
-    ldpp_dout(dpp, 0) << fmt::format("handoff verify HTTP request failed with exit code {} ({})", vres.result(), strerror(-vres.result()))
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("handoff verify HTTP request failed with exit code {} ({})"), vres.result(), strerror(-vres.result()))
                       << dendl;
     return HandoffAuthResult(-EACCES,
-        fmt::format("Handoff HTTP request failed with code {} ({})", vres.result(), strerror(-vres.result())),
+        fmt::format(FMT_STRING("Handoff HTTP request failed with code {} ({})"), vres.result(), strerror(-vres.result())),
         HandoffAuthResult::error_type::TRANSPORT_ERROR);
   }
 
@@ -959,7 +985,7 @@ HandoffAuthResult HandoffHelperImpl::_http_auth(const DoutPrefixProvider* dpp,
   // Return an error, but only after attempting to parse the response
   // for a useful error message.
   auto status = vres.http_code();
-  ldpp_dout(dpp, 20) << fmt::format("fetch '{}' status {}", vres.query_url(), status) << dendl;
+  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("fetch '{}' status {}"), vres.query_url(), status) << dendl;
 
   // These error code responses mimic rgw_auth_keystone.cc.
   switch (status) {
@@ -970,10 +996,10 @@ HandoffAuthResult HandoffHelperImpl::_http_auth(const DoutPrefixProvider* dpp,
   case 404:
     return HandoffAuthResult(-ERR_INVALID_ACCESS_KEY, resp.message);
   case RGWHTTPClient::HTTP_STATUS_NOSTATUS:
-    ldpp_dout(dpp, 5) << fmt::format("Handoff fetch '{}' unknown status {}", vres.query_url(), status) << dendl;
+    ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("Handoff fetch '{}' unknown status {}"), vres.query_url(), status) << dendl;
     return HandoffAuthResult(-EACCES, resp.message);
   default:
-    ldpp_dout(dpp, 0) << fmt::format("Handoff fetch '{}' returned unexpected HTTP status code {}", status) << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("Handoff fetch '{}' returned unexpected HTTP status code {}"), vres.query_url(), status) << dendl;
     return HandoffAuthResult(-EACCES, resp.message);
   }
 }

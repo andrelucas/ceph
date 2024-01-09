@@ -53,9 +53,14 @@ public:
     INTERNAL_ERROR,
   };
 
+  enum class user_type {
+    USER,
+    ANONYMOUS,
+  };
+
 public:
   /**
-   * @brief Construct a success-type result.
+   * @brief Construct a success-type result for a regular user.
    *
    * @param userid The user ID associated with the request.
    * @param message human-readable status.
@@ -65,6 +70,24 @@ public:
       , message_ { message }
       , is_err_ { false }
       , err_type_ { error_type::NO_ERROR } {};
+
+  /**
+   * @brief Construct a success-type result for an anonymous user.
+   *
+   * @param type user_type::ANONYMOUS
+   * @param message human-readable status.
+   */
+  HandoffAuthResult(user_type type, const std::string& message)
+      : type_ { user_type::ANONYMOUS }
+      , userid_ {}
+      , message_ { message }
+      , is_err_ { false }
+      , err_type_ { error_type::NO_ERROR }
+  {
+    if (type != user_type::ANONYMOUS) {
+      throw std::invalid_argument("HandoffAuthResult: type must be ANONYMOUS");
+    }
+  };
 
   /**
    * @brief Construct a success-type result. \p message is
@@ -80,6 +103,7 @@ public:
       , is_err_ { true }
       , err_type_ { err_type } {};
 
+  bool is_anonymous() const noexcept { return type_ == user_type::ANONYMOUS; }
   bool is_err() const noexcept { return is_err_; }
   bool is_ok() const noexcept { return !is_err_; }
   error_type err_type() const noexcept { return err_type_; }
@@ -102,15 +126,20 @@ public:
   std::string to_string() const noexcept
   {
     if (is_err()) {
-      return fmt::format("error={} message={}", errorcode_, message_);
+      return fmt::format(FMT_STRING("error={} message={}"), errorcode_, message_);
     } else {
-      return fmt::format("userid='{}' message={}", userid_, message_);
+      if (is_anonymous()) {
+        return fmt::format(FMT_STRING("(anonymous) message={}"), message_);
+      } else {
+        return fmt::format(FMT_STRING("userid='{}' message={}"), userid_, message_);
+      }
     }
   }
 
   friend std::ostream& operator<<(std::ostream& os, const HandoffAuthResult& ep);
 
 private:
+  user_type type_ = user_type::USER;
   std::string userid_
       = "";
   int errorcode_ = 0;

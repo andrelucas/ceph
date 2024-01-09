@@ -1,8 +1,9 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab ft=cpp
 
-#include <errno.h>
 #include <array>
+#include <errno.h>
+#include <memory>
 #include <mutex>
 #include <string.h>
 #include <string_view>
@@ -6091,19 +6092,33 @@ void rgw::auth::s3::LDAPEngine::shutdown() {
   }
 }
 
-rgw::HandoffHelper* rgw::auth::s3::HandoffEngine::handoff_helper = nullptr;
+/***************************************************************************/
+
+// Begin Handoff Engine.
+
+std::shared_ptr<rgw::HandoffHelper> rgw::auth::s3::HandoffEngine::handoff_helper;
 
 void rgw::auth::s3::HandoffEngine::init(CephContext* const cct, rgw::sal::Store* store)
 {
+  static std::once_flag logged_presence;
   if (!cct->_conf->rgw_s3_auth_use_handoff) {
+    std::call_once(logged_presence, [&]() {
+      ldout(cct, 1) << "Akamai Handoff Authentication present but disabled" << dendl;
+    });
     return;
   }
 
-  // NOTE: This is not a thread-safe initialisation.
-  if (!handoff_helper) {
-    handoff_helper = new rgw::HandoffHelper();
+  static std::once_flag hhinit;
+  std::call_once(hhinit, [&]() {
+    ldout(cct, 1) << "Akamai Handoff Authentication present and enabled" << dendl;
+    handoff_helper = std::make_shared<rgw::HandoffHelper>();
     handoff_helper->init(cct, store);
-  }
+  });
+}
+
+void rgw::auth::s3::HandoffEngine::shutdown()
+{
+  // Nothing yet.
 }
 
 bool rgw::auth::s3::HandoffEngine::valid() {
@@ -6183,13 +6198,9 @@ rgw::auth::s3::HandoffEngine::authenticate(
   return result_t::grant(std::move(apl), completer_factory(boost::none));
 } /* rgw::auth::s3::HandoffEngine::authenticate */
 
-void rgw::auth::s3::HandoffEngine::shutdown() {
-  if (handoff_helper) {
-    delete handoff_helper;
-    handoff_helper = nullptr;
-  }
-}
+// End Handoff Engine.
 
+/***************************************************************************/
 
 /* LocalEngine */
 rgw::auth::Engine::result_t

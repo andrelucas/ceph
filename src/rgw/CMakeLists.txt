@@ -501,6 +501,16 @@ target_link_libraries(radosgwd radosgw librados
   ${LIB_RESOLV}
   ${CURL_LIBRARIES} ${EXPAT_LIBRARIES} ${BLKID_LIBRARIES}
   ${ALLOC_LIBS})
+# This is a hack to force linking tcmalloc when it is available. It won't work
+# everywhere and it should only be necessary when using the GNU linker.
+if(ALLOCATOR STREQUAL tcmalloc AND HAVE_LIBTCMALLOC)
+  get_filename_component(_LINKER_BASENAME "${CMAKE_LINKER}" NAME)
+  if(_LINKER_BASENAME STREQUAL "ld")
+    MESSAGE(WARNING "GNU ld detected - forcing tcmalloc link for radosgw binary")
+    target_link_options(radosgwd PRIVATE -Wl,--no-as-needed -ltcmalloc -Wl,--as-needed)
+  endif()
+  unset(_LINKER_BASENAME)
+endif()
 set_target_properties(radosgwd PROPERTIES OUTPUT_NAME radosgw)
 install(TARGETS radosgwd DESTINATION bin)
 
