@@ -55,6 +55,7 @@ message S3ErrorDetails {
   }
 
   Type type = 1;
+  int32 http_status_code = 2;
 }
 
 // AuthenticatorService provides RPCs for authenticating S3 requests.
@@ -85,7 +86,7 @@ message AuthenticateRESTRequest {
   // The HTTP method from the user's S3 REST request used for the S3 request.
   HTTPMethod http_method = 3;
   // The name of the bucket the operation was performed on from the user's S3 REST request.
-  string bucket_name = 4;
+  optional string bucket_name = 4;
   // The object key the operation was performed on from the user's S3 REST request. For actions performed against a
   // bucket, this field will be empty.
   optional string object_key = 5;
