@@ -44,6 +44,7 @@
 
 #include "absl/strings/numbers.h"
 #include "absl/time/time.h"
+#include "authenticator/v1/authenticator.pb.h"
 #include "include/ceph_assert.h"
 
 #include "common/dout.h"
@@ -51,6 +52,11 @@
 #include "rgw/rgw_client_io.h"
 #include "rgw/rgw_common.h"
 #include "rgw/rgw_http_client.h"
+
+// These are 'standard' protobufs for the 'Richer error model'
+// (https://grpc.io/docs/guides/error/).
+#include "google/rpc/error_details.pb.h"
+#include "google/rpc/status.pb.h"
 
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rgw

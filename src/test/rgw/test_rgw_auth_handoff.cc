@@ -21,6 +21,7 @@
 #include <gtest/gtest.h>
 #include <openssl/evp.h>
 
+#include "authenticator/v1/authenticator.pb.h"
 #include "common/async/yield_context.h"
 #include "common/ceph_argparse.h"
 #include "common/ceph_json.h"
@@ -37,7 +38,14 @@
 
 #include "test_rgw_grpc_util.h"
 
-#include "rgw/auth/v1/auth.grpc.pb.h"
+// These are 'standard' protobufs for the 'Richer error model'
+// (https://grpc.io/docs/guides/error/).
+#include "google/rpc/error_details.pb.h"
+#include "google/rpc/status.pb.h"
+
+// This is the protobuf for the authenticator service, copied from
+// obj-endpoint.
+#include "authenticator/v1/authenticator.grpc.pb.h"
 
 /*
  * Tools tests.

@@ -37,8 +37,8 @@
 #include "common/dout.h"
 #include "rgw/rgw_common.h"
 
-#include "rgw/auth/v1/auth.grpc.pb.h"
-using namespace ::rgw::auth::v1;
+#include "authenticator/v1/authenticator.grpc.pb.h"
+using namespace ::authenticator::v1;
 
 #include "rgw_handoff.h"
 
