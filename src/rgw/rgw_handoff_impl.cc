@@ -188,7 +188,7 @@ std::string AuthorizationParameters::to_string() const noexcept
     } else {
       std::vector<std::string> h;
       for (const auto& kv : http_headers_) {
-        h.emplace_back(fmt::format(FMT_STRING("{}{},"), kv.first, kv.second));
+        h.emplace_back(fmt::format(FMT_STRING("{}={},"), kv.first, kv.second));
       }
       hdr = fmt::format(FMT_STRING("[{}]"), fmt::join(h, ","));
     }
