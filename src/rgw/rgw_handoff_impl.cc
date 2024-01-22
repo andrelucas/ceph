@@ -244,7 +244,10 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req)
   // message.
   auto error_details = status.error_details();
   if (error_details.empty()) {
-    return HandoffAuthResult(-EACCES, status.error_message(), HandoffAuthResult::error_type::INTERNAL_ERROR);
+    // There are no error details, so there can't be an S3ErrorDetails
+    // message, so we assume this is related to the RPC itself, not the
+    // authentication. This gets a TRANSPORT_ERROR.
+    return HandoffAuthResult(-EACCES, status.error_message(), HandoffAuthResult::error_type::TRANSPORT_ERROR);
   }
   ::google::rpc::Status s;
   if (!s.ParseFromString(error_details)) {
@@ -258,7 +261,11 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req)
       return HandoffAuthResult(s3_details.http_status_code(), status.error_message(), HandoffAuthResult::error_type::AUTH_ERROR);
     }
   }
-  return HandoffAuthResult(-EACCES, "S3ErrorDetails not found, error message follows: " + status.error_message(), HandoffAuthResult::error_type::INTERNAL_ERROR);
+  // There was no S3ErrorDetails message, so assume the error was related to
+  // the RPC itself, not the authentication, and that in some future version
+  // of gRPC the transport errors use the Richer error model. (Stranger things
+  // have happened.) This gets a TRANSPORT_ERROR, as above.
+  return HandoffAuthResult(-EACCES, "S3ErrorDetails not found, error message follows: " + status.error_message(), HandoffAuthResult::error_type::TRANSPORT_ERROR);
 }
 
 /****************************************************************************/

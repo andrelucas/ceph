@@ -184,7 +184,7 @@ public:
   }
 
   /**
-   * @brief Call rgw::auth::v1::AuthService::Auth() and cast the result to
+   * @brief Call rgw::auth::v1::AuthService::Auth() and return a
    * HandoffAuthResult, suitable for HandoffHelperImpl::auth().
    *
    * On success, return the embedded username. We don't currently support the
@@ -198,6 +198,11 @@ public:
    * form, it won't do to return the raw HTTP status code! We're assuming the
    * Authenticator knows what HTTP code it wants returned, and it's up to
    * Handoff to interpret it properly and return a useful code.
+   *
+   * If we don't find an S3ErrorDetails message, return a generic error (with
+   * the provided error message) with error type TRANSPORT_ERROR. This allows
+   * the caller to differentiate between authentication problems and RPC
+   * problems.
    *
    * The alternative to using HandoffAuthResult would be interpreting the
    * request status and result object would be either returning a bunch of
