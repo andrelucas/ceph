@@ -21,15 +21,11 @@
 #ifndef RGW_HANDOFF_H
 #define RGW_HANDOFF_H
 
-#include "acconfig.h"
-
 #include <fmt/format.h>
-#include <functional>
 #include <iosfwd>
 #include <string>
 
 #include "common/async/yield_context.h"
-#include "common/ceph_context.h"
 #include "common/dout.h"
 #include "rgw/rgw_common.h"
 
@@ -92,7 +88,11 @@ public:
   /**
    * @brief Construct a success-type result. \p message is
    *
-   * @param errorcode The HTTP error code.
+   * \p errorcode is one of the codes in rgw_common.cc, array
+   * rgw_http_s3_errors. If we don't map exactly, it's most likely because
+   * those error codes don't match the HTTP return code we want.
+   *
+   * @param errorcode The RGW S3 error code.
    * @param message human-readable status.
    * @param err_type The error type enum, which will help give better error
    * log messages.

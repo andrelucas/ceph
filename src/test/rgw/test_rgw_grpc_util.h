@@ -25,8 +25,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "rgw/auth/v1/auth.grpc.pb.h"
-
 /**
  * @brief A stop-and-startable gRPC server for testing.
  *

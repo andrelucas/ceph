@@ -37,8 +37,8 @@
 #include "common/dout.h"
 #include "rgw/rgw_common.h"
 
-#include "rgw/auth/v1/auth.grpc.pb.h"
-using namespace ::rgw::auth::v1;
+#include "authenticator/v1/authenticator.grpc.pb.h"
+using namespace ::authenticator::v1;
 
 #include "rgw_handoff.h"
 
@@ -153,7 +153,7 @@ public:
  */
 class AuthServiceClient {
 private:
-  std::unique_ptr<AuthService::Stub> stub_;
+  std::unique_ptr<AuthenticatorService::Stub> stub_;
 
 public:
   /**
@@ -169,7 +169,7 @@ public:
    * @param channel pointer to the grpc::Channel object to be used.
    */
   explicit AuthServiceClient(std::shared_ptr<::grpc::Channel> channel)
-      : stub_(AuthService::NewStub(channel))
+      : stub_(AuthenticatorService::NewStub(channel))
   {
   }
 
@@ -180,60 +180,65 @@ public:
    */
   void set_stub(std::shared_ptr<::grpc::Channel> channel)
   {
-    stub_ = AuthService::NewStub(channel);
+    stub_ = AuthenticatorService::NewStub(channel);
   }
 
   /**
-   * @brief Call rgw::auth::v1::AuthService::Status() and return either the
-   * status server_description message, or std::nullopt in case of error.
-   *
-   * @param req The (empty) request protobuf message.
-   * @return std::optional<std::string> The server_description field of the
-   * response, or std::nullopt on error.
-   */
-  std::optional<std::string> Status(const StatusRequest& req);
-
-  /**
-   * @brief Call rgw::auth::v1::AuthService::Auth() and cast the result to
+   * @brief Call rgw::auth::v1::AuthService::Auth() and return a
    * HandoffAuthResult, suitable for HandoffHelperImpl::auth().
    *
-   * On error, creates a HandoffAuthResult indicating a failure (500).
+   * On success, return the embedded username. We don't currently support the
+   * original_user_id field of the response message, as we have no current use
+   * for it.
    *
-   * Otherwise, calls parse_auth_response() to interpret the AuthResponse
-   * returned by the RPC.
+   * On error, parse the result for an S3ErrorDetails message embedded in the
+   * details field. (Richer error model.) If we find one, return the error
+   * message and embed the contained HTTP status code. It's up to the caller
+   * to follow up and pass the HTTP status code back to RGW in the proper
+   * form, it won't do to return the raw HTTP status code! We're assuming the
+   * Authenticator knows what HTTP code it wants returned, and it's up to
+   * Handoff to interpret it properly and return a useful code.
    *
-   * The alternative to interpreting the request status and result object
-   * would be either returning a bunch of connection status plus an
-   * AuthResponse object, or throwing exceptions on error. This feels like an
-   * easier API to use in our specific use case.
+   * If we don't find an S3ErrorDetails message, return a generic error (with
+   * the provided error message) with error type TRANSPORT_ERROR. This allows
+   * the caller to differentiate between authentication problems and RPC
+   * problems.
+   *
+   * The alternative to using HandoffAuthResult would be interpreting the
+   * request status and result object would be either returning a bunch of
+   * connection status plus an AuthResponse object, or throwing exceptions on
+   * error. This feels like an easier API to use in our specific use case.
    *
    * @param req the filled-in authentication request protobuf
    * (rgw::auth::v1::AuthRequest).
    * @return HandoffAuthResult A completed auth result.
    */
-  HandoffAuthResult Auth(const AuthRequest& req);
+  HandoffAuthResult Auth(const AuthenticateRESTRequest& req);
 
   /**
-   * @brief Given an Auth service request and response, construct a matching
-   * HandoffAuthResult ready to return from HandoffHelperImpl::auth().
+   * @brief Map an Authenticator gRPC error code onto an error code that RGW
+   * can digest.
    *
-   * Called implicitly by Auth().
+   * The Authenticator returns a details error code in S3ErrorDetails.Type. We
+   * need to map this onto the list of error codes in rgw_common.cc, array
+   * rgw_http_s3_errors. There may be exceptions if the inbuild RGW codes that
+   * match the Authenticator codes don't return the proper HTTP status code.
+   * This will probably need tweaked over time.
    *
-   * All we have to do is map the AuthResponse \p code field (type
-   * rgw::auth::v1::AuthCode) onto suitable HTTP-like response codes expected
-   * by HandoffHelperImpl::auth(), and by extention HandoffHelper::auth(), and
-   * finally by HandoffEngine::authenticate()).
+   * If there's no direct mapping, we'll try to map a subset of HTTP error
+   * codes onto a matching RGW error code. If we can't do that, we'll return
+   * EACCES which results in an HTTP 403.
    *
-   * Only a response with code AUTH_CODE_OK results in a successful
-   * authentication. Any other return value results in an authentication
-   * failure. Note that RGW may try other authentication engines; this is
-   * based on configuration and is not under the control of Handoff.
-   *
-   * @param req
-   * @param resp
+   * @param auth_type The Authenticator error code (S3ErrorDetails.Type).
+   * @param auth_http_status_code The desired HTTP status code.
+   * @param message The Authenticator's error message (copied verbatim into
+   * the HandoffAuthResult).
    * @return HandoffAuthResult
    */
-  HandoffAuthResult parse_auth_response(const AuthRequest& req, const AuthResponse* resp);
+  static HandoffAuthResult _translate_authenticator_error_code(
+      ::authenticator::v1::S3ErrorDetails_Type auth_type,
+      int32_t auth_http_status_code,
+      const std::string& message);
 };
 
 /****************************************************************************/

@@ -6185,6 +6185,10 @@ rgw::auth::s3::HandoffEngine::authenticate(
       signature,
       s, y);
   if (auth_result.is_err()) {
+    // HandoffHelper::auth() returns positive error codes, which for gRPC have
+    // already been washed through
+    // AuthServiceClient::_translate_authenticator_error_code() to turn them
+    // into RGW-recognised error codes.
     return result_t::deny(-auth_result.code());
   }
 

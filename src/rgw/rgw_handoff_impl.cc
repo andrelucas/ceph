@@ -32,9 +32,11 @@
 #include "rgw_handoff_impl.h"
 
 #include <boost/algorithm/string.hpp>
+#include <cerrno>
 #include <cstring>
 #include <fmt/format.h>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <rgw_handoff.h>
 #include <string>
@@ -44,6 +46,7 @@
 
 #include "absl/strings/numbers.h"
 #include "absl/time/time.h"
+#include "authenticator/v1/authenticator.pb.h"
 #include "include/ceph_assert.h"
 
 #include "common/dout.h"
@@ -51,6 +54,11 @@
 #include "rgw/rgw_client_io.h"
 #include "rgw/rgw_common.h"
 #include "rgw/rgw_http_client.h"
+
+// These are 'standard' protobufs for the 'Richer error model'
+// (https://grpc.io/docs/guides/error/).
+#include "google/rpc/error_details.pb.h"
+#include "google/rpc/status.pb.h"
 
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rgw
@@ -109,12 +117,13 @@ AuthorizationParameters::AuthorizationParameters(const DoutPrefixProvider* dpp_i
   }
   req_name++;
 
-  // Save all the HTTP headers. Do this before the first valid exit.
+  // Save all the HTTP headers starting with 'x_amz_'. Do this before the
+  // first valid exit.
   ceph_assert(s->cio != nullptr); // Give a helpful error to unit tests.
   for (const auto& kv : s->cio->get_env().get_map()) {
     std::string key = kv.first;
     // HTTP headers are uppercased and have hyphens replaced with underscores.
-    if (ba::starts_with(key, "HTTP_")) {
+    if (ba::starts_with(key, "HTTP_X_AMZ_")) {
       key = key.substr(5);
       ba::replace_all(key, "_", "-");
       ba::to_lower(key);
@@ -181,7 +190,7 @@ std::string AuthorizationParameters::to_string() const noexcept
     } else {
       std::vector<std::string> h;
       for (const auto& kv : http_headers_) {
-        h.emplace_back(fmt::format(FMT_STRING("{}{},"), kv.first, kv.second));
+        h.emplace_back(fmt::format(FMT_STRING("{}={},"), kv.first, kv.second));
       }
       hdr = fmt::format(FMT_STRING("[{}]"), fmt::join(h, ","));
     }
@@ -220,52 +229,104 @@ std::ostream& operator<<(std::ostream& os, const AuthorizationParameters& ep)
  *
  ****************************************************************************/
 
-std::optional<std::string> AuthServiceClient::Status(const StatusRequest& req)
+HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req)
 {
   ::grpc::ClientContext context;
-  StatusResponse resp;
+  AuthenticateRESTResponse resp;
 
-  ::grpc::Status status = stub_->Status(&context, req, &resp);
-  // Check for an error from gRPC itself.
-  if (!status.ok()) {
-    return std::nullopt;
+  ::grpc::Status status = stub_->AuthenticateREST(&context, req, &resp);
+
+  using namespace authenticator::v1;
+
+  if (status.ok()) {
+    return HandoffAuthResult(resp.user_id(), status.error_message());
   }
-  return std::make_optional(resp.server_description());
-}
-
-HandoffAuthResult AuthServiceClient::Auth(const AuthRequest& req)
-{
-  ::grpc::ClientContext context;
-  AuthResponse resp;
-
-  ::grpc::Status status = stub_->Auth(&context, req, &resp);
-  // Check for an error from gRPC itself.
-  if (!status.ok()) {
+  // Error conditions are returned via the Richer error model
+  // (https://grpc.io/docs/guides/error/). Create a google::rpc::Status
+  // message.
+  auto error_details = status.error_details();
+  if (error_details.empty()) {
+    // There are no error details, so there can't be an S3ErrorDetails
+    // message, so we assume this is related to the RPC itself, not the
+    // authentication. This gets a TRANSPORT_ERROR.
     return HandoffAuthResult(-EACCES, status.error_message(), HandoffAuthResult::error_type::TRANSPORT_ERROR);
   }
-  return parse_auth_response(req, &resp);
+  ::google::rpc::Status s;
+  if (!s.ParseFromString(error_details)) {
+    return HandoffAuthResult(-EACCES, "failed to deserialize gRPC error_details, error message follows: " + status.error_message(), HandoffAuthResult::error_type::INTERNAL_ERROR);
+  }
+  // Loop through the detail field (repeated Any) and look for our
+  // S3ErrorDetails message.
+  for (auto& detail : s.details()) {
+    S3ErrorDetails s3_details;
+    if (detail.UnpackTo(&s3_details)) {
+      return _translate_authenticator_error_code(s3_details.type(), s3_details.http_status_code(), status.error_message());
+    }
+  }
+  // There was no S3ErrorDetails message, so assume the error was related to
+  // the RPC itself, not the authentication, and that in some future version
+  // of gRPC the transport errors use the Richer error model. (Stranger things
+  // have happened.) This gets a TRANSPORT_ERROR, as above.
+  return HandoffAuthResult(-EACCES, "S3ErrorDetails not found, error message follows: " + status.error_message(), HandoffAuthResult::error_type::TRANSPORT_ERROR);
 }
 
-HandoffAuthResult AuthServiceClient::parse_auth_response(const AuthRequest& req, const AuthResponse* resp)
+using err_type = ::authenticator::v1::S3ErrorDetails_Type;
+
+// We can't statically initialise a map, so initialise a list and allocate a
+// map on first use in _translate_authenticator_error_code().
+struct HandoffAuthResultMapping {
+  err_type auth_type;
+  int rgw_error_code;
+};
+
+static HandoffAuthResultMapping auth_list[] = {
+  { err_type::S3ErrorDetails_Type_TYPE_ACCESS_DENIED, EACCES },
+  { err_type::S3ErrorDetails_Type_TYPE_AUTHORIZATION_HEADER_MALFORMED, ERR_INVALID_REQUEST },
+  { err_type::S3ErrorDetails_Type_TYPE_EXPIRED_TOKEN, EACCES },
+  { err_type::S3ErrorDetails_Type_TYPE_INTERNAL_ERROR, ERR_INTERNAL_ERROR },
+  { err_type::S3ErrorDetails_Type_TYPE_INVALID_ACCESS_KEY_ID, ERR_INVALID_ACCESS_KEY },
+  { err_type::S3ErrorDetails_Type_TYPE_INVALID_REQUEST, EINVAL },
+  { err_type::S3ErrorDetails_Type_TYPE_INVALID_SECURITY, EINVAL },
+  { err_type::S3ErrorDetails_Type_TYPE_INVALID_TOKEN, ERR_INVALID_IDENTITY_TOKEN },
+  { err_type::S3ErrorDetails_Type_TYPE_INVALID_URI, ERR_INVALID_REQUEST },
+  { err_type::S3ErrorDetails_Type_TYPE_METHOD_NOT_ALLOWED, ERR_METHOD_NOT_ALLOWED },
+  { err_type::S3ErrorDetails_Type_TYPE_MISSING_SECURITY_HEADER, ERR_INVALID_REQUEST },
+  { err_type::S3ErrorDetails_Type_TYPE_REQUEST_TIME_TOO_SKEWED, ERR_REQUEST_TIME_SKEWED },
+  { err_type::S3ErrorDetails_Type_TYPE_SIGNATURE_DOES_NOT_MATCH, ERR_SIGNATURE_NO_MATCH },
+  { err_type::S3ErrorDetails_Type_TYPE_TOKEN_REFRESH_REQUIRED, ERR_INVALID_REQUEST }
+};
+
+static std::map<err_type, int> auth_map;
+
+HandoffAuthResult AuthServiceClient::_translate_authenticator_error_code(
+    ::authenticator::v1::S3ErrorDetails_Type auth_type,
+    int32_t auth_http_status_code,
+    const std::string& message)
 {
-  namespace auth_v1 = rgw::auth::v1;
-  // Parse out the response codes and return the codes expected by the caller.
-  // These codes match rgw_auth_keystone.cc (and the HTTP arm of this object).
-  switch (resp->code()) {
-  case auth_v1::AUTH_CODE_OK:
-    return HandoffAuthResult(resp->uid(), resp->message());
-  case auth_v1::AUTH_CODE_UNAUTHORIZED:
-    return HandoffAuthResult(-ERR_SIGNATURE_NO_MATCH, resp->message());
-  case auth_v1::AUTH_CODE_NOTFOUND:
-    return HandoffAuthResult(-ERR_INVALID_ACCESS_KEY, resp->message());
-  case auth_v1::AUTH_CODE_FAILURE:
-    return HandoffAuthResult(-EACCES, resp->message());
-  case auth_v1::AUTH_CODE_FORBIDDEN:
-    /* fallthrough */
-  case auth_v1::AUTH_CODE_UNSPECIFIED:
-    /* fallthrough */
-  default:
-    return HandoffAuthResult(-EACCES, resp->message());
+  static std::once_flag map_init;
+  std::call_once(map_init, []() {
+    for (const auto& al : auth_list) {
+      auth_map[al.auth_type] = al.rgw_error_code;
+    }
+  });
+  auto srch = auth_map.find(auth_type);
+  if (srch != auth_map.end()) {
+    // Return an entry in the map directly.
+    return HandoffAuthResult(srch->second, message, HandoffAuthResult::error_type::AUTH_ERROR);
+  } else {
+    // With no direct mapping, return an RGW error with the HTTP status code
+    // indicated by the Authenticator. This is far from perfect; we're not
+    // giving the user a good experience here but we need to return something.
+    //
+    switch (auth_http_status_code) {
+    case 400:
+      return HandoffAuthResult(EINVAL, message, HandoffAuthResult::error_type::AUTH_ERROR);
+    case 404:
+      return HandoffAuthResult(ERR_NOT_FOUND, message, HandoffAuthResult::error_type::AUTH_ERROR);
+    case 403:
+    default:
+      return HandoffAuthResult(EACCES, message, HandoffAuthResult::error_type::AUTH_ERROR);
+    }
   }
 }
 
@@ -739,26 +800,29 @@ bool HandoffHelperImpl::valid_presigned_time(const DoutPrefixProvider* dpp, cons
 
 /**
  * @brief For a given HTTP method in string form ("GET", "POST", etc.) return
- * the corresponding rgw::auth::v1::RequestMethod enum value.
+ * the corresponding request HTTPMethod enum value.
+ *
+ * This is used to map the request type we get from RGW onto the enum the API
+ * expects.
  *
  * @param method The HTTP method as a string view.
- * @return rgw::auth::v1::RequestMethod the enum value, or
- * REQUEST_METHOD_UNSPECIFIED if the method is not recognised.
+ * @return authenticator::v1::AuthenticateRESTRequest::HTTPMethod the enum
+ * value, or ...HTTP_METHOD_UNSPECIFIED if the method is not recognised.
  */
-static rgw::auth::v1::RequestMethod method_to_reqmethod(const std::string_view& method)
+static authenticator::v1::AuthenticateRESTRequest::HTTPMethod method_to_reqmethod(const std::string_view& method)
 {
   if (method == "GET") {
-    return rgw::auth::v1::REQUEST_METHOD_GET;
+    return AuthenticateRESTRequest_HTTPMethod_HTTP_METHOD_GET;
   } else if (method == "PUT") {
-    return rgw::auth::v1::REQUEST_METHOD_PUT;
+    return AuthenticateRESTRequest_HTTPMethod_HTTP_METHOD_PUT;
   } else if (method == "POST") {
-    return rgw::auth::v1::REQUEST_METHOD_POST;
+    return AuthenticateRESTRequest_HTTPMethod_HTTP_METHOD_POST;
   } else if (method == "DELETE") {
-    return rgw::auth::v1::REQUEST_METHOD_DELETE;
+    return AuthenticateRESTRequest_HTTPMethod_HTTP_METHOD_DELETE;
   } else if (method == "HEAD") {
-    return rgw::auth::v1::REQUEST_METHOD_HEAD;
+    return AuthenticateRESTRequest_HTTPMethod_HTTP_METHOD_HEAD;
   } else {
-    return rgw::auth::v1::REQUEST_METHOD_UNSPECIFIED;
+    return AuthenticateRESTRequest_HTTPMethod_HTTP_METHOD_UNSPECIFIED;
   }
 }
 
@@ -875,35 +939,33 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp_in
   auto hdpp = HandoffDoutPrefixPipe(*dpp_in, "grpc_auth");
   auto dpp = &hdpp;
 
-  rgw::auth::v1::AuthRequest req;
+  authenticator::v1::AuthenticateRESTRequest req;
   // Fill in the request protobuf. Seem to have to create strings from
   // string_view, which is a shame.
-  req.set_access_key_id(std::string { access_key_id });
-  req.set_authorization_token_header(std::string { session_token });
   req.set_string_to_sign(std::string { string_to_sign });
   req.set_authorization_header(auth);
 
   // If we got authorization parameters, fill them in.
   if (authorization_param) {
-    auto req_param = req.mutable_param();
-
-    req_param->set_method(method_to_reqmethod(authorization_param->method()));
-    req_param->set_bucket_name(authorization_param->bucket_name());
-    req_param->set_object_key_name(authorization_param->object_key_name());
+    req.set_http_method(method_to_reqmethod(authorization_param->method()));
+    if (!authorization_param->bucket_name().empty()) {
+      req.set_bucket_name(authorization_param->bucket_name());
+    }
+    if (!authorization_param->object_key_name().empty()) {
+      req.set_object_key(authorization_param->object_key_name());
+    }
 
     const auto headers = authorization_param->http_headers();
-    // It's unlikely there'll be zero headers, but let's check first.
     if (headers.size() > 0) {
-      auto req_headers = req_param->mutable_http_headers();
+      auto req_headers = req.mutable_x_amz_headers();
       for (const auto& kv : headers) {
         req_headers->insert({ kv.first, kv.second });
       }
     }
-    req_param->set_http_request_path(authorization_param->http_request_path());
 
     const auto query_params = authorization_param->http_query_params();
     if (query_params.size() > 0) {
-      auto req_query_params = req_param->mutable_http_query_parameters();
+      auto req_query_params = req.mutable_query_parameters();
       for (const auto& kv : query_params) {
         req_query_params->insert({ kv.first, kv.second });
       }

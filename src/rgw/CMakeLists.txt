@@ -275,7 +275,13 @@ if(WITH_RADOSGW_GRPC)
 
   # EDIT THIS to specify .proto source files. Omit the '.proto' suffix!
   set(grpc_source
-    rgw/auth/v1/auth
+    authenticator/v1/authenticator
+
+    # These are 'standard' protobufs for the 'Richer error model'
+    # (https://grpc.io/docs/guides/error/). They're not installed anywhere by
+    # default.
+    google/rpc/error_details
+    google/rpc/status
   )
 
   # EDIT THIS to specify test .proto source files. Omit the '.proto suffix!
