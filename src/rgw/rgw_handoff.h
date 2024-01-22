@@ -21,15 +21,11 @@
 #ifndef RGW_HANDOFF_H
 #define RGW_HANDOFF_H
 
-#include "acconfig.h"
-
 #include <fmt/format.h>
-#include <functional>
 #include <iosfwd>
 #include <string>
 
 #include "common/async/yield_context.h"
-#include "common/ceph_context.h"
 #include "common/dout.h"
 #include "rgw/rgw_common.h"
 
