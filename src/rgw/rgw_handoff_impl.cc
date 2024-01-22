@@ -32,9 +32,11 @@
 #include "rgw_handoff_impl.h"
 
 #include <boost/algorithm/string.hpp>
+#include <cerrno>
 #include <cstring>
 #include <fmt/format.h>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <rgw_handoff.h>
 #include <string>
@@ -258,7 +260,7 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req)
   for (auto& detail : s.details()) {
     S3ErrorDetails s3_details;
     if (detail.UnpackTo(&s3_details)) {
-      return HandoffAuthResult(s3_details.http_status_code(), status.error_message(), HandoffAuthResult::error_type::AUTH_ERROR);
+      return _translate_authenticator_error_code(s3_details.type(), s3_details.http_status_code(), status.error_message());
     }
   }
   // There was no S3ErrorDetails message, so assume the error was related to
@@ -266,6 +268,66 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req)
   // of gRPC the transport errors use the Richer error model. (Stranger things
   // have happened.) This gets a TRANSPORT_ERROR, as above.
   return HandoffAuthResult(-EACCES, "S3ErrorDetails not found, error message follows: " + status.error_message(), HandoffAuthResult::error_type::TRANSPORT_ERROR);
+}
+
+using err_type = ::authenticator::v1::S3ErrorDetails_Type;
+
+// We can't statically initialise a map, so initialise a list and allocate a
+// map on first use in _translate_authenticator_error_code().
+struct HandoffAuthResultMapping {
+  err_type auth_type;
+  int rgw_error_code;
+};
+
+static HandoffAuthResultMapping auth_list[] = {
+  { err_type::S3ErrorDetails_Type_TYPE_ACCESS_DENIED, EACCES },
+  { err_type::S3ErrorDetails_Type_TYPE_AUTHORIZATION_HEADER_MALFORMED, ERR_INVALID_REQUEST },
+  { err_type::S3ErrorDetails_Type_TYPE_EXPIRED_TOKEN, EACCES },
+  { err_type::S3ErrorDetails_Type_TYPE_INTERNAL_ERROR, ERR_INTERNAL_ERROR },
+  { err_type::S3ErrorDetails_Type_TYPE_INVALID_ACCESS_KEY_ID, ERR_INVALID_ACCESS_KEY },
+  { err_type::S3ErrorDetails_Type_TYPE_INVALID_REQUEST, EINVAL },
+  { err_type::S3ErrorDetails_Type_TYPE_INVALID_SECURITY, EINVAL },
+  { err_type::S3ErrorDetails_Type_TYPE_INVALID_TOKEN, ERR_INVALID_IDENTITY_TOKEN },
+  { err_type::S3ErrorDetails_Type_TYPE_INVALID_URI, ERR_INVALID_REQUEST },
+  { err_type::S3ErrorDetails_Type_TYPE_METHOD_NOT_ALLOWED, ERR_METHOD_NOT_ALLOWED },
+  { err_type::S3ErrorDetails_Type_TYPE_MISSING_SECURITY_HEADER, ERR_INVALID_REQUEST },
+  { err_type::S3ErrorDetails_Type_TYPE_REQUEST_TIME_TOO_SKEWED, ERR_REQUEST_TIME_SKEWED },
+  { err_type::S3ErrorDetails_Type_TYPE_SIGNATURE_DOES_NOT_MATCH, ERR_SIGNATURE_NO_MATCH },
+  { err_type::S3ErrorDetails_Type_TYPE_TOKEN_REFRESH_REQUIRED, ERR_INVALID_REQUEST }
+};
+
+static std::map<err_type, int> auth_map;
+
+HandoffAuthResult AuthServiceClient::_translate_authenticator_error_code(
+    ::authenticator::v1::S3ErrorDetails_Type auth_type,
+    int32_t auth_http_status_code,
+    const std::string& message)
+{
+  static std::once_flag map_init;
+  std::call_once(map_init, []() {
+    for (const auto& al : auth_list) {
+      auth_map[al.auth_type] = al.rgw_error_code;
+    }
+  });
+  auto srch = auth_map.find(auth_type);
+  if (srch != auth_map.end()) {
+    // Return an entry in the map directly.
+    return HandoffAuthResult(srch->second, message, HandoffAuthResult::error_type::AUTH_ERROR);
+  } else {
+    // With no direct mapping, return an RGW error with the HTTP status code
+    // indicated by the Authenticator. This is far from perfect; we're not
+    // giving the user a good experience here but we need to return something.
+    //
+    switch (auth_http_status_code) {
+    case 400:
+      return HandoffAuthResult(EINVAL, message, HandoffAuthResult::error_type::AUTH_ERROR);
+    case 404:
+      return HandoffAuthResult(ERR_NOT_FOUND, message, HandoffAuthResult::error_type::AUTH_ERROR);
+    case 403:
+    default:
+      return HandoffAuthResult(EACCES, message, HandoffAuthResult::error_type::AUTH_ERROR);
+    }
+  }
 }
 
 /****************************************************************************/

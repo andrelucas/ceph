@@ -668,7 +668,7 @@ class TestAuthImpl final : public authenticator::v1::AuthenticatorService::Servi
     auto maybe_akid = extract_access_key_id_from_authorization_header(request->authorization_header());
     if (!maybe_akid) {
       ldpp_dout(&dpp_, 20) << __func__ << ": unable to extract access key from authorization header" << dendl;
-      return grpc_error(grpc::StatusCode::INVALID_ARGUMENT, s3err_type::S3ErrorDetails_Type_TYPE_AUTHORIZATION_HEADER_MALFORMED, 401, "unable to extract access key from authorization header");
+      return grpc_error(grpc::StatusCode::INVALID_ARGUMENT, s3err_type::S3ErrorDetails_Type_TYPE_AUTHORIZATION_HEADER_MALFORMED, 400, "unable to extract access key from authorization header");
     }
     auto access_key_id = *maybe_akid;
 
@@ -1351,6 +1351,48 @@ TEST_F(HandoffHelperImplSubsysTest, AuthorizationParamConstruct)
       EXPECT_EQ(param.http_headers().at("x-amz-foo"), "bar") << test_desc;
     }
   }
+}
+
+// Test AuthServiceClient::_translate_authenticator_error_code().
+TEST_F(HandoffHelperImplSubsysTest, TestReturnCodeMapping)
+{
+  // There's no need to be exhausive here, that's just copying an array or
+  // implementing a big switch. Check a few representative values, and check
+  // the cases where there's no mapping to make sure we're properly
+  // defaulting.
+
+  using err_type = S3ErrorDetails::Type;
+  HandoffAuthResult res { "testid", "bar" };
+
+  // Test a sample of standard responses.
+  res = AuthServiceClient::_translate_authenticator_error_code(err_type::S3ErrorDetails_Type_TYPE_ACCESS_DENIED, 403, "foo");
+  ASSERT_TRUE(res.is_err());
+  EXPECT_EQ(res.code(), EACCES);
+  res = AuthServiceClient::_translate_authenticator_error_code(err_type::S3ErrorDetails_Type_TYPE_AUTHORIZATION_HEADER_MALFORMED, 400, "foo");
+  ASSERT_TRUE(res.is_err());
+  EXPECT_EQ(res.code(), ERR_INVALID_REQUEST);
+  res = AuthServiceClient::_translate_authenticator_error_code(err_type::S3ErrorDetails_Type_TYPE_SIGNATURE_DOES_NOT_MATCH, 403, "foo");
+  ASSERT_TRUE(res.is_err());
+  EXPECT_EQ(res.code(), ERR_SIGNATURE_NO_MATCH);
+
+  // Test the way we handle the 'no mapping' case.
+
+  // Unspecified (no mapping), request a 403. We should get an 'EACCES'.
+  res = AuthServiceClient::_translate_authenticator_error_code(err_type::S3ErrorDetails_Type_TYPE_UNSPECIFIED, 403, "foo");
+  ASSERT_TRUE(res.is_err());
+  EXPECT_EQ(res.code(), EACCES);
+  // Unspecified (no mapping), request a 400. We should get an 'EINVAL'.
+  res = AuthServiceClient::_translate_authenticator_error_code(err_type::S3ErrorDetails_Type_TYPE_UNSPECIFIED, 400, "foo");
+  ASSERT_TRUE(res.is_err());
+  EXPECT_EQ(res.code(), EINVAL);
+  // Unspecified (no mapping), request a 404. We should get an 'ERR_NOT_FOUND'.
+  res = AuthServiceClient::_translate_authenticator_error_code(err_type::S3ErrorDetails_Type_TYPE_UNSPECIFIED, 404, "foo");
+  ASSERT_TRUE(res.is_err());
+  EXPECT_EQ(res.code(), ERR_NOT_FOUND);
+  // Unspecified (no mapping), request a 666 (nonsense code). We should get an 'EACCES'.
+  res = AuthServiceClient::_translate_authenticator_error_code(err_type::S3ErrorDetails_Type_TYPE_UNSPECIFIED, 666, "foo");
+  ASSERT_TRUE(res.is_err());
+  EXPECT_EQ(res.code(), EACCES);
 }
 
 } // namespace rgw

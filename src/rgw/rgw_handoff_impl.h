@@ -214,6 +214,31 @@ public:
    * @return HandoffAuthResult A completed auth result.
    */
   HandoffAuthResult Auth(const AuthenticateRESTRequest& req);
+
+  /**
+   * @brief Map an Authenticator gRPC error code onto an error code that RGW
+   * can digest.
+   *
+   * The Authenticator returns a details error code in S3ErrorDetails.Type. We
+   * need to map this onto the list of error codes in rgw_common.cc, array
+   * rgw_http_s3_errors. There may be exceptions if the inbuild RGW codes that
+   * match the Authenticator codes don't return the proper HTTP status code.
+   * This will probably need tweaked over time.
+   *
+   * If there's no direct mapping, we'll try to map a subset of HTTP error
+   * codes onto a matching RGW error code. If we can't do that, we'll return
+   * EACCES which results in an HTTP 403.
+   *
+   * @param auth_type The Authenticator error code (S3ErrorDetails.Type).
+   * @param auth_http_status_code The desired HTTP status code.
+   * @param message The Authenticator's error message (copied verbatim into
+   * the HandoffAuthResult).
+   * @return HandoffAuthResult
+   */
+  static HandoffAuthResult _translate_authenticator_error_code(
+      ::authenticator::v1::S3ErrorDetails_Type auth_type,
+      int32_t auth_http_status_code,
+      const std::string& message);
 };
 
 /****************************************************************************/
