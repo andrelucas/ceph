@@ -238,7 +238,7 @@ static boost::regex re_v4_auth { "^AWS4-HMAC-SHA256\\sCredential=(?<accesskey>[0
  *
  * This is the part the authenticator normally performs.
  */
-static std::optional<std::string> verify_aws_v4_signature(std::string string_to_sign, std::string access_key_id, std::string secret_key, std::string authorization)
+static std::optional<std::string> verify_aws_v4_signature(std::string string_to_sign, std::string secret_key, std::string authorization)
 {
   // std::cerr << fmt::format(FMT_STRING("get_aws_v4_hash(): string_to_sign='{}' access_key_id='{}' secret_key='{}' authorization='{}'"), string_to_sign, access_key_id, secret_key, authorization) << std::endl;
 
@@ -309,7 +309,7 @@ static boost::regex re_v2_auth { "^AWS\\s(?<accesskey>[0-9a-f]+):"
  *
  * This is the part the authenticator normally performs.
  */
-static std::optional<std::string> verify_aws_v2_signature(std::string string_to_sign, std::string access_key_id, std::string secret_key, std::string authorization)
+static std::optional<std::string> verify_aws_v2_signature(std::string string_to_sign, std::string secret_key, std::string authorization)
 {
   // std::cerr << fmt::format(FMT_STRING("get_aws_v4_hash(): string_to_sign='{}' access_key_id='{}' secret_key='{}' authorization='{}'"), string_to_sign, access_key_id, secret_key, authorization) << std::endl;
 
@@ -350,14 +350,36 @@ static std::optional<std::string> verify_aws_v2_signature(std::string string_to_
   return std::make_optional(sig_b64);
 }
 
-// Examine the Authorization header. If it starts with 'AWS ', call the v2
-// signature handler. Otherwise call the v4 handler.
-static std::optional<std::string> verify_aws_signature(std::string string_to_sign, std::string access_key_id, std::string secret_key, std::string authorization)
+// Given an Authorization header (v2 or v4), extract and return the access key
+// id. Return nullopt on any error.
+static std::optional<std::string> extract_access_key_id_from_authorization_header(const std::string authorization)
 {
   if (ba::starts_with(authorization, "AWS ")) {
-    return verify_aws_v2_signature(string_to_sign, access_key_id, secret_key, authorization);
+    boost::smatch m;
+    if (!boost::regex_match(authorization, m, re_v2_auth)) {
+      std::cerr << "no match V2" << std::endl;
+      return std::nullopt;
+    }
+    return std::make_optional(m.str("accesskey"));
+
   } else {
-    return verify_aws_v4_signature(string_to_sign, access_key_id, secret_key, authorization);
+    boost::smatch m;
+    if (!boost::regex_match(authorization, m, re_v4_auth)) {
+      std::cerr << "no match v4" << std::endl;
+      return std::nullopt;
+    }
+    return std::make_optional(m.str("accesskey"));
+  }
+}
+
+// Examine the Authorization header. If it starts with 'AWS ', call the v2
+// signature handler. Otherwise call the v4 handler.
+static std::optional<std::string> verify_aws_signature(std::string string_to_sign, std::string secret_key, std::string authorization)
+{
+  if (ba::starts_with(authorization, "AWS ")) {
+    return verify_aws_v2_signature(string_to_sign, secret_key, authorization);
+  } else {
+    return verify_aws_v4_signature(string_to_sign, secret_key, authorization);
   }
 }
 
@@ -382,7 +404,7 @@ static rgw::HandoffHTTPVerifyResult http_verify_by_func(const DoutPrefixProvider
   std::string authorization;
   try {
     JSONDecoder::decode_json("stringToSign", string_to_sign_base64, &parser, true);
-    JSONDecoder::decode_json("accessKeyId", access_key_id, &parser, true);
+    // JSONDecoder::decode_json("accessKeyId", access_key_id, &parser, true);
     JSONDecoder::decode_json("authorization", authorization, &parser, true);
 
   } catch (const JSONDecoder::err& err) {
@@ -399,7 +421,7 @@ static rgw::HandoffHTTPVerifyResult http_verify_by_func(const DoutPrefixProvider
   auto secret = (*info).secret;
   // std::cerr << fmt::format(FMT_STRING("verify_by_func(): string_to_sign='{}' access_key_id='{}' secret_key='{}' authorization='{}'"), string_to_sign, access_key_id, secret, authorization) << std::endl;
 
-  auto gen_signature = verify_aws_signature(string_to_sign, access_key_id, secret, authorization);
+  auto gen_signature = verify_aws_signature(string_to_sign, secret, authorization);
   std::string message;
   if (gen_signature.has_value()) {
     message = "OK";
@@ -460,7 +482,7 @@ TEST(HandoffMeta, SigPositive)
     auto info = info_for_credential(t.access_key);
     ASSERT_TRUE(info) << "No secret found for " << t.access_key;
     auto s2s = rgw::from_base64(t.ss_base64);
-    auto sig = verify_aws_signature(s2s, t.access_key, (*info).secret, t.authorization);
+    auto sig = verify_aws_signature(s2s, (*info).secret, t.authorization);
     ASSERT_TRUE(sig);
   }
 }
@@ -471,9 +493,9 @@ TEST(HandoffMeta, SigNegative)
     auto info = info_for_credential(t.access_key);
     ASSERT_TRUE(info) << "No secret found for " << t.access_key;
     auto s2s = rgw::from_base64(t.ss_base64);
-    auto sig = verify_aws_signature("0" + s2s, t.access_key, (*info).secret, t.authorization);
+    auto sig = verify_aws_signature("0" + s2s, (*info).secret, t.authorization);
     ASSERT_FALSE(sig);
-    sig = verify_aws_signature(t.ss_base64, t.access_key, (*info).secret + "0", t.authorization);
+    sig = verify_aws_signature(t.ss_base64, (*info).secret + "0", t.authorization);
     ASSERT_FALSE(sig);
   }
 }
@@ -602,44 +624,65 @@ TEST_F(HandoffHelperImplHTTPTest, HeaderExpectBadSignature)
 
 /* #region HandoffHelperImplGRPC tests */
 
-class TestAuthImpl final : public rgw::auth::v1::AuthService::Service {
+class TestAuthImpl final : public authenticator::v1::AuthenticatorService::Service {
 
   DoutPrefix dpp_ { g_ceph_context, ceph_subsys_rgw, "unittest gRPC server " };
 
-  // This is AuthService's ping equivalent.
-  grpc::Status Status(grpc::ServerContext* context, const rgw::auth::v1::StatusRequest* request, rgw::auth::v1::StatusResponse* response) override
+  // Save some typing. This is an enum in S3ErrorDetails.
+  using s3err_type = authenticator::v1::S3ErrorDetails::Type;
+
+  grpc::Status grpc_error(grpc::StatusCode grpc_code, s3err_type type, int http_code, const std::string& message)
   {
-    response->set_server_description("TestAuthImpl");
-    return grpc::Status::OK;
+    // This incantation is extracted from example code found here:
+    // https://github.com/grpc/grpc/blob/master/examples/cpp/error_details/greeter_server.cc,
+    // referenced from the 'Richer error model' doc
+    // (https://grpc.io/docs/guides/error/).
+    //
+    // Create an S3ErrorDetails object containing details RGW will need, and
+    // pack it into a grpc::Status object returnable by this method.
+
+    authenticator::v1::S3ErrorDetails err;
+    err.set_type(type);
+    // err.set_http_code(http_code);
+    // err.set_message(message);
+    authenticator::v1::S3ErrorDetails s3errordetails;
+    s3errordetails.set_type(type);
+    s3errordetails.set_http_status_code(http_code);
+
+    ::google::rpc::Status s;
+    s.set_code(grpc_code);
+    s.set_message(message);
+    s.add_details()->PackFrom(s3errordetails);
+    return grpc::Status { grpc_code, message, s.SerializeAsString() };
   }
 
   // Very simple implementation of the auth service. XXX Isn't as careful with
   // return codes as it could be, and returns no authorization-related codes.
-  grpc::Status Auth(grpc::ServerContext* context, const rgw::auth::v1::AuthRequest* request, rgw::auth::v1::AuthResponse* response) override
+  grpc::Status AuthenticateREST(grpc::ServerContext* context, const authenticator::v1::AuthenticateRESTRequest* request, authenticator::v1::AuthenticateRESTResponse* response) override
   {
     ldpp_dout(&dpp_, 20) << __func__ << ": enter" << dendl;
 
+    auto maybe_akid = extract_access_key_id_from_authorization_header(request->authorization_header());
+    if (!maybe_akid) {
+      ldpp_dout(&dpp_, 20) << __func__ << ": unable to extract access key from authorization header" << dendl;
+      return grpc_error(grpc::StatusCode::INVALID_ARGUMENT, s3err_type::S3ErrorDetails_Type_TYPE_AUTHORIZATION_HEADER_MALFORMED, 401, "unable to extract access key from authorization header");
+    }
+    auto access_key_id = *maybe_akid;
+
     // Use our pre-canned authentication database.
-    auto info = info_for_credential(request->access_key_id());
+    auto info = info_for_credential(access_key_id);
     if (!info) {
       ldpp_dout(&dpp_, 20) << __func__ << ": exit CREDENTIALS NOT FOUND" << dendl;
-      response->set_message("CREDENTIALS NOT FOUND");
-      response->set_code(rgw::auth::v1::AUTH_CODE_UNAUTHORIZED);
-      return grpc::Status::OK;
+      return grpc_error(grpc::StatusCode::UNAUTHENTICATED, s3err_type::S3ErrorDetails_Type_TYPE_INVALID_ACCESS_KEY_ID, 403, "credentials not found");
     }
     auto sig = verify_aws_signature(request->string_to_sign(),
-        request->access_key_id(),
         info->secret,
         request->authorization_header());
     if (!sig) {
       ldpp_dout(&dpp_, 20) << __func__ << ": exit SIGNATURE MISMATCH" << dendl;
-      response->set_message("SIGNATURE NOT VERIFIED");
-      response->set_code(rgw::auth::v1::AUTH_CODE_UNAUTHORIZED);
-      return grpc::Status::OK;
+      return grpc_error(grpc::StatusCode::UNAUTHENTICATED, s3err_type::S3ErrorDetails_Type_TYPE_SIGNATURE_DOES_NOT_MATCH, 403, "signature mismatch");
     }
-    response->set_message("OK");
-    response->set_uid(info->userid);
-    response->set_code(rgw::auth::v1::AUTH_CODE_OK);
+    response->set_user_id(info->userid);
     ldpp_dout(&dpp_, 20) << __func__ << ": exit OK" << dendl;
     return grpc::Status::OK;
   }
@@ -734,29 +777,6 @@ TEST_F(HandoffHelperImplGRPCTest, MetaStop)
   for (int n = 0; n < 1000; n++) {
     server().stop();
   }
-}
-
-// Status() is essentially a ping.
-TEST_F(HandoffHelperImplGRPCTest, StatusWorksWithServer)
-{
-  server().start();
-  helper_init();
-  auto channel = grpc::CreateChannel(server().address(), grpc::InsecureChannelCredentials());
-  AuthServiceClient client { channel };
-  StatusRequest req;
-  auto desc = client.Status(req);
-  ASSERT_TRUE(desc.has_value()) << "Status() RPC failed";
-  ASSERT_EQ(*desc, "TestAuthImpl");
-}
-
-TEST_F(HandoffHelperImplGRPCTest, StatusFailsWithoutServer)
-{
-  helper_init();
-  auto channel = grpc::CreateChannel(server().address(), grpc::InsecureChannelCredentials());
-  AuthServiceClient client { channel };
-  StatusRequest req;
-  auto desc = client.Status(req);
-  ASSERT_FALSE(desc.has_value()) << "Status() RPC succeeded when it should have failed";
 }
 
 // Fail properly when the Authorization header is absent and one can't be
@@ -1304,7 +1324,7 @@ TEST_F(HandoffHelperImplSubsysTest, AuthorizationParamConstruct)
 
     TestClient cio;
     // Set a header that should be included in the params.
-    cio.get_env().set("HTTP_FOO", "bar");
+    cio.get_env().set("HTTP_X_AMZ_FOO", "bar");
     s.cio = &cio;
 
     auto test_desc = fmt::format(FMT_STRING("for test: {} {} exp:{}"), t.method, t.r_uri, t.expected_pass);
@@ -1324,8 +1344,8 @@ TEST_F(HandoffHelperImplSubsysTest, AuthorizationParamConstruct)
       EXPECT_EQ(param.bucket_name(), t.exp_bucket) << test_desc;
       EXPECT_EQ(param.object_key_name(), t.exp_object_key) << test_desc;
       // Any valid request should have the headers.
-      ASSERT_NE(param.http_headers().find("foo"), param.http_headers().end()) << test_desc;
-      EXPECT_EQ(param.http_headers().at("foo"), "bar") << test_desc;
+      ASSERT_NE(param.http_headers().find("x-amz-foo"), param.http_headers().end()) << test_desc;
+      EXPECT_EQ(param.http_headers().at("x-amz-foo"), "bar") << test_desc;
     }
   }
 }
