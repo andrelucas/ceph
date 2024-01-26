@@ -1236,10 +1236,10 @@ size_t AWSv4ComplMulti::recv_body(char* const buf, const size_t buf_max)
   bool eof = false;
   size_t total = 0;
 
-  while (total < buf_max && !eof) {
+  do {
     const size_t received = recv_chunk(buf + total, buf_max - total, eof);
     total += received;
-  }
+  } while (total < buf_max && !eof);
   dout(20) << "AWSv4ComplMulti: received=" << total << dendl;
   return total;
 }
