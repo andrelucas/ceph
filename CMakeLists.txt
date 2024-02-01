@@ -484,44 +484,54 @@ if(WITH_RADOSGW)
   message(STATUS "crypto soname: ${LIBCRYPTO_SONAME}")
 
   if(WITH_RADOSGW_GRPC)
-    set(ABSL_PROPAGATE_CXX_STD ON CACHE INTERNAL "")
-    set(BUILD_TESTING OFF CACHE INTERNAL "")
+    # set(ABSL_PROPAGATE_CXX_STD ON CACHE INTERNAL "")
+    # set(BUILD_TESTING OFF CACHE INTERNAL "")
 
-    # Use libraries we've already configured. Without this, the CMake run
-    # explodes.
-    set(gRPC_SSL_PROVIDER package CACHE INTERNAL "")
-    set(gRPC_ZLIB_PROVIDER package CACHE INTERNAL "")
+    # # Use libraries we've already configured. Without this, the CMake run
+    # # explodes.
+    # set(gRPC_SSL_PROVIDER package CACHE INTERNAL "")
+    # set(gRPC_ZLIB_PROVIDER package CACHE INTERNAL "")
 
-    # Turn off everything but C++ and Python.
-    foreach(l in CSHARP NODE OBJECTIVE_C PHP RUBY)
-      set("gRPC_BUILD_GRPC_${l}_PLUGIN" OFF CACHE INTERNAL "")
-    endforeach(l)
+    # # Turn off everything but C++ and Python.
+    # foreach(l in CSHARP NODE OBJECTIVE_C PHP RUBY)
+    # set("gRPC_BUILD_GRPC_${l}_PLUGIN" OFF CACHE INTERNAL "")
+    # endforeach(l)
 
-    set(old_CMAKE_CXX_STANDARD ${CMAKE_CXX_STANDARD})
-    set(CMAKE_CXX_STANDARD 17)
+    # set(old_CMAKE_CXX_STANDARD ${CMAKE_CXX_STANDARD})
+    # set(CMAKE_CXX_STANDARD 17)
 
-    # See: https://github.com/protocolbuffers/protobuf/issues/12185
-    set(old_ABSL_ENABLE_INSTALL ${ABSL_ENABLE_INSTALL})
-    set(ABSL_ENABLE_INSTALL ON)
+    # # See: https://github.com/protocolbuffers/protobuf/issues/12185
+    # set(old_ABSL_ENABLE_INSTALL ${ABSL_ENABLE_INSTALL})
+    # set(ABSL_ENABLE_INSTALL ON)
+    set(RGW_GRPC_ROOT_DIR /usr/local/grpc)
 
-    # See: https://grpc.io/blog/cmake-improvements/
-    # Note: As soon as we can rely on having CMake >= 3.25, add 'SYSTEM' to
-    # the list of FetchContent_Declare arguments, so the gRPC (and related)
-    # includes are added as system includes. This cuts down on the number of
-    # annoying and irrelevant compiler warnings you'll see.
-    #
-    include(FetchContent)
-    FetchContent_Declare(
-      gRPC
-      GIT_REPOSITORY https://github.com/grpc/grpc
-      GIT_TAG v1.59.3
-      GIT_SHALLOW ON
-    )
-    set(FETCHCONTENT_QUIET OFF)
-    FetchContent_MakeAvailable(gRPC)
+    foreach(pkg in absl utf8_range protobuf grpc)
+      list(APPEND CMAKE_PREFIX_PATH ${RGW_GRPC_ROOT_DIR}/lib/cmake/${pkg})
+    endforeach()
 
-    set(CMAKE_CXX_STANDARD ${old_CMAKE_CXX_STANDARD})
-    set(ABSL_ENABLE_INSTALL ${old_ABSL_ENABLE_INSTALL})
+    find_package(absl REQUIRED)
+    find_package(utf8_range REQUIRED)
+    find_package(protobuf REQUIRED)
+    find_package(gRPC REQUIRED)
+
+    # # See: https://grpc.io/blog/cmake-improvements/
+    # # Note: As soon as we can rely on having CMake >= 3.25, add 'SYSTEM' to
+    # # the list of FetchContent_Declare arguments, so the gRPC (and related)
+    # # includes are added as system includes. This cuts down on the number of
+    # # annoying and irrelevant compiler warnings you'll see.
+    # #
+    # include(FetchContent)
+    # FetchContent_Declare(
+    #   gRPC
+    #   GIT_REPOSITORY https://github.com/grpc/grpc
+    #   GIT_TAG v1.59.3
+    #   GIT_SHALLOW ON
+    # )
+    # set(FETCHCONTENT_QUIET OFF)
+    # FetchContent_MakeAvailable(gRPC)
+
+    # set(CMAKE_CXX_STANDARD ${old_CMAKE_CXX_STANDARD})
+    # set(ABSL_ENABLE_INSTALL ${old_ABSL_ENABLE_INSTALL})
 
   endif(WITH_RADOSGW_GRPC)
 endif (WITH_RADOSGW)

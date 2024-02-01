@@ -55,8 +55,8 @@ function(buf_grpc_expand var_proto var_header var_source proto_dir proto_list ou
         list(APPEND _hdr ${output_dir}/${input}.grpc.pb.h)
         list(APPEND _src ${output_dir}/${input}.pb.cc)
         list(APPEND _src ${output_dir}/${input}.grpc.pb.cc)
-        list(APPEND _src ${output_dir}/${input}_pb2.py)
-        list(APPEND _src ${output_dir}/${input}_pb2_grpc.py)
+        # list(APPEND _src ${output_dir}/${input}_pb2.py)
+        # list(APPEND _src ${output_dir}/${input}_pb2_grpc.py)
     endforeach()
 
     # Export var_header and var_source (can't use return(PROPAGATE), we can't

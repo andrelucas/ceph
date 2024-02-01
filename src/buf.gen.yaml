@@ -9,9 +9,9 @@ plugins:
     # This is the binary that the gRPC C++ source builds into bin/.
     path: grpc_cpp_plugin
     out: bufgen
-  - plugin: python
-    out: bufgen
-  - plugin: grpc_python
-    # This is the binary that the gRPC C++ source builds into bin/.
-    path: grpc_python_plugin
-    out: bufgen
+  # - plugin: python
+  #   out: bufgen
+  # - plugin: grpc_python
+  #   # This is the binary that the gRPC C++ source builds into bin/.
+  #   path: grpc_python_plugin
+  #   out: bufgen

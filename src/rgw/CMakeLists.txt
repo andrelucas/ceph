@@ -324,9 +324,10 @@ if(WITH_RADOSGW_GRPC)
   # Golang gRPC tools are separate and will need to be installed by some other
   # means.
   set(grpc_tools
-    protoc
-    grpc_cpp_plugin
-    grpc_python_plugin
+    ${RGW_GRPC_ROOT_DIR}/bin/protoc
+    ${RGW_GRPC_ROOT_DIR}/bin/grpc_cpp_plugin
+
+    # ${RGW_GRPC_ROOT_DIR}/bin/grpc_python_plugin
   )
 
   # This custom command is used to invoke buf to regenerate the gRPC and
@@ -343,16 +344,17 @@ if(WITH_RADOSGW_GRPC)
   # to rebuild a target that lists those generated .cc and .h files as
   # sources.
   #
+  message(WARNING "XXX RGW_GRPC_ROOT_DIR=${RGW_GRPC_ROOT_DIR}")
   add_custom_command(
     OUTPUT ${rgw_grpc_gen_sources} ${rgw_grpc_gen_test_sources}
-    COMMAND env PATH=${CMAKE_BINARY_DIR}/bin:$$PATH buf generate --output ${CMAKE_BINARY_DIR}
+    COMMAND env PATH=${RGW_GRPC_ROOT_DIR}/bin:$$PATH buf generate --output ${CMAKE_BINARY_DIR}
     DEPENDS ${grpc_tools} ${rgw_grpc_proto} ${rgw_grpc_test_proto} ${buf_config_files}
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src"
   )
 
   # rgw_grpc_lint calls `buf lint` to check the inputs.
   add_custom_target(rgw_grpc_lint
-    COMMAND env PATH=${CMAKE_BINARY_DIR}/bin:$$PATH buf lint
+    COMMAND env PATH=${RGW_GRPC_ROOT_DIR}/bin:$$PATH buf lint
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src"
   )
 
@@ -376,7 +378,7 @@ if(WITH_RADOSGW_GRPC)
     ${rgw_grpc_gen_test_sources}
   )
   target_link_libraries(rgw_grpc_genobj
-    PRIVATE grpc++
+    PRIVATE gRPC::grpc++
   )
   target_include_directories(rgw_grpc_genobj
     PUBLIC "${BUFGEN_DIRECTORY}"
@@ -387,7 +389,7 @@ if(WITH_RADOSGW_GRPC)
   # rgw_grpc_test_genobj themselves - don't link these into the main library.
   add_dependencies(rgw_common rgw_grpc_genobj)
 
-  target_link_libraries(rgw_common PUBLIC rgw_grpc_genobj grpc++)
+  target_link_libraries(rgw_common PUBLIC rgw_grpc_genobj gRPC::grpc++)
 endif()
 
 set(rgw_a_srcs
