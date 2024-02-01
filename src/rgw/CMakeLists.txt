@@ -344,7 +344,6 @@ if(WITH_RADOSGW_GRPC)
   # to rebuild a target that lists those generated .cc and .h files as
   # sources.
   #
-  message(WARNING "XXX RGW_GRPC_ROOT_DIR=${RGW_GRPC_ROOT_DIR}")
   add_custom_command(
     OUTPUT ${rgw_grpc_gen_sources} ${rgw_grpc_gen_test_sources}
     COMMAND env PATH=${RGW_GRPC_ROOT_DIR}/bin:$$PATH buf generate --output ${CMAKE_BINARY_DIR}
