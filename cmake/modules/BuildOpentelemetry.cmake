@@ -6,14 +6,21 @@ function(target_create _target _lib)
 endfunction()
 
 function(build_opentelemetry)
+  set(old_CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH}") # XXX
+  set(opentelemetry_CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};${CMAKE_BINARY_DIR}/_deps/grpc-build/third_party/abseil-cpp") # XXX
+  set(grpc_absl_dir "${RGW_GRPC_ROOT_DIR}/lib/cmake/absl")
+  set(myabsl_prefix_path "${grpc_absl_dir}")
+
   set(opentelemetry_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/opentelemetry-cpp")
   set(opentelemetry_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/opentelemetry-cpp")
   set(opentelemetry_cpp_targets opentelemetry_trace opentelemetry_exporter_jaeger_trace)
   set(opentelemetry_CMAKE_ARGS -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-                               -DWITH_JAEGER=ON
-                               -DBUILD_TESTING=OFF
-                               -DWITH_EXAMPLES=OFF
-                               -DBoost_INCLUDE_DIR=${CMAKE_BINARY_DIR}/boost/include)
+    -DWITH_ABSEIL=ON
+    -DWITH_JAEGER=ON
+    -DBUILD_TESTING=OFF
+    -DWITH_EXAMPLES=OFF
+    -DCMAKE_PREFIX_PATH=${myabsl_prefix_path}
+    -DBoost_INCLUDE_DIR=${CMAKE_BINARY_DIR}/boost/include)
 
   set(opentelemetry_libs
       ${opentelemetry_BINARY_DIR}/sdk/src/trace/libopentelemetry_trace.a
@@ -84,4 +91,6 @@ function(build_opentelemetry)
     opentelemetry::libopentelemetry
     PROPERTIES
       INTERFACE_LINK_LIBRARIES "${opentelemetry_deps}")
+
+  set(CMAKE_PREFIX_PATH "${old_CMAKE_PREFIX_PATH}") # XXX
 endfunction()
