@@ -19,6 +19,8 @@
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
 #include <gtest/gtest.h>
+#include <openssl/conf.h>
+#include <openssl/crypto.h>
 #include <openssl/evp.h>
 
 #include "authenticator/v1/authenticator.pb.h"
@@ -38,9 +40,8 @@
 
 #include "test_rgw_grpc_util.h"
 
-// These are 'standard' protobufs for the 'Richer error model'
+// These are generated from 'standard' protos for the 'Richer error model'
 // (https://grpc.io/docs/guides/error/).
-#include "google/rpc/error_details.pb.h"
 #include "google/rpc/status.pb.h"
 
 // This is the protobuf for the authenticator service, copied from
@@ -203,27 +204,135 @@ namespace ba = boost::algorithm;
 
 #define SSL_CHAR_CAST(x) reinterpret_cast<const unsigned char*>(x)
 
+/**
+ * @brief Wrap a C resource pointer with custom initialisation and destruction
+ * functions so that the resource becomes RAII. Especially useful for OpenSSL
+ * C resources.
+ *
+ * @tparam T The pointed-to type.
+ */
+template <typename T>
+class RaiiPtr {
+private:
+  T* ptr = nullptr;
+
+  using create_func = std::function<T*()>;
+  using destroy_func = std::function<void(RaiiPtr<T>*)>;
+
+  destroy_func deleter;
+
+public:
+  /**
+   * @brief Construct a new RaiiPtr object, providing the custom
+   * initialisation and destruction methods.
+   *
+   * \p creator and \p deleter are typically lambdas. For example, if MYTYPE
+   * is a type, allocated with MYTYPE_new(foo, bar), and deleted with
+   * MYTYPE_free(), use:
+   *
+   * ```
+   * RaiiPtr<MYTYPE> p(
+   *   [&foo, &bar]() -> auto { return MYTYPE_new(foo, bar); } ,
+   *   [](auto w) { MYTYPE_free(w->get()); }
+   * );
+   * ```
+   *
+   * @param creator the creation function
+   * @param deleter the deletion function
+   */
+  RaiiPtr(create_func creator, destroy_func deleter) noexcept
+      : deleter { deleter }
+  {
+    ptr = creator();
+  }
+  /**
+   * @brief Throwing constructor for a new Raii Ptr object, providing the
+   * custom initialisation and destruction methods, and a text message to
+   * include in an exception raised if the initialisation function returns a
+   * nullptr.
+   *
+   * \p creator and \p deleter are typically lambdas. For example, if MYTYPE
+   * is a type, allocated with MYTYPE_new(foo, bar), and deleted with
+   * MYTYPE_free(), throwing an exception containing the string 'baz', use:
+   *
+   * ```
+   * RaiiPtr<MYTYPE> p(
+   *   [&foo, &bar]() -> auto { return MYTYPE_new(foo, bar); } ,
+   *   [](auto w) { MYTYPE_free(w->get()); },
+   *   "baz"
+   * );
+   * ```
+   *
+   * @param creator
+   * @param _message
+   */
+  RaiiPtr(create_func creator, destroy_func, const std::string& throw_message)
+  {
+    T* p = creator();
+    if (p == nullptr) {
+      throw std::runtime_error("RaiiPtr creation failed: " + throw_message);
+    }
+    ptr = p;
+  }
+  ~RaiiPtr() noexcept
+  {
+    if (valid()) {
+      deleter(this);
+    }
+  }
+  // Play it safe and don't allow this to be copied or moved. Moves are easy
+  // in principle and could be added later if needed.
+  RaiiPtr(const RaiiPtr&) = delete;
+  RaiiPtr& operator=(const RaiiPtr&) = delete;
+  RaiiPtr(RaiiPtr&&) = delete;
+  RaiiPtr& operator=(RaiiPtr&&) = delete;
+
+  T* get() const noexcept
+  {
+    return ptr;
+  }
+  bool valid() const noexcept
+  {
+    return ptr != nullptr;
+  }
+}; // class RaiiPtr<T>
+
 // Wrap the rigmarole of hashing a buffer with OpenSSL.
-static std::optional<std::vector<uint8_t>> _hash_by(const std::vector<uint8_t>& key, const std::string& input, const std::string& hash_type)
+static std::optional<std::vector<uint8_t>>
+_hash_by(const std::vector<uint8_t>& key, const std::string& input, const std::string& hash_type)
 {
-  auto pkey = EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, key.data(), key.size());
+  auto pkey = RaiiPtr<EVP_PKEY>(
+      [&key]() -> auto { return EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, key.data(), key.size()); },
+      [](auto w) { EVP_PKEY_free(w->get()); });
+  if (!pkey.valid()) {
+    std::cerr << "Cannot initialise EVP_PKEY" << std::endl;
+    return std::nullopt;
+  }
+  auto ctx = RaiiPtr<EVP_MD_CTX>(
+      []() -> auto { return EVP_MD_CTX_new(); },
+      [](auto w) { EVP_MD_CTX_free(w->get()); });
+
   auto md = EVP_get_digestbyname(hash_type.c_str());
-  auto ctx = EVP_MD_CTX_new();
-  if (!EVP_DigestSignInit(ctx, NULL, md, NULL, pkey)) {
+  if (md == NULL) {
+    std::cerr << fmt::format(FMT_STRING("Cannot fetch hash {}"), hash_type) << std::endl;
+    return std::nullopt;
+  }
+
+  if (!EVP_DigestSignInit(ctx.get(), NULL, md, NULL, pkey.get())) {
     std::cerr << "HMAC ctx init failed" << std::endl;
     return std::nullopt;
   }
-  if (!EVP_DigestSignUpdate(ctx, input.data(), input.size())) {
+  std::cerr << fmt::format(FMT_STRING("input: {} size: {}"), input, input.size()) << std::endl;
+  if (!EVP_DigestSignUpdate(ctx.get(), input.data(), input.size())) {
     std::cerr << "HMAC update failed" << std::endl;
     return std::nullopt;
   }
   std::vector<uint8_t> hash(EVP_MD_size(md));
   size_t hsiz = hash.size();
-  if (!EVP_DigestSignFinal(ctx, hash.data(), &hsiz) || static_cast<int>(hsiz) != EVP_MD_size(md)) {
+  if (!EVP_DigestSignFinal(ctx.get(), hash.data(), &hsiz) || static_cast<int>(hsiz) != EVP_MD_size(md)) {
     std::cerr << "HMAC final failed" << std::endl;
     return std::nullopt;
   }
-  EVP_MD_CTX_free(ctx);
   return std::make_optional(hash);
 }
 
