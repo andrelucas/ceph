@@ -6,6 +6,10 @@
 #include <iostream>
 #include <map>
 
+// OBJGEN1-627: The Billion Laughs attack prevention APIs are wrapped in an
+// #ifdef XML_DTD macro.
+#define XML_DTD
+
 #include <expat.h>
 
 #include "include/types.h"
@@ -14,6 +18,11 @@
 #include "rgw_xml.h"
 
 using namespace std;
+
+// OBJGEN1-627: We require libexpat 2.5.0 or later for security reasons.
+#if XML_MAJOR_VERSION < 2 || XML_MINOR_VERSION < 5
+#error libexpat >= 2.5.0 is required
+#endif
 
 XMLObjIter::
 XMLObjIter()
@@ -156,6 +165,9 @@ RGWXMLParser::
 RGWXMLParser() : buf(nullptr), buf_len(0), cur_obj(nullptr), success(true), init_called(false)
 {
   p = XML_ParserCreate(nullptr);
+  // OBJGEN1-627: Lower XML parser attach thresholds aggressively.
+  XML_SetBillionLaughsAttackProtectionActivationThreshold(p, 1024UL * 1024UL);
+  XML_SetBillionLaughsAttackProtectionMaximumAmplification(p, 10.0);
 }
 
 RGWXMLParser::
