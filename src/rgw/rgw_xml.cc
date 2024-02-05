@@ -165,7 +165,7 @@ RGWXMLParser::
 RGWXMLParser() : buf(nullptr), buf_len(0), cur_obj(nullptr), success(true), init_called(false)
 {
   p = XML_ParserCreate(nullptr);
-  // OBJGEN1-627: Lower XML parser attach thresholds aggressively.
+  // OBJGEN1-627: Lower XML parser attack thresholds aggressively.
   XML_SetBillionLaughsAttackProtectionActivationThreshold(p, 1024UL * 1024UL);
   XML_SetBillionLaughsAttackProtectionMaximumAmplification(p, 10.0);
 }
