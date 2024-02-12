@@ -229,3 +229,6 @@ add_executable(unittest_rgw_lua test_rgw_lua.cc)
 add_ceph_unittest(unittest_rgw_lua)
 target_link_libraries(unittest_rgw_lua ${rgw_libs} ${LUA_LIBRARIES})
 
+add_executable(unittest_rgw_expat_mitigations test_rgw_expat_mitigations.cc)
+add_ceph_unittest(unittest_rgw_expat_mitigations)
+target_link_libraries(unittest_rgw_expat_mitigations ${EXPAT_LIBRARIES} ${rgw_libs})
