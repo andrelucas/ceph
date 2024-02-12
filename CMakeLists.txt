@@ -442,6 +442,10 @@ if(WITH_RADOSGW)
   set(_saved_CMAKE_MESSAGE_LOG_LEVEL ${CMAKE_MESSAGE_LOG_LEVEL})
   set(CMAKE_MESSAGE_LOG_LEVEL NOTICE)
 
+  # Don't confuse matters by having an in-tree shared library version of
+  # expat. We only want the static library.
+  set(EXPAT_SHARED_LIBS OFF)
+
   # SOURCE_SUBDIR is a CMake 3.18 feature. Ubuntu 20.04's version is 3.16.3.
   FetchContent_Declare(
     expat
