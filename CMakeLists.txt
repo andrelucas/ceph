@@ -503,9 +503,12 @@ if(WITH_RADOSGW)
     # # See: https://github.com/protocolbuffers/protobuf/issues/12185
     # set(old_ABSL_ENABLE_INSTALL ${ABSL_ENABLE_INSTALL})
     # set(ABSL_ENABLE_INSTALL ON)
+    set(RGW_ABSL_ROOT_DIR /usr/local/abseil-cpp)
     set(RGW_GRPC_ROOT_DIR /usr/local/grpc)
 
-    foreach(pkg in absl utf8_range protobuf grpc)
+    list(APPEND CMAKE_PREFIX_PATH ${RGW_ABSL_ROOT_DIR}/lib/cmake/absl)
+
+    foreach(pkg in utf8_range protobuf grpc)
       list(APPEND CMAKE_PREFIX_PATH ${RGW_GRPC_ROOT_DIR}/lib/cmake/${pkg})
     endforeach()
 
@@ -522,10 +525,10 @@ if(WITH_RADOSGW)
     # #
     # include(FetchContent)
     # FetchContent_Declare(
-    #   gRPC
-    #   GIT_REPOSITORY https://github.com/grpc/grpc
-    #   GIT_TAG v1.59.3
-    #   GIT_SHALLOW ON
+    # gRPC
+    # GIT_REPOSITORY https://github.com/grpc/grpc
+    # GIT_TAG v1.59.3
+    # GIT_SHALLOW ON
     # )
     # set(FETCHCONTENT_QUIET OFF)
     # FetchContent_MakeAvailable(gRPC)

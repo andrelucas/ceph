@@ -6,10 +6,12 @@ function(target_create _target _lib)
 endfunction()
 
 function(build_opentelemetry)
-  set(old_CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH}") # XXX
-  set(opentelemetry_CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};${CMAKE_BINARY_DIR}/_deps/grpc-build/third_party/abseil-cpp") # XXX
-  set(grpc_absl_dir "${RGW_GRPC_ROOT_DIR}/lib/cmake/absl")
-  set(myabsl_prefix_path "${grpc_absl_dir}")
+  if(WITH_RADOSGW_GRPC)
+    set(old_CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH}")
+
+    # Point to our preinstalled abseil-cpp.
+    set(opentelemetry_CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};${RGW_ABSL_ROOT_DIR}/lib/cmake/absl")
+  endif(WITH_RADOSGW_GRPC)
 
   set(opentelemetry_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/opentelemetry-cpp")
   set(opentelemetry_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/opentelemetry-cpp")
@@ -92,5 +94,7 @@ function(build_opentelemetry)
     PROPERTIES
       INTERFACE_LINK_LIBRARIES "${opentelemetry_deps}")
 
-  set(CMAKE_PREFIX_PATH "${old_CMAKE_PREFIX_PATH}") # XXX
+  if(WITH_RADOSGW_GRPC)
+    set(CMAKE_PREFIX_PATH "${old_CMAKE_PREFIX_PATH}")
+  endif(WITH_RADOSGW_GRPC)
 endfunction()
