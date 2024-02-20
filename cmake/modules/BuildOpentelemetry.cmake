@@ -12,9 +12,6 @@ function(build_opentelemetry)
     # This has to be set everywhere, because lots of things include the
     # opentelemetry headers.
     add_compile_definitions(HAVE_ABSEIL=1)
-    # Stuff all over the tree uses opentelemetry, so we have to be able to
-    # find the Abseil headers as "absl/*".
-    include_directories(${RGW_ABSL_ROOT_DIR}/include)
   else()
     set(opentelemetry_CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH}")
   endif(WITH_RADOSGW_GRPC)
@@ -43,6 +40,12 @@ function(build_opentelemetry)
                                 ${opentelemetry_SOURCE_DIR}/exporters/jaeger/include/
                                 ${opentelemetry_SOURCE_DIR}/ext/include/
                                 ${opentelemetry_SOURCE_DIR}/sdk/include/)
+  if(WITH_RADOSGW_GRPC)
+    # Stuff all over the tree uses opentelemetry, so we have to be able to
+    # find the Abseil headers as "absl/*".
+    list(APPEND opentelemetry_include_dir ${RGW_ABSL_ROOT_DIR}/include)
+  endif(WITH_RADOSGW_GRPC)
+
   include_directories(SYSTEM ${opentelemetry_include_dir})
   # TODO: add target based propogation
   set(opentelemetry_deps opentelemetry_trace opentelemetry_resources opentelemetry_common
