@@ -7,8 +7,14 @@ endfunction()
 
 function(build_opentelemetry)
   if(WITH_RADOSGW_GRPC)
-    # Point to our preinstalled abseil-cpp.
+    # Point CMake to our preinstalled abseil-cpp.
     set(opentelemetry_CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};${RGW_ABSL_ROOT_DIR}/lib/cmake/absl")
+    # This has to be set everywhere, because lots of things include the
+    # opentelemetry headers.
+    add_compile_definitions(HAVE_ABSEIL=1)
+    # Stuff all over the tree uses opentelemetry, so we have to be able to
+    # find the Abseil headers as "absl/*".
+    include_directories(${RGW_ABSL_ROOT_DIR}/include)
   else()
     set(opentelemetry_CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH}")
   endif(WITH_RADOSGW_GRPC)
