@@ -7,10 +7,10 @@ endfunction()
 
 function(build_opentelemetry)
   if(WITH_RADOSGW_GRPC)
-    set(old_CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH}")
-
     # Point to our preinstalled abseil-cpp.
     set(opentelemetry_CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};${RGW_ABSL_ROOT_DIR}/lib/cmake/absl")
+  else()
+    set(opentelemetry_CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH}")
   endif(WITH_RADOSGW_GRPC)
 
   set(opentelemetry_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/opentelemetry-cpp")
@@ -21,7 +21,8 @@ function(build_opentelemetry)
     -DWITH_JAEGER=ON
     -DBUILD_TESTING=OFF
     -DWITH_EXAMPLES=OFF
-    -DCMAKE_PREFIX_PATH=${myabsl_prefix_path}
+    -DCMAKE_PREFIX_PATH=${opentelemetry_CMAKE_PREFIX_PATH}
+    -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
     -DBoost_INCLUDE_DIR=${CMAKE_BINARY_DIR}/boost/include)
 
   set(opentelemetry_libs
@@ -93,8 +94,4 @@ function(build_opentelemetry)
     opentelemetry::libopentelemetry
     PROPERTIES
       INTERFACE_LINK_LIBRARIES "${opentelemetry_deps}")
-
-  if(WITH_RADOSGW_GRPC)
-    set(CMAKE_PREFIX_PATH "${old_CMAKE_PREFIX_PATH}")
-  endif(WITH_RADOSGW_GRPC)
 endfunction()
