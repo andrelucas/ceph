@@ -6539,7 +6539,7 @@ void RGWCompleteMultipart::execute(optional_yield y)
   
 
   // make reservation for notification if needed
-  res = store->get_notification(meta_obj.get(), nullptr, s, rgw::notify::ObjectCreatedCompleteMultipartUpload, y,
+  res = driver->get_notification(meta_obj.get(), nullptr, s, rgw::notify::ObjectCreatedCompleteMultipartUpload, y,
                                  &s->object->get_name());
   op_ret = res->publish_reserve(this);
   if (op_ret < 0) {
@@ -6566,7 +6566,7 @@ void RGWCompleteMultipart::execute(optional_yield y)
   upload_time = upload->get_mtime();
   int r = serializer->unlock();
   if (r < 0) {
-    ldpp_dout(this, 0) << "WARNING: failed to unlock " << serializer->oid << dendl;
+    ldpp_dout(this, 0) << "WARNING: failed to unlock " << *serializer.get() << dendl;
   }
 } // RGWCompleteMultipart::execute
 
@@ -6641,7 +6641,7 @@ void RGWCompleteMultipart::complete()
   // when the bucket is, as that would add an unneeded delete marker
   // moved to complete to prevent segmentation fault in publish commit
   if (meta_obj.get() != nullptr) {
-    int ret = meta_obj->delete_object(this, s->obj_ctx, null_yield, true /* prevent versioning */);
+    int ret = meta_obj->delete_object(this, null_yield, true /* prevent versioning */);
     if (ret >= 0) {
       /* serializer's exclusive lock is released */
       serializer->clear_locked();
