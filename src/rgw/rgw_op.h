@@ -282,6 +282,11 @@ public:
   virtual dmc::client_id dmclock_client() { return dmc::client_id::metadata; }
   virtual dmc::Cost dmclock_cost() { return 1; }
   virtual void write_ops_log_entry(rgw_log_entry& entry) const {};
+
+  using UriLogRewrite = std::function<const std::string(const std::string&)>;
+  virtual std::optional<UriLogRewrite> get_uri_log_rewrite() const {
+    return std::nullopt;
+  }
 };
 
 class RGWDefaultResponseOp : public RGWOp {
@@ -1876,6 +1881,11 @@ protected:
   bufferlist data;
   std::unique_ptr<rgw::sal::MPSerializer> serializer;
   jspan multipart_trace;
+  ceph::real_time upload_time;
+  std::unique_ptr<rgw::sal::Object> target_obj;
+  std::unique_ptr<rgw::sal::Notification> res;
+  std::unique_ptr<rgw::sal::Object> meta_obj;
+  off_t ofs = 0;
 
 public:
   RGWCompleteMultipart() {}
