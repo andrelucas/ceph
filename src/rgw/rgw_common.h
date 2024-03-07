@@ -585,6 +585,7 @@ enum RGWIdentityType
   TYPE_LDAP=3,
   TYPE_ROLE=4,
   TYPE_WEB=5,
+  TYPE_HANDOFF=6,
 };
 
 static std::string RGW_STORAGE_CLASS_STANDARD = "STANDARD";
