@@ -306,4 +306,3 @@ target_link_libraries(unittest_rgw_grpc
 add_executable(unittest_rgw_expat_mitigations test_rgw_expat_mitigations.cc)
 add_ceph_unittest(unittest_rgw_expat_mitigations)
 target_link_libraries(unittest_rgw_expat_mitigations ${EXPAT_LIBRARIES} ${rgw_libs})
-
