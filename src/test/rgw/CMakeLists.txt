@@ -294,6 +294,15 @@ target_link_libraries(radosgw-cr-test ${rgw_libs} librados
   ${CURL_LIBRARIES} ${EXPAT_LIBRARIES} ${BLKID_LIBRARIES}
   GTest::GTest)
 
+add_executable(unittest_rgw_grpc
+  test_rgw_grpc.cc test_rgw_grpc_util.h
+)
+add_ceph_unittest(unittest_rgw_grpc)
+target_link_libraries(unittest_rgw_grpc
+  ${UNITTEST_LIBS}
+  ${rgw_libs}
+)
+
 add_executable(unittest_rgw_expat_mitigations test_rgw_expat_mitigations.cc)
 add_ceph_unittest(unittest_rgw_expat_mitigations)
 target_link_libraries(unittest_rgw_expat_mitigations ${EXPAT_LIBRARIES} ${rgw_libs})
