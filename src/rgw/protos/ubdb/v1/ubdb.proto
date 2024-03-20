@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package ubdb.v1;
+
+option go_package = "bits.linode.com/StorageTeam/ubns/gen/proto/ubdb/v1";
+
+// UBDBService provides an endpoint for UBDB.
+service UBDBService {
+  // AddBucketEntry creates a new BucketEntry in UBDB.
+  rpc AddBucketEntry(AddBucketEntryRequest) returns (AddBucketEntryResponse);
+
+  // DeleteBucketEntry deletes a BucketEntry in UBDB.
+  rpc DeleteBucketEntry(DeleteBucketEntryRequest) returns (DeleteBucketEntryResponse);
+
+  // UpdateBucketEntry deletes a BucketEntry in UBDB.
+  rpc UpdateBucketEntry(UpdateBucketEntryRequest) returns (UpdateBucketEntryResponse);
+}
+
+// Request message for adding a bucket entry.
+message AddBucketEntryRequest {
+  string bucket = 1; // The name of the bucket. @gotags: xml:"Bucket" json:"Bucket"
+}
+
+// Response message for adding a bucket entry.
+message AddBucketEntryResponse {}
+
+// Request message for updating a bucket entry.
+message UpdateBucketEntryRequest {
+  string bucket = 1; // The name of the bucket. @gotags: xml:"Bucket" json:"Bucket"
+}
+
+// Response message for updating a bucket entry.
+message UpdateBucketEntryResponse {}
+
+// Request message for deleting a bucket entry.
+message DeleteBucketEntryRequest {
+  string bucket = 1; // The name of the bucket. @gotags: xml:"Bucket" json:"Bucket"
+}
+
+// Response message for deleting a bucket entry.
+message DeleteBucketEntryResponse {}

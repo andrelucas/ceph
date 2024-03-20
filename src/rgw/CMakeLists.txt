@@ -273,6 +273,7 @@ if(WITH_RADOSGW_GRPC)
   # EDIT THIS to specify .proto source files. Omit the '.proto' suffix!
   set(grpc_source
     authenticator/v1/authenticator
+    ubdb/v1/ubdb
 
     # These are 'standard' protobufs for the 'Richer error model'
     # (https://grpc.io/docs/guides/error/). They're not installed anywhere by
@@ -283,7 +284,7 @@ if(WITH_RADOSGW_GRPC)
 
   # EDIT THIS to specify test .proto source files. Omit the '.proto suffix!
   set(grpc_test_source
-    "rgw/test/v1/test_rgw_grpc"
+    rgw/test/v1/test_rgw_grpc
   )
 
   # Fill variables with input and generated source locations.
