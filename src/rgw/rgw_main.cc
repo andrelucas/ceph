@@ -546,6 +546,7 @@ int radosgw_Main(int argc, const char **argv)
   if (g_conf()->rgw_ubns_enabled) {
     dout(1) << "Akamai UBNS enabled" << dendl;
     ubns_client = std::make_shared<rgw::UBNSClient>();
+    ubns_client->init(cct.get(), "");
   } else {
     dout(1) << "Akamai UBNS present but disabled" << dendl;
   }

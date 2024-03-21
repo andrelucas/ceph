@@ -3433,3 +3433,54 @@ options:
   services:
   - rgw
   with_legacy: true
+- name: rgw_ubns_grpc_arg_initial_reconnect_backoff_ms
+  type: int
+  level: advanced
+  desc: Setting for GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS.
+  long_desc: The initial reconnect backoff timeout, the amount of time the
+    gRPC channel will wait before attempting to reconnect to the server.
+    The library enforces a minimum value of 100ms for this setting.
+    Be careful when changing this setting.
+  default: 1000
+  flags:
+  - runtime
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_ubns_grpc_arg_min_reconnect_backoff_ms
+  type: int
+  level: advanced
+  desc: Setting for GRPC_ARG_MIN_RECONNECT_BACKOFF_MS (minimum reconnect backoff).
+  long_desc: The smallest value for the reconnect backoff timer. Be careful
+    when changing this setting.
+  default: 20000
+  flags:
+  - runtime
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_ubns_grpc_arg_max_reconnect_backoff_ms
+  type: int
+  level: advanced
+  desc: Setting for GRPC_ARG_MAX_RECONNECT_BACKOFF_MS (minimum reconnect backoff).
+  long_desc: The largest value for the reconnect backoff timer. Be careful
+    when changing this setting.
+  default: 120000
+  flags:
+  - runtime
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_ubns_grpc_uri
+  type: str
+  level: advanced
+  desc: URI for the UBNS service via gRPC.
+  long_desc: The gRPC server address to use. This value is passed unchanged to
+    grpc::CreateCustomChannel() so may be in any format supported by the C++
+    gRPC library.
+  default: dns:127.0.0.1:8002
+  flags:
+  - runtime
+  services:
+  - rgw
+  with_legacy: true

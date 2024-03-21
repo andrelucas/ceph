@@ -52,6 +52,7 @@
 #include "rgw_notify_event_type.h"
 #include "rgw_sal.h"
 #include "rgw_sal_rados.h"
+#include "rgw_ubns.h"
 
 #include "services/svc_zone.h"
 #include "services/svc_quota.h"
@@ -3200,6 +3201,16 @@ void RGWCreateBucket::execute(optional_yield y)
     return;
   }
 
+  // XXX check sequencing with documentation, this is just to test the flow.
+  if (s->ubns_client) {
+    auto result = s->ubns_client->add_bucket_entry(this, bucket_name);
+    if (result.err()) {
+      ldpp_dout(this, 0) << "UBNS rejected bucket creation: " << result.message() << dendl;
+      op_ret = -EEXIST;
+      return;
+    }
+  }
+
   /* we need to make sure we read bucket info, it's not read before for this
    * specific request */
   {
@@ -3426,6 +3437,16 @@ void RGWDeleteBucket::execute(optional_yield y)
   op_ret = rgw_remove_sse_s3_bucket_key(s);
   if (op_ret != 0) {
       // do nothing; it will already have been logged
+  }
+
+  // XXX check sequencing with documentation, this is just to test the flow.
+  if (s->ubns_client) {
+    auto result = s->ubns_client->delete_bucket_entry(this, s->bucket_name);
+    if (result.err()) {
+      ldpp_dout(this, 0) << "UBNS rejected bucket deletion: " << result.message() << dendl;
+      op_ret = -EEXIST;
+      return;
+    }
   }
 
   op_ret = s->bucket->remove_bucket(this, false, false, nullptr, y);

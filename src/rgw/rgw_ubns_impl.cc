@@ -11,17 +11,172 @@
 
 #include "rgw_ubns_impl.h"
 
+#include "common/dout.h"
+
+#include "ubdb/v1/ubdb.grpc.pb.h"
+#include "ubdb/v1/ubdb.pb.h"
+
+// These are 'standard' protobufs for the 'Richer error model'
+// (https://grpc.io/docs/guides/error/).
+#include "google/rpc/error_details.pb.h"
+#include "google/rpc/status.pb.h"
+
+#define dout_context g_ceph_context
+#define dout_subsys ceph_subsys_rgw
+
 namespace rgw {
 
-bool UBNSClientImpl::init()
+UBNSClient::Result UBNSgRPCClient::add_bucket_request(const ubdb::v1::AddBucketEntryRequest& req)
 {
-  // XXX init gRPC.
-  return true; // XXX
+  ::grpc::ClientContext context;
+  ubdb::v1::AddBucketEntryResponse resp;
+  auto status = stub_->AddBucketEntry(&context, req, &resp);
+  if (!status.ok()) {
+    return UBNSClient::Result(fmt::format(FMT_STRING("gRPC error: {}"), status.error_message()));
+  }
+  return UBNSClient::Result();
+}
+
+UBNSClient::Result UBNSgRPCClient::delete_bucket_request(const ubdb::v1::DeleteBucketEntryRequest& req)
+{
+  ::grpc::ClientContext context;
+  ubdb::v1::DeleteBucketEntryResponse resp;
+  auto status = stub_->DeleteBucketEntry(&context, req, &resp);
+  if (!status.ok()) {
+    return UBNSClient::Result(fmt::format(FMT_STRING("gRPC error: {}"), status.error_message()));
+  }
+  return UBNSClient::Result();
+}
+
+UBNSClient::Result UBNSgRPCClient::update_bucket_request(const ubdb::v1::UpdateBucketEntryRequest& req)
+{
+  ::grpc::ClientContext context;
+  ubdb::v1::UpdateBucketEntryResponse resp;
+  auto status = stub_->UpdateBucketEntry(&context, req, &resp);
+  if (!status.ok()) {
+    return UBNSClient::Result(fmt::format(FMT_STRING("gRPC error: {}"), status.error_message()));
+  }
+  return UBNSClient::Result();
+}
+
+bool UBNSClientImpl::init(CephContext* cct, const std::string& grpc_uri)
+{
+  ceph_assert(cct != nullptr);
+
+  // Set up the configuration observer.
+  config_obs_.init(cct);
+
+  // Empty grpc_uri (the default) means use the configuration value.
+  auto uri = grpc_uri.empty() ? cct->_conf->rgw_ubns_grpc_uri : grpc_uri;
+  if (!set_channel_uri(cct, uri)) {
+    // This is unlikely, but no gRPC channel in gRPC mode is a critical error.
+    ldout(cct, 0) << "Failed to create initial gRPC channel" << dendl;
+    return false;
+  }
+  return true;
 }
 
 void UBNSClientImpl::shutdown()
 {
-  // XXX shut down gRPC client.
+  // The gRPC channel shutdown will be handled by the unique_ptr, on
+  // destruction.
+}
+
+std::optional<UBNSgRPCClient> UBNSClientImpl::safe_get_client(const DoutPrefixProvider* dpp)
+{
+  UBNSgRPCClient client {};
+  std::shared_lock<std::shared_mutex> g(m_channel_);
+  // Quick confidence check of channel_.
+  if (!channel_) {
+    ldpp_dout(dpp, 0) << "Unset gRPC channel" << dendl;
+    return std::nullopt;
+  }
+  client.set_stub(channel_);
+  return std::make_optional(std::move(client));
+}
+
+UBNSClient::Result UBNSClientImpl::add_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name)
+{
+  ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << dendl;
+
+  // // Get the gRPC client from under the channel lock. Hold the lock for as
+  // // short a time as possible.
+  // UBNSgRPCClient client {}; // Uninitialised variant - must call set_stub().
+  // {
+  //   std::shared_lock<std::shared_mutex> g(m_channel_);
+  //   // Quick confidence check of channel_.
+  //   if (!channel_) {
+  //     ldpp_dout(dpp, 0) << "Unset gRPC channel" << dendl;
+  //     return UBNSClient::Result("Internal error (gRPC channel not set)");
+  //   }
+  //   client.set_stub(channel_);
+  // }
+  auto client = safe_get_client(dpp);
+  if (!client) {
+    return UBNSClient::Result("Internal error (could not fetch gRPC client)");
+  }
+  ldpp_dout(dpp, 1) << "Sending gRPC AddBucketRequest" << dendl;
+  ubdb::v1::AddBucketEntryRequest req;
+  req.set_bucket(bucket_name);
+  return client->add_bucket_request(req);
+}
+
+UBNSClient::Result UBNSClientImpl::delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name)
+{
+  ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << dendl;
+  auto client = safe_get_client(dpp);
+  if (!client) {
+    return UBNSClient::Result("Internal error (could not fetch gRPC client)");
+  }
+  ldpp_dout(dpp, 1) << "Sending gRPC DeleteBucketRequest" << dendl;
+  ubdb::v1::DeleteBucketEntryRequest req;
+  req.set_bucket(bucket_name);
+  return client->delete_bucket_request(req);
+}
+
+UBNSClient::Result UBNSClientImpl::update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name)
+{
+  ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << dendl;
+  return UBNSClient::Result("NOTIMPL");
+}
+
+grpc::ChannelArguments UBNSClientImpl::get_default_channel_args(CephContext* const cct)
+{
+  grpc::ChannelArguments args;
+
+  // Set our default backoff parameters. These are runtime-alterable.
+  args.SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, cct->_conf->rgw_ubns_grpc_arg_initial_reconnect_backoff_ms);
+  args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS, cct->_conf->rgw_ubns_grpc_arg_max_reconnect_backoff_ms);
+  args.SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, cct->_conf->rgw_ubns_grpc_arg_min_reconnect_backoff_ms);
+  ldout(cct, 20) << fmt::format(FMT_STRING("HandoffHelperImpl::{}: reconnect_backoff(ms): initial/min/max={}/{}/{}"),
+      __func__,
+      cct->_conf->rgw_ubns_grpc_arg_initial_reconnect_backoff_ms,
+      cct->_conf->rgw_ubns_grpc_arg_min_reconnect_backoff_ms,
+      cct->_conf->rgw_ubns_grpc_arg_max_reconnect_backoff_ms)
+                 << dendl;
+
+  return grpc::ChannelArguments();
+}
+
+bool UBNSClientImpl::set_channel_uri(CephContext* const cct, const std::string& new_uri)
+{
+  std::unique_lock<chan_lock_t> g(m_channel_);
+  if (!channel_args_) {
+    auto args = get_default_channel_args(cct);
+    // Don't use set_channel_args(), which takes lock m_channel_.
+    channel_args_ = std::make_optional(std::move(args));
+  }
+  // XXX grpc::InsecureChannelCredentials()...
+  auto new_channel = grpc::CreateCustomChannel(new_uri, grpc::InsecureChannelCredentials(), *channel_args_);
+  if (!new_channel) {
+    ldout(cct, 0) << "UBNSClientImpl::set_channel_uri(): ERROR: Failed to create new gRPC channel " << new_uri << dendl;
+    return false;
+  } else {
+    ldout(cct, 1) << "UBNSClientImpl::set_channel_uri(" << new_uri << ") success" << dendl;
+    channel_ = std::move(new_channel);
+    channel_uri_ = new_uri;
+    return true;
+  }
 }
 
 } // namespace rgw

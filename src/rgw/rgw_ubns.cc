@@ -12,18 +12,8 @@
 #include "rgw_ubns.h"
 #include "rgw_ubns_impl.h"
 
+#include <iostream>
 #include <memory>
-
-// #include "common/dout.h"
-// #include "rgw/rgw_common.h"
-
-#include "ubdb/v1/ubdb.grpc.pb.h"
-#include "ubdb/v1/ubdb.pb.h"
-
-// These are 'standard' protobufs for the 'Richer error model'
-// (https://grpc.io/docs/guides/error/).
-#include "google/rpc/error_details.pb.h"
-#include "google/rpc/status.pb.h"
 
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rgw
@@ -43,14 +33,42 @@ UBNSClient::UBNSClient()
 // https://www.fluentcpp.com/2017/09/22/make-pimpl-using-unique_ptr/ .
 UBNSClient::~UBNSClient() { }
 
-bool UBNSClient::init()
+bool UBNSClient::init(CephContext* cct, const std::string& grpc_uri)
 {
-  return impl_->init();
+  return impl_->init(cct, grpc_uri);
 }
 
 void UBNSClient::shutdown()
 {
   impl_->shutdown();
+}
+
+UBNSClient::Result UBNSClient::add_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name)
+{
+  return impl_->add_bucket_entry(dpp, bucket_name);
+}
+UBNSClient::Result UBNSClient::delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name)
+{
+  return impl_->delete_bucket_entry(dpp, bucket_name);
+}
+UBNSClient::Result UBNSClient::update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name)
+{
+  return impl_->update_bucket_entry(dpp, bucket_name);
+}
+
+std::string UBNSClient::Result::to_string() const
+{
+  if (ok()) {
+    return "UBNSClient::Result(success)";
+  } else {
+    return "UBNSClient::Result(failure: '" + message() + "')";
+  }
+}
+
+std::ostream& operator<<(std::ostream& os, const UBNSClient::Result& r)
+{
+  os << r.to_string();
+  return os;
 }
 
 } // namespace rgw
