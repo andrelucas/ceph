@@ -535,6 +535,21 @@ int radosgw_Main(int argc, const char **argv)
   /* Header custom behavior */
   rest.register_x_headers(g_conf()->rgw_log_http_headers);
 
+  /* Initialise Akamai UBNS. We have to explicitly pass this pointer around a
+   * fair bit in v17, via process_request() and into req_state, the 's'
+   * pointer that all operations receive. We end up placing it in the
+   * ProcessEnv, because in v18 it's a tiny bit better due to
+   * process_request() already taking a ProcessEnv* rather than an explicit
+   * list of pointers to various items.
+   */
+  std::shared_ptr<rgw::UBNSClient> ubns_client;
+  if (g_conf()->rgw_ubns_enabled) {
+    dout(1) << "Akamai UBNS enabled" << dendl;
+    ubns_client = std::make_shared<rgw::UBNSClient>();
+  } else {
+    dout(1) << "Akamai UBNS present but disabled" << dendl;
+  }
+
   if (cct->_conf.get_val<std::string>("rgw_scheduler_type") == "dmclock" &&
       !cct->check_experimental_feature_enabled("dmclock")){
     derr << "dmclock scheduler type is experimental and needs to be"
@@ -616,7 +631,7 @@ int radosgw_Main(int argc, const char **argv)
       std::string uri_prefix;
       config->get_val("prefix", "", &uri_prefix);
 
-      RGWProcessEnv env = { store, &rest, olog, port, uri_prefix, auth_registry, &ratelimiting };
+      RGWProcessEnv env = { store, &rest, olog, port, uri_prefix, auth_registry, ubns_client, &ratelimiting };
 
       fe = new RGWLoadGenFrontend(env, config);
     }
@@ -625,7 +640,7 @@ int radosgw_Main(int argc, const char **argv)
       config->get_val("port", 80, &port);
       std::string uri_prefix;
       config->get_val("prefix", "", &uri_prefix);
-      RGWProcessEnv env{ store, &rest, olog, port, uri_prefix, auth_registry, &ratelimiting };
+      RGWProcessEnv env { store, &rest, olog, port, uri_prefix, auth_registry, ubns_client, &ratelimiting };
       fe = new RGWAsioFrontend(env, config, sched_ctx);
     }
 

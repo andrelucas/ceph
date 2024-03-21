@@ -280,6 +280,7 @@ void handle_connection(boost::asio::io_context& context,
                       *env.auth_registry, &client, env.olog, y,
                       scheduler, &user, &latency,
                       env.ratelimiting->get_active(),
+                      env.ubns_client,
                       &http_ret);
 
       if (cct->_conf->subsys.should_gather(dout_subsys, 1)) {

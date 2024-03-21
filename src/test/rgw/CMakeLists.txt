@@ -237,3 +237,10 @@ target_link_libraries(unittest_rgw_grpc
   ${UNITTEST_LIBS}
   ${rgw_libs}
 )
+
+add_executable(unittest_rgw_ubns test_rgw_ubns.cc test_rgw_grpc_util.h)
+add_ceph_unittest(unittest_rgw_ubns)
+target_link_libraries(unittest_rgw_ubns
+  ${UNITTEST_LIBS}
+  ${rgw_libs}
+)

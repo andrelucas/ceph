@@ -35,6 +35,7 @@
 #include "rgw_tag.h"
 #include "rgw_op_type.h"
 #include "rgw_sync_policy.h"
+#include "rgw_ubns.h"
 #include "cls/version/cls_version_types.h"
 #include "cls/user/cls_user_types.h"
 #include "cls/rgw/cls_rgw_types.h"
@@ -1562,6 +1563,7 @@ struct req_state : DoutPrefixProvider {
   RGWRateLimitInfo bucket_ratelimit;
   std::string ratelimit_bucket_marker;
   std::string ratelimit_user_name;
+  std::shared_ptr<rgw::UBNSClient> ubns_client;
   bool content_started{false};
   int format{0};
   ceph::Formatter *formatter{nullptr};

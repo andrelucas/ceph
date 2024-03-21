@@ -3425,3 +3425,11 @@ options:
   - rgw
   flags:
   - startup
+- name: rgw_ubns_enabled
+  type: bool
+  level: advanced
+  desc: Enable the Akamai Unique Bucket Name Service
+  default: false
+  services:
+  - rgw
+  with_legacy: true

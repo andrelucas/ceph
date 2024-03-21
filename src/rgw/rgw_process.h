@@ -11,6 +11,7 @@
 #include "rgw_op.h"
 #include "rgw_rest.h"
 #include "rgw_ratelimit.h"
+#include "rgw_ubns.h"
 #include "include/ceph_assert.h"
 
 #include "common/WorkQueue.h"
@@ -38,6 +39,8 @@ struct RGWProcessEnv {
   int port;
   std::string uri_prefix;
   std::shared_ptr<rgw::auth::StrategyRegistry> auth_registry;
+  // Point (optionally) to the ubns_client, with its persistent gRPC channel.
+  std::shared_ptr<rgw::UBNSClient> ubns_client;
   //maybe there is a better place to store the rate limit data structure
   ActiveRateLimiter* ratelimiting;
 };
@@ -177,6 +180,7 @@ extern int process_request(rgw::sal::Store* store,
                            std::string* user,
                            ceph::coarse_real_clock::duration* latency,
                            std::shared_ptr<RateLimiter> ratelimit,
+                           std::shared_ptr<rgw::UBNSClient> ubns_client,
                            int* http_ret = nullptr);
 
 extern int rgw_process_authenticated(RGWHandler_REST* handler,

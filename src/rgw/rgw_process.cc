@@ -262,18 +262,19 @@ int rgw_process_authenticated(RGWHandler_REST * const handler,
 }
 
 int process_request(rgw::sal::Store* const store,
-                    RGWREST* const rest,
-                    RGWRequest* const req,
-                    const std::string& frontend_prefix,
-                    const rgw_auth_registry_t& auth_registry,
-                    RGWRestfulIO* const client_io,
-                    OpsLogSink* const olog,
-                    optional_yield yield,
-		    rgw::dmclock::Scheduler *scheduler,
-                    string* user,
-                    ceph::coarse_real_clock::duration* latency,
-                    std::shared_ptr<RateLimiter> ratelimit,
-                    int* http_ret)
+    RGWREST* const rest,
+    RGWRequest* const req,
+    const std::string& frontend_prefix,
+    const rgw_auth_registry_t& auth_registry,
+    RGWRestfulIO* const client_io,
+    OpsLogSink* const olog,
+    optional_yield yield,
+    rgw::dmclock::Scheduler* scheduler,
+    string* user,
+    ceph::coarse_real_clock::duration* latency,
+    std::shared_ptr<RateLimiter> ratelimit,
+    std::shared_ptr<rgw::UBNSClient> ubns_client,
+    int* http_ret)
 {
   int ret = client_io->init(g_ceph_context);
 
@@ -289,6 +290,9 @@ int process_request(rgw::sal::Store* const store,
   s->ratelimit_data = ratelimit;
   std::unique_ptr<rgw::sal::User> u = store->get_user(rgw_user());
   s->set_user(u);
+
+  // Save the (possibly null) UBNS client pointer so we can issue gRPC requests.
+  s->ubns_client = ubns_client;
 
   RGWObjectCtx rados_ctx(store, s);
   s->obj_ctx = &rados_ctx;
