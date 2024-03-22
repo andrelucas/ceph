@@ -5,6 +5,8 @@
 #include "rgw_op.h"
 #include "rgw_rest_s3.h"
 
+namespace rgw {
+
 /**
  * @brief The type of S3 request for which the StoreQuery handler was invoked.
  *
@@ -404,3 +406,5 @@ public:
   void send_response_json() override;
   const char* name() const override { return "storequery_objectstatus"; }
 };
+
+} // namespace rgw

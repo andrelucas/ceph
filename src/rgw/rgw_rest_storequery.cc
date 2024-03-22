@@ -13,6 +13,8 @@
 #include "rgw_sal_rados.h"
 #include "rgw_url.h"
 
+namespace rgw {
+
 void RGWStoreQueryOp_Base::send_response_pre() {
   if (op_ret) {
     set_req_state_err(s, op_ret);
@@ -407,3 +409,5 @@ RGWOp *RGWHandler_REST_StoreQuery_S3::op_delete() {
   // We don't handle DELETE requests yet.
   return nullptr;
 }
+
+} // namespace rgw
