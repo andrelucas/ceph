@@ -271,6 +271,11 @@ target_include_directories(unittest_rgw_lua
   SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/src/rgw/store/rados")
 target_link_libraries(unittest_rgw_lua ${rgw_libs})
 
+# unittest_rgw_storequery
+add_executable(unittest_rgw_storequery test_rgw_storequery.cc)
+add_ceph_unittest(unittest_rgw_storequery)
+target_link_libraries(unittest_rgw_storequery ${rgw_libs})
+
 add_executable(radosgw-cr-test rgw_cr_test.cc)
 target_link_libraries(radosgw-cr-test ${rgw_libs} librados
   cls_rgw_client cls_otp_client cls_lock_client cls_refcount_client
