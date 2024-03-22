@@ -3478,7 +3478,7 @@ options:
   long_desc: The gRPC server address to use. This value is passed unchanged to
     grpc::CreateCustomChannel() so may be in any format supported by the C++
     gRPC library.
-  default: dns:127.0.0.1:8002
+  default: ipv4:127.0.0.1:9000
   flags:
   - runtime
   services:

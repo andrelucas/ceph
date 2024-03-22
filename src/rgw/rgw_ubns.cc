@@ -12,6 +12,7 @@
 #include "rgw_ubns.h"
 #include "rgw_ubns_impl.h"
 
+#include <fmt/format.h>
 #include <iostream>
 #include <memory>
 
@@ -59,9 +60,9 @@ UBNSClient::Result UBNSClient::update_bucket_entry(const DoutPrefixProvider* dpp
 std::string UBNSClient::Result::to_string() const
 {
   if (ok()) {
-    return "UBNSClient::Result(success)";
+    return "UBNSClient::Result(success,code=0)";
   } else {
-    return "UBNSClient::Result(failure: '" + message() + "')";
+    return fmt::format(FMT_STRING("UBNSClient::Result(failure,code={},message='{}'"), code(), message());
   }
 }
 

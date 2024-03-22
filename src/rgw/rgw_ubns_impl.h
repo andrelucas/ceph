@@ -173,6 +173,10 @@ private:
  * - Manage the persistent gRPC channel, supporting changes.
  * - Handle runtime configuration changes.
  * - Perform relevant gRPC calls to implement the UBNS API.
+ *
+ * The configuration observer is implemented as a member (\p config_obs_) of
+ * type UBNSConfigObserver<UBNSCLientImpl>. It's templated this way to make it
+ * easier to unit test the config observer.
  */
 class UBNSClientImpl {
 
@@ -209,15 +213,6 @@ public:
    */
   bool init(CephContext* cct, const std::string& grpc_uri);
   void shutdown();
-
-  /**
-   * @brief Safely fetch a UBNSgRPCClient object from under the channel shared mutex.
-   *
-   * @param dpp DoutPrefixProvider.
-   * @return std::optional<UBNSgRPCClient> A gRPC client object, or
-   * std::nullopt on failure.
-   */
-  std::optional<UBNSgRPCClient> safe_get_client(const DoutPrefixProvider* dpp);
 
   /**
    * @brief Call ubdb.v1.AddBucketEntry() and return the result.
@@ -295,6 +290,16 @@ public:
     std::unique_lock l { m_channel_ };
     channel_args_ = std::make_optional(args);
   }
+
+private:
+  /**
+   * @brief Safely fetch a UBNSgRPCClient object from under the channel shared mutex.
+   *
+   * @param dpp DoutPrefixProvider.
+   * @return std::optional<UBNSgRPCClient> A gRPC client object, or
+   * std::nullopt on failure.
+   */
+  std::optional<UBNSgRPCClient> safe_get_client(const DoutPrefixProvider* dpp);
 
 }; // class UBNSClientImpl
 

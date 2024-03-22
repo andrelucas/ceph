@@ -315,6 +315,110 @@ TEST_F(UBNSTestImplGRPCTest, ChannelRecoversFromDeadAtStartup)
   //   EXPECT_EQ(res.err_type(), HandoffAuthResult::error_type::NO_ERROR) << "should now show no error";
 }
 
+/**
+ * @brief Mock the chunks of HandoffHelperImpl we need to check that the
+ * config observer is working properly.
+ *
+ * See the notes on HandoffConfigObserver<T> for more details. This class
+ * allows us to instantiate a config observer and make sure it's responding
+ * correctly to configuration changes.
+ */
+class MockHelperForConfigObserver final {
+public:
+  MockHelperForConfigObserver()
+      : observer_(*this)
+  {
+  }
+  ~MockHelperForConfigObserver() = default;
+
+  int init(CephContext* const cct)
+  {
+    return 0;
+  }
+  grpc::ChannelArguments get_default_channel_args(CephContext* const cct)
+  {
+    return grpc::ChannelArguments();
+  }
+  void set_channel_args(CephContext* const cct, const grpc::ChannelArguments& args) { channel_args_set_ = true; }
+  void set_channel_uri(CephContext* const cct, const std::string& uri) { channel_uri_ = uri; }
+
+public:
+  UBNSConfigObserver<MockHelperForConfigObserver> observer_;
+  bool chunked_upload_;
+  bool channel_args_set_ = false;
+  std::string channel_uri_;
+};
+
+/**
+ * @brief Test that the config observer is hooked up properly for runtime
+ * changes to variables we care about.
+ */
+class TestHandoffConfigObserver : public ::testing::Test {
+
+protected:
+  void SetUp() override
+  {
+    ASSERT_EQ(dpp_.get_cct()->_conf->rgw_ubns_enabled, true);
+    ASSERT_EQ(uci_.init(g_ceph_context), 0);
+  }
+
+  MockHelperForConfigObserver uci_;
+  DoutPrefix dpp_ { g_ceph_context, ceph_subsys_rgw, "unittest " };
+};
+
+TEST_F(TestHandoffConfigObserver, Null)
+{
+}
+
+// Test that the config change propagates to the helper. We're not parsing the
+// individual arg setting, that would mean essentially recreating the helper's
+// code in the mock which is pointless.
+//
+// In all the test cases we'll call handle_conf_change() directly. I had
+// problems getting the observer to work reliably in unit tests, whether I
+// just relied on 'automatic' change application, or if I directly called
+// conf.apply_changes(). It doesn't really matter - what we're testing here is
+// that if handle_conf_change() is called properly, then the configuration
+// will flow through to the helperimpl.
+//
+TEST_F(TestHandoffConfigObserver, GRPCChannelArgs)
+{
+  // Parameters we'll 'change'.
+  std::set<std::string> changed;
+
+  std::set<std::string> param = {
+    "rgw_ubns_grpc_arg_initial_reconnect_backoff_ms",
+    "rgw_ubns_grpc_arg_min_reconnect_backoff_ms",
+    "rgw_ubns_grpc_arg_max_reconnect_backoff_ms"
+  };
+
+  auto cct = dpp_.get_cct();
+  auto conf = cct->_conf;
+
+  for (const auto& p : param) {
+    uci_.channel_args_set_ = false;
+
+    conf.set_val_or_die(p, "1001");
+    changed.clear();
+    changed.emplace(p);
+    uci_.observer_.handle_conf_change(conf, changed);
+    ASSERT_TRUE(uci_.channel_args_set_);
+  }
+}
+
+TEST_F(TestHandoffConfigObserver, GRPCURI)
+{
+  // Parameters we'll 'change'.
+  std::set<std::string> changed { "rgw_ubns_grpc_uri" };
+
+  auto cct = dpp_.get_cct();
+  auto conf = cct->_conf;
+
+  conf->rgw_ubns_grpc_uri = "foo";
+  uci_.observer_.handle_conf_change(conf, changed);
+  ASSERT_EQ(uci_.channel_uri_, "foo");
+}
+
 } // namespace
 
 // main() cribbed from test_http_manager.cc
