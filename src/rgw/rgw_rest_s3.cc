@@ -62,11 +62,12 @@
 #include "rgw_bucket_sync.h"
 
 #include "include/ceph_assert.h"
-#include "rgw_role.h"
-#include "rgw_rest_sts.h"
 #include "rgw_rest_iam.h"
-#include "rgw_sts.h"
+#include "rgw_rest_storequery.h"
+#include "rgw_rest_sts.h"
+#include "rgw_role.h"
 #include "rgw_sal_rados.h"
+#include "rgw_sts.h"
 
 #include "rgw_s3select.h"
 
@@ -4541,6 +4542,21 @@ void RGWGetBucketPublicAccessBlock_ObjStore_S3::send_response()
 
 RGWOp *RGWHandler_REST_Service_S3::op_get()
 {
+  if (enable_storequery) {
+    // Check for StoreQuery GET commands.
+    auto sq_handler = new RGWHandler_REST_StoreQuery_S3(
+        auth_registry, RGWSQHandlerType::Service);
+    sq_handler->init(driver, s, s->cio);
+    try {
+      auto op = sq_handler->get_op();
+      if (op != nullptr) {
+        return op;
+      } // else passthrough - this isn't a bug.
+    } catch (int) {
+      // If we threw an exception, we want processing to stop.
+      return nullptr;
+    }
+  }
   if (is_usage_op()) {
     return new RGWGetUsage_ObjStore_S3;
   } else {
@@ -4598,7 +4614,21 @@ RGWOp *RGWHandler_REST_Bucket_S3::op_get()
     return new RGWGetBucketMetaSearch_ObjStore_S3;
   }
 
-  if (is_acl_op()) {
+  if (enable_storequery) {
+    // Check for StoreQuery GET commands.
+    auto sq_handler = new RGWHandler_REST_StoreQuery_S3(
+        auth_registry, RGWSQHandlerType::Bucket);
+    sq_handler->init(driver, s, s->cio);
+    try {
+      auto op = sq_handler->get_op();
+      if (op != nullptr) {
+        return op;
+      } // else passthrough - this isn't a bug.
+    } catch (int) {
+      // If we threw an exception, we want processing to stop.
+      return nullptr;
+    }
+  } else if (is_acl_op()) {
     return new RGWGetACLs_ObjStore_S3;
   } else if (is_cors_op()) {
     return new RGWGetCORS_ObjStore_S3;
@@ -4750,7 +4780,21 @@ RGWOp *RGWHandler_REST_Obj_S3::get_obj_op(bool get_data)
 
 RGWOp *RGWHandler_REST_Obj_S3::op_get()
 {
-  if (is_acl_op()) {
+  if (enable_storequery) {
+    // Check for StoreQuery GET commands.
+    auto sq_handler =
+        new RGWHandler_REST_StoreQuery_S3(auth_registry, RGWSQHandlerType::Obj);
+    sq_handler->init(driver, s, s->cio);
+    try {
+      auto op = sq_handler->get_op();
+      if (op != nullptr) {
+        return op;
+      } // else passthrough, this isn't a bug.
+    } catch (int) {
+      // If we threw an exception, we want processing to stop.
+      return nullptr;
+    }
+  } else if (is_acl_op()) {
     return new RGWGetACLs_ObjStore_S3;
   } else if (s->info.args.exists("uploadId")) {
     return new RGWListMultipart_ObjStore_S3;
@@ -5255,17 +5299,18 @@ RGWHandler_REST* RGWRESTMgr_S3::get_handler(rgw::sal::Driver* driver,
       return nullptr;
     }
     // non-POST S3 service without a bucket
-    return new RGWHandler_REST_Service_S3(auth_registry);
+    return new RGWHandler_REST_Service_S3(auth_registry, enable_storequery);
   }
   if (!rgw::sal::Object::empty(s->object.get())) {
     // has object
-    return new RGWHandler_REST_Obj_S3(auth_registry);
+    return new RGWHandler_REST_Obj_S3(auth_registry, enable_storequery);
   }
   if (s->info.args.exist_obj_excl_sub_resource()) {
     return nullptr;
   }
   // has bucket
-  return new RGWHandler_REST_Bucket_S3(auth_registry, enable_pubsub);
+  return new RGWHandler_REST_Bucket_S3(auth_registry, enable_pubsub,
+                                       enable_storequery);
 }
 
 bool RGWHandler_REST_S3Website::web_dir() const {
