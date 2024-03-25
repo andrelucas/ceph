@@ -268,6 +268,12 @@ void rgw::AppMain::cond_init_apis()
     const bool s3website_enabled = apis_map.count("s3website") > 0;
     const bool sts_enabled = apis_map.count("sts") > 0;
     const bool iam_enabled = apis_map.count("iam") > 0;
+    const bool storequery_enabled = apis_map.count("storequery") > 0;
+    if (storequery_enabled) {
+      dout(0) << "Akamai StoreQuery enabled" << dendl;
+    } else {
+      dout(0) << "Akamai StoreQuery present but not enabled" << dendl;
+    }
     const bool pubsub_enabled =
         apis_map.count("pubsub") > 0 || apis_map.count("notifications") > 0;
     // Swift API entrypoint could placed in the root instead of S3
