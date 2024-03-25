@@ -6016,6 +6016,12 @@ void RGWPutLC::execute(optional_yield y)
     ldpp_dout(this, 15) << "New LifecycleConfiguration:" << ss.str() << dendl;
   }
 
+  if (s->info.env->exists("HTTP_X_RGW_VALIDATE_ONLY")) {
+    ldpp_dout(this, 15) << "x-rgw-validate-only header set - exiting early"
+                        << dendl;
+    return;
+  }
+
   op_ret = driver->forward_request_to_master(this, s->user.get(), nullptr, data, nullptr, s->info, y);
   if (op_ret < 0) {
     ldpp_dout(this, 0) << "forward_request_to_master returned ret=" << op_ret << dendl;
