@@ -3932,3 +3932,37 @@ options:
   default: true
   services:
   - rgw
+- name: rgw_secret_encrypt_enabled
+  type: bool
+  level: advanced
+  desc: Is the feature that encrypts secrets enabled?
+  default: false
+  services:
+    - rgw
+  flags:
+    - startup
+- name: rgw_secret_encrypt_key_file
+  type: str
+  level: advanced
+  desc: Name of the file that contains the encryption keys to encrypt secrets, including S3 secret keys.
+  default: /dev/shm/rgw_secret_encryption/encrypt_keys.json
+  services:
+    - rgw
+  flags:
+    - startup
+- name: rgw_secret_encrypt_key_reload_interval
+  type: uint
+  level: advanced
+  desc: The key file reload (upon unknown key) interval in seconds
+  default: 5
+  services:
+    - rgw
+  flags:
+    - startup
+- name: rgw_post_check_null_byte_in_filename
+  type: bool
+  level: advanced
+  desc: If enabled, RGW will deny POST requests if the uploaded object's name contains a null character (\0) in the middle.
+  default: true
+  services:
+  - rgw
