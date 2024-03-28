@@ -4441,7 +4441,7 @@ RGWOp *RGWHandler_REST_Service_S3::op_get()
       auto op = sq_handler.get_op();
       if (op != nullptr) {
         return op;
-      }
+      } // else fallthrough - not a bug!
     } catch (int) {
       // If we threw an exception, we want processing to stop.
       return nullptr;
@@ -4555,12 +4555,13 @@ RGWOp *RGWHandler_REST_Bucket_S3::op_get()
       auto op = sq_handler.get_op();
       if (op != nullptr) {
         return op;
-      }
+      } // else fallthrough - not a bug!
     } catch (int) {
       // If we threw an exception, we want processing to stop.
       return nullptr;
     }
-  } else if (is_acl_op()) {
+  }
+  if (is_acl_op()) {
     return new RGWGetACLs_ObjStore_S3;
   } else if (is_cors_op()) {
     return new RGWGetCORS_ObjStore_S3;
@@ -4718,12 +4719,13 @@ RGWOp *RGWHandler_REST_Obj_S3::op_get()
       auto op = sq_handler.get_op();
       if (op != nullptr) {
         return op;
-      }
+      } // else fallthrough - not a bug!
     } catch (int) {
       // If we threw an exception, we want processing to stop.
       return nullptr;
     }
-  } else if (is_acl_op()) {
+  }
+  if (is_acl_op()) {
     return new RGWGetACLs_ObjStore_S3;
   } else if (s->info.args.exists("uploadId")) {
     return new RGWListMultipart_ObjStore_S3;
