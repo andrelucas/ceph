@@ -2,6 +2,7 @@
 // vim: ts=8 sw=2 smarttab
 
 #include "common/ceph_argparse.h"
+#include "global/global_context.h"
 #include "rgw/rgw_rest_storequery.h"
 #include <gtest/gtest.h>
 

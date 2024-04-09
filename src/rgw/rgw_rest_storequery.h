@@ -4,6 +4,9 @@
 
 #include "rgw_op.h"
 #include "rgw_rest_s3.h"
+#include <fmt/printf.h>
+#include <memory>
+#include <unistd.h>
 
 namespace rgw {
 
@@ -15,11 +18,9 @@ namespace rgw {
  * querying an object if we're invoked by the RGWHandler_REST_Service_S3 - we
  * don't have enough information to query an object.
  */
-enum class RGWSQHandlerType {
-  Service,
+enum class RGWSQHandlerType { Service,
   Bucket,
-  Obj
-};
+  Obj };
 
 /**
  * @brief Handler for StoreQuery REST commands (we only support S3).
@@ -40,31 +41,68 @@ private:
   const RGWSQHandlerType handler_type_;
 
 protected:
-  int init_permissions(RGWOp* op, optional_yield y) override { return 0; }
+  /**
+   * @brief Duplicate RGWHandler_REST::init_permissions() processing so the
+   * operations can continue.
+   *
+   * Interestingly, RGWHandler_REST::init_permissions() loads the bucket! It's
+   * called from process_request() via rgw_process_authenticated(), and the
+   * default handler does all sorts of policy handing and verification before
+   * loading the bucket.
+   *
+   * The actual load for the regular REST handler is done in
+   * RGWHandler_REST::do_init_permissions(), and thence to
+   * RGWHandler::rgw_build_bucket_policies(). We're going to replicate chunks
+   * of rgw_build_bucket_policies() to load the bucket. We can't call it; the
+   * whole point of storequery is that we _don't_ respect things like
+   * policies, and that function explicitly checks the policy.
+   *
+   * We can skip the policies etc., but we still have to verify the bucket
+   * name and (if appropriate for the handler type) load the object.
+   *
+   * Do the minimum possible. For example, if we're a Service type query, we
+   * don't need to load the bucket.
+   *
+   * @param op The operation.
+   * @param y Optional yield.
+   * @return int, zero means success, otherwise an error code, e.g.
+   * ERR_NO_SUCH_BUCKET.
+   */
+  int init_permissions(RGWOp* op, optional_yield y) override;
+
+  /**
+   * @brief Null override of read_permissions.
+   *
+   * @param op The operation.
+   * @param y Optional yield.
+   * @return int, zero means success.
+   */
   int read_permissions(RGWOp* op, optional_yield y) override { return 0; }
+
+  /**
+   * @brief Trivial override of supports_quota(). Spoiler: We don't.
+   *
+   * @return false Always returns false.
+   */
   bool supports_quota() override { return false; }
 
   /**
    * @brief Determine if a StoreQuery GET operation is being requested.
    *
-   * NOTE: Our error-handling behaviour depends on exception processing in the
-   * calling REST handler. RGWHandler_REST_{Service,Bucket,Obj}_S3 will catch
-   * this exception, and any further handlers should have the same processing.
-   * Otherwise the exception will propagate further. In v17.2.6 it will
-   * terminate the process.
+   * If the x-rgw-storequery HTTP header is absent, assert - we should have
+   * checked for this in the REST handler.
    *
-   * If the x-rgw-storequery HTTP header is absent, return nullptr.
+   * If the x- header is present but its contents fail to parse, return
+   * nullptr to stop further processing of the request. This is the only thing
+   * we can return to the API, a richer error interface would require
+   * significant code changes.
    *
-   * If the x- header is present but its contents fail to parse, throw
-   * -ERR_INTERNAL_ERROR to stop further processing of the request.
+   * On success, return an object of the appropriate RGWOp subclass to handle
+   * the request. As required by the interface, the object is allocated with
+   * \p new and is freed by a call to handler->put_op() in process_request().
    *
-   * Otherwise return an object of the appropriate RGWOp subclass to handle
-   * the request.
-   *
-   * @return RGWOp* nullptr if no SQ GET operation, otherwise an RGWOp object
-   * to process the operation.
-   * @throws -ERR_INTERNAL_ERROR if the x-header is present, but the contents
-   * fail to properly parse.
+   * @return RGWOp* nullptr on error, otherwise an RGWOp object to process the
+   * operation.
    */
   RGWOp* op_get() override;
 
@@ -84,12 +122,30 @@ protected:
 
 public:
   using RGWHandler_REST_S3::RGWHandler_REST_S3;
-  RGWHandler_REST_StoreQuery_S3(const rgw::auth::StrategyRegistry& auth_registry, RGWSQHandlerType handler_type)
+  RGWHandler_REST_StoreQuery_S3(
+      const rgw::auth::StrategyRegistry& auth_registry,
+      RGWSQHandlerType handler_type)
       : RGWHandler_REST_S3(auth_registry)
       , handler_type_ { handler_type }
   {
   }
-  virtual ~RGWHandler_REST_StoreQuery_S3() = default;
+
+  /**
+   * @brief Given a req_state, determine if this is a storequery request.
+   *
+   * Note this is static - it's intended to be called from
+   * RGWRESTMgr_S3::get_handler() before any objects are created.
+   *
+   * If the request is not OP_GET, return false. (Of course, we'll need to
+   * change this if we ever support other than OP_GET.)
+   *
+   * Otherwise, if the storequery HTTP header is present, return true.
+   *
+   * @param s The request state
+   * @return true This is a storequery request.
+   * @return false This is not a storequery request.
+   */
+  static bool is_storequery_request(const req_state* s);
 };
 
 /// The longest supported value for the x-rgw-storequery header.
@@ -111,12 +167,14 @@ private:
 
 public:
   RGWSQHeaderParser() { }
+
   /// Reset the parser object.
   void reset();
   /// @private
   /// Tokenise the header value. Intended for testing, called implicitly by
   /// parse().
   bool tokenize(const DoutPrefixProvider* dpp, const std::string& input);
+
   /**
    * @brief Parse the value of the `x-rgw-storequery` header and configure
    * this to return an appropriate RGWOp* object.
@@ -157,10 +215,11 @@ public:
    * useful object.
    * @return false The header was not parsed, and op() will return nullptr.
    */
-  bool parse(const DoutPrefixProvider* dpp, const std::string& input, RGWSQHandlerType handler_type);
-  RGWOp* op() { return op_; }
-  std::string command() { return command_; }
-  std::vector<std::string> param() { return param_; }
+  bool parse(const DoutPrefixProvider* dpp, const std::string& input,
+      RGWSQHandlerType handler_type);
+  RGWOp* op() noexcept { return op_; }
+  std::string command() noexcept { return command_; }
+  std::vector<std::string> param() noexcept { return param_; }
 };
 
 /**
@@ -183,7 +242,12 @@ public:
  * send_response().
  */
 class RGWStoreQueryOp_Base : public RGWOp {
+private:
 public:
+  RGWStoreQueryOp_Base()
+  {
+  }
+
   /**
    * @brief Bypass requester authorization checks for storequery commands.
    *
@@ -191,7 +255,8 @@ public:
    * @param y optional yield.
    * @return int zero (success).
    */
-  int verify_requester([[maybe_unused]] const rgw::auth::StrategyRegistry& auth_registry,
+  int verify_requester(
+      [[maybe_unused]] const rgw::auth::StrategyRegistry& auth_registry,
       [[maybe_unused]] optional_yield y) override
   {
     return 0;
@@ -376,6 +441,10 @@ private:
   bool execute_mpupload_query(optional_yield y);
 
 public:
+  RGWStoreQueryOp_ObjectStatus()
+  {
+  }
+
   /**
    * @brief execute() Implementation - query the index for the presence of the
    * given key.
