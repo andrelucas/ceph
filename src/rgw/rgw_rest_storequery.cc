@@ -47,7 +47,7 @@ void RGWStoreQueryOp_Base::send_response()
 
 void RGWStoreQueryOp_Ping::execute(optional_yield y)
 {
-  ldpp_dout(this, 20) << fmt::format("{}: {}({})", typeid(this).name(),
+  ldpp_dout(this, 20) << fmt::format(FMT_STRING("{}: {}({})"), typeid(this).name(),
       __func__, request_id_)
                       << dendl;
   // This can't fail.
@@ -104,7 +104,7 @@ bool RGWStoreQueryOp_ObjectStatus::execute_simple_query(optional_yield y)
     constexpr int version_query_max = 100;
 
     ldpp_dout(this, 20) << fmt::format(
-        "issue bucket list() query next_marker={}",
+        FMT_STRING("issue bucket list() query next_marker={}"),
         params.marker.name)
                         << dendl;
     // NOTE: rgw::sal::RadosBucket::list() updates params.marker as it
@@ -120,7 +120,7 @@ bool RGWStoreQueryOp_ObjectStatus::execute_simple_query(optional_yield y)
 
     if (results.objs.size() == 0) {
       // EOF. Exit the simple search loop.
-      ldpp_dout(this, 20) << fmt::format("bucket list() prefix='{}' EOF",
+      ldpp_dout(this, 20) << fmt::format(FMT_STRING("bucket list() prefix='{}' EOF"),
           object_key_name_)
                           << dendl;
       break;
@@ -131,13 +131,13 @@ bool RGWStoreQueryOp_ObjectStatus::execute_simple_query(optional_yield y)
         // Check for exact key match - we searched a prefix.
         if (obj.key.name != object_key_name_) {
           ldpp_dout(this, 20)
-              << fmt::format("ignore non-exact match key={}", obj.key.name)
+              << fmt::format(FMT_STRING("ignore non-exact match key={}"), obj.key.name)
               << dendl;
           continue;
         }
 
         ldpp_dout(this, 20)
-            << fmt::format("obj {}/{}: exists={} current={} delete_marker={}",
+            << fmt::format(FMT_STRING("obj {}/{}: exists={} current={} delete_marker={}"),
                    n, results.objs.size(), obj.exists, obj.is_current(),
                    obj.is_delete_marker())
             << dendl;
@@ -154,7 +154,7 @@ bool RGWStoreQueryOp_ObjectStatus::execute_simple_query(optional_yield y)
   } while (!found);
 
   if (found) {
-    ldpp_dout(this, 20) << fmt::format("found key={} in standard path",
+    ldpp_dout(this, 20) << fmt::format(FMT_STRING("found key={} in standard path"),
         object_key_name_)
                         << dendl;
     op_ret = 0;
@@ -198,7 +198,7 @@ bool RGWStoreQueryOp_ObjectStatus::execute_mpupload_query(optional_yield y)
     uploads.clear();
 
     ldpp_dout(this, 20) << fmt::format(
-        "issue list_multiparts() query marker='{}'",
+        FMT_STRING("issue list_multiparts() query marker='{}'"),
         marker)
                         << dendl;
     // Note that 'marker' is an inout param that we'll need for subsequent
@@ -214,7 +214,7 @@ bool RGWStoreQueryOp_ObjectStatus::execute_mpupload_query(optional_yield y)
     }
 
     if (uploads.size() == 0) {
-      ldpp_dout(this, 20) << fmt::format("list_multiparts() prefix='{}' EOF",
+      ldpp_dout(this, 20) << fmt::format(FMT_STRING("list_multiparts() prefix='{}' EOF"),
           object_key_name_)
                           << dendl;
       break;
@@ -226,7 +226,7 @@ bool RGWStoreQueryOp_ObjectStatus::execute_mpupload_query(optional_yield y)
         object_mpupload_id_ = upload->get_upload_id();
         ldpp_dout(this, 20)
             << fmt::format(
-                   "multipart upload found for object={} upload_id='{}'",
+                   FMT_STRING("multipart upload found for object={} upload_id='{}'"),
                    upload->get_key(), object_mpupload_id_)
             << dendl;
         found = true;
@@ -236,7 +236,7 @@ bool RGWStoreQueryOp_ObjectStatus::execute_mpupload_query(optional_yield y)
   } while (!found);
 
   if (found) {
-    ldpp_dout(this, 20) << fmt::format("found key={} in mp upload path",
+    ldpp_dout(this, 20) << fmt::format(FMT_STRING("found key={} in mp upload path"),
         object_key_name_)
                         << dendl;
     op_ret = 0;
@@ -251,7 +251,7 @@ void RGWStoreQueryOp_ObjectStatus::execute(optional_yield y)
   bucket_name_ = rgw_make_bucket_entry_name(s->bucket_tenant, s->bucket_name);
   object_key_name_ = s->object->get_key().name;
 
-  ldpp_dout(this, 20) << fmt::format("{}: {} (bucket='{}' object='{}')",
+  ldpp_dout(this, 20) << fmt::format(FMT_STRING("{}: {} (bucket='{}' object='{}')"),
       typeid(this).name(), __func__,
       bucket_name_, object_key_name_)
                       << dendl;
@@ -307,13 +307,13 @@ bool RGWSQHeaderParser::tokenize(const DoutPrefixProvider* dpp,
     const std::string& input)
 {
   if (input.empty()) {
-    ldpp_dout(dpp, 0) << fmt::format("illegal empty {} header", HEADER_LC)
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("illegal empty {} header"), HEADER_LC)
                       << dendl;
     return false;
   }
   if (input.size() > RGWSQMaxHeaderLength) {
     ldpp_dout(dpp, 0) << fmt::format(
-        "{} header exceeds maximum length of {} chars",
+        FMT_STRING("{} header exceeds maximum length of {} chars"),
         HEADER_LC, RGWSQMaxHeaderLength)
                       << dendl;
     return false;
@@ -321,13 +321,13 @@ bool RGWSQHeaderParser::tokenize(const DoutPrefixProvider* dpp,
   // Enforce ASCII-7 non-control characters.
   if (!std::all_of(input.cbegin(), input.cend(),
           [](auto c) { return c >= ' '; })) {
-    ldpp_dout(dpp, 0) << fmt::format("Illegal character found in {}", HEADER_LC)
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("Illegal character found in {}"), HEADER_LC)
                       << dendl;
     return false;
   }
 
   // Only debug the header contents after canonicalising it.
-  ldpp_dout(dpp, 20) << fmt::format("header {}: '{}'", HEADER_LC, input)
+  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("header {}: '{}'"), HEADER_LC, input)
                      << dendl;
 
   try {
@@ -361,7 +361,7 @@ bool RGWSQHeaderParser::parse(const DoutPrefixProvider* dpp,
     return false;
   }
   if (command_.empty()) {
-    ldpp_dout(dpp, 0) << fmt::format("{}: no command found", HEADER_LC)
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: no command found"), HEADER_LC)
                       << dendl;
     return false;
   }
@@ -370,7 +370,7 @@ bool RGWSQHeaderParser::parse(const DoutPrefixProvider* dpp,
   if (command_ == "objectstatus") {
     if (handler_type != RGWSQHandlerType::Obj) {
       ldpp_dout(dpp, 0)
-          << fmt::format("{}: ObjectStatus only applies in an Object context",
+          << fmt::format(FMT_STRING("{}: ObjectStatus only applies in an Object context"),
                  HEADER_LC)
           << dendl;
       return false;
@@ -430,7 +430,7 @@ RGWOp* RGWHandler_REST_StoreQuery_S3::op_get()
   // without much more substantial code changes.
   auto p = RGWSQHeaderParser();
   if (!p.parse(&dpp, hdr, handler_type_)) {
-    ldpp_dout(&dpp, 0) << fmt::format("{}: parser failure", HEADER_LC) << dendl;
+    ldpp_dout(&dpp, 0) << fmt::format(FMT_STRING("{}: parser failure"), HEADER_LC) << dendl;
     return nullptr;
   }
   p.op()->init(driver, s, this);
