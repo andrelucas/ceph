@@ -70,17 +70,14 @@ message UpdateBucketEntryRequest {
   //
   // @gotags: xml:"Bucket" json:"Bucket"
   string bucket = 1;
-  // The owner of the bucket.
+  // The name of the Ceph cluster hosting the bucket.
   //
-  // It can be any value that uniquely identifies the owner of
-  // the bucket (externally to Ceph cluster and within a region)
-  // since it isn't used for any UBNS operations aside from simple
-  // string comparisons.
-  // Used in conjunction with the bucket name to uniquely identify
-  // a bucket within a region.
+  // It can be any value that uniquely identifies the cluster
+  // since it isn't used for any UBNS operations aside from
+  // simple string comparisons.
   //
-  // @gotags: xml:"Owner" json:"Owner"
-  string owner = 2;
+  // @gotags: xml:"Cluster" json:"Cluster"
+  string cluster = 2;
   // New desired state of the bucket.
   //
   // @gotags: xml:"State" json:"State"
