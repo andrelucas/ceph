@@ -3166,9 +3166,37 @@ void RGWCreateBucket::execute(optional_yield y)
   string bucket_name = rgw_make_bucket_entry_name(s->bucket_tenant, s->bucket_name);
   rgw_raw_obj obj(store->get_zone()->get_params().domain_root, bucket_name);
 
+  std::optional<rgw::UBNSCreateMachine> ubns_creater;
+  if (s->ubns_client) {
+    ubns_creater = rgw::UBNSCreateMachine(this, s->ubns_client, bucket_name, s->user->get_id().to_str());
+  }
+
   op_ret = get_params(y);
   if (op_ret < 0)
     return;
+
+  // // XXX check sequencing with documentation, this is just to test the flow.
+  // if (s->ubns_client) {
+  //   auto result = s->ubns_client->add_bucket_entry(this, bucket_name, s->user->get_id().to_str());
+  //   if (result.err()) {
+  //     ldpp_dout(this, 0) << "UBNS rejected bucket creation: " << result.message() << dendl;
+  //     op_ret = -EEXIST;
+  //     return;
+  //   }
+  // }
+  if (ubns_creater) {
+    bool success = ubns_creater->set_state(rgw::UBNSCreateMachine::State::CreateStart);
+    if (!success) {
+      auto result = ubns_creater->saved_grpc_result();
+      if (result) {
+        ldpp_dout(this, 0) << "UBNS failed AddBucketEntry() request: " << result->message() << dendl;
+      } else {
+        ldpp_dout(this, 0) << "UBNS failed AddBucketEntry() request failed with unknown error" << dendl;
+      }
+      op_ret = -EEXIST;
+      return;
+    }
+  }
 
   if (!relaxed_region_enforcement &&
       !location_constraint.empty() &&
@@ -3199,16 +3227,6 @@ void RGWCreateBucket::execute(optional_yield y)
     op_ret = -ERR_INVALID_LOCATION_CONSTRAINT;
     s->err.message = "The specified placement target does not exist";
     return;
-  }
-
-  // XXX check sequencing with documentation, this is just to test the flow.
-  if (s->ubns_client) {
-    auto result = s->ubns_client->add_bucket_entry(this, bucket_name);
-    if (result.err()) {
-      ldpp_dout(this, 0) << "UBNS rejected bucket creation: " << result.message() << dendl;
-      op_ret = -EEXIST;
-      return;
-    }
   }
 
   /* we need to make sure we read bucket info, it's not read before for this
@@ -3361,6 +3379,17 @@ void RGWCreateBucket::execute(optional_yield y)
       op_ret = -ERR_BUCKET_EXISTS;
     }
   }
+
+  if (ubns_creater) {
+    bool success = ubns_creater->set_state(rgw::UBNSCreateMachine::State::UpdateStart);
+    if (!success) {
+      auto result = ubns_creater->saved_grpc_result();
+      if (result) {
+        ldpp_dout(this, 0) << "UBNS failed UpdateBucketEntry request: " << result->message() << dendl;
+      }
+      op_ret = -EEXIST; // XXX is this appropriate?
+    }
+  }
 }
 
 int RGWDeleteBucket::verify_permission(optional_yield y)
@@ -3386,6 +3415,34 @@ void RGWDeleteBucket::execute(optional_yield y)
   if (s->bucket_name.empty()) {
     op_ret = -EINVAL;
     return;
+  }
+
+  std::optional<rgw::UBNSDeleteMachine> ubns_deleter;
+  if (s->ubns_client) {
+    ubns_deleter = rgw::UBNSDeleteMachine(this, s->ubns_client, s->bucket_name, s->user->get_id().to_str());
+  }
+
+  // // XXX check sequencing with documentation, this is just to test the flow.
+  // if (s->ubns_client) {
+  //   auto result = s->ubns_client->delete_bucket_entry(this, s->bucket_name);
+  //   if (result.err()) {
+  //     ldpp_dout(this, 0) << "UBNS rejected bucket deletion: " << result.message() << dendl;
+  //     op_ret = -EEXIST;
+  //     return;
+  //   }
+  // }
+  if (ubns_deleter) {
+    bool success = ubns_deleter->set_state(rgw::UBNSDeleteMachine::State::UpdateStart);
+    if (!success) {
+      auto result = ubns_deleter->saved_grpc_result();
+      if (result) {
+        ldpp_dout(this, 0) << "UBNS failed DeleteBucketEntry request: " << result->message() << dendl;
+      } else {
+        ldpp_dout(this, 0) << "UBNS failed DeleteBucketEntry request with unknown error" << dendl;
+      }
+      op_ret = -EINVAL; // XXX what's the right error here?
+      return;
+    }
   }
 
   if (!s->bucket_exists) {
@@ -3439,21 +3496,22 @@ void RGWDeleteBucket::execute(optional_yield y)
       // do nothing; it will already have been logged
   }
 
-  // XXX check sequencing with documentation, this is just to test the flow.
-  if (s->ubns_client) {
-    auto result = s->ubns_client->delete_bucket_entry(this, s->bucket_name);
-    if (result.err()) {
-      ldpp_dout(this, 0) << "UBNS rejected bucket deletion: " << result.message() << dendl;
-      op_ret = -EEXIST;
-      return;
-    }
-  }
-
   op_ret = s->bucket->remove_bucket(this, false, false, nullptr, y);
   if (op_ret < 0 && op_ret == -ECANCELED) {
       // lost a race, either with mdlog sync or another delete bucket operation.
       // in either case, we've already called ctl.bucket->unlink_bucket()
       op_ret = 0;
+  }
+
+  if (ubns_deleter) {
+    bool success = ubns_deleter->set_state(rgw::UBNSDeleteMachine::State::DeleteStart);
+    if (!success) {
+      auto result = ubns_deleter->saved_grpc_result();
+      if (result) {
+        ldpp_dout(this, 0) << "UBNS failed DeleteBucketEntry request: " << result->message() << dendl;
+      }
+      op_ret = -EINVAL; // XXX what's the right error here? We deleted it!
+    }
   }
 
   return;

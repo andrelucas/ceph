@@ -44,29 +44,29 @@ void UBNSClient::shutdown()
   impl_->shutdown();
 }
 
-UBNSClient::Result UBNSClient::add_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name)
+UBNSClientResult UBNSClient::add_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner)
 {
-  return impl_->add_bucket_entry(dpp, bucket_name);
+  return impl_->add_bucket_entry(dpp, bucket_name, owner);
 }
-UBNSClient::Result UBNSClient::delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name)
+UBNSClientResult UBNSClient::delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name)
 {
   return impl_->delete_bucket_entry(dpp, bucket_name);
 }
-UBNSClient::Result UBNSClient::update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name)
+UBNSClientResult UBNSClient::update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner)
 {
-  return impl_->update_bucket_entry(dpp, bucket_name);
+  return impl_->update_bucket_entry(dpp, bucket_name, owner);
 }
 
-std::string UBNSClient::Result::to_string() const
+std::string UBNSClientResult::to_string() const
 {
   if (ok()) {
-    return "UBNSClient::Result(success,code=0)";
+    return "UBNSClientResult(success,code=0)";
   } else {
-    return fmt::format(FMT_STRING("UBNSClient::Result(failure,code={},message='{}'"), code(), message());
+    return fmt::format(FMT_STRING("UBNSClientResult(failure,code={},message='{}'"), code(), message());
   }
 }
 
-std::ostream& operator<<(std::ostream& os, const UBNSClient::Result& r)
+std::ostream& operator<<(std::ostream& os, const UBNSClientResult& r)
 {
   os << r.to_string();
   return os;

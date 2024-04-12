@@ -221,7 +221,7 @@ TEST_F(UBNSTestImplGRPCTest, AddBucketSucceeds)
   TestClient cio;
   DEFINE_REQ_STATE;
   s.cio = &cio;
-  auto res = uci_.add_bucket_entry(&dpp_, "foo");
+  auto res = uci_.add_bucket_entry(&dpp_, "foo", "owner");
   EXPECT_TRUE(res.ok()) << "single add should succeed, but got: " << res.message();
 }
 
@@ -232,9 +232,9 @@ TEST_F(UBNSTestImplGRPCTest, AddTwiceFails)
   TestClient cio;
   DEFINE_REQ_STATE;
   s.cio = &cio;
-  auto res = uci_.add_bucket_entry(&dpp_, "foo");
+  auto res = uci_.add_bucket_entry(&dpp_, "foo", "owner");
   EXPECT_TRUE(res.ok()) << "first add should succeed, but got: " << res.message();
-  res = uci_.add_bucket_entry(&dpp_, "foo");
+  res = uci_.add_bucket_entry(&dpp_, "foo", "owner");
   EXPECT_FALSE(res.ok()) << "second add of same bucket should fail";
 }
 
@@ -245,11 +245,11 @@ TEST_F(UBNSTestImplGRPCTest, AddRemoveAddSucceeds)
   TestClient cio;
   DEFINE_REQ_STATE;
   s.cio = &cio;
-  auto res = uci_.add_bucket_entry(&dpp_, "foo");
+  auto res = uci_.add_bucket_entry(&dpp_, "foo", "owner");
   EXPECT_TRUE(res.ok()) << "first add should succeed, but got: " << res.message();
   res = uci_.delete_bucket_entry(&dpp_, "foo");
   EXPECT_TRUE(res.ok()) << "remove same bucket should succeed, but got: " << res.message();
-  res = uci_.add_bucket_entry(&dpp_, "foo");
+  res = uci_.add_bucket_entry(&dpp_, "foo", "owner");
   EXPECT_TRUE(res.ok()) << "re-add of same bucket after deletion should succeed, but got: " << res.message();
 }
 
@@ -271,7 +271,7 @@ TEST_F(UBNSTestImplGRPCTest, SecondDeleteFails)
   TestClient cio;
   DEFINE_REQ_STATE;
   s.cio = &cio;
-  auto res = uci_.add_bucket_entry(&dpp_, "foo");
+  auto res = uci_.add_bucket_entry(&dpp_, "foo", "owner");
   EXPECT_TRUE(res.ok()) << "add should succeed, but got: " << res.message();
   res = uci_.delete_bucket_entry(&dpp_, "foo");
   EXPECT_TRUE(res.ok()) << "delete of existing bucket should succeed, but got: " << res.message();
@@ -301,25 +301,22 @@ TEST_F(UBNSTestImplGRPCTest, ChannelRecoversFromDeadAtStartup)
   DEFINE_REQ_STATE;
   s.cio = &cio;
   //   auto res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
-  auto res = uci_.add_bucket_entry(&dpp_, "foo");
+  auto res = uci_.add_bucket_entry(&dpp_, "foo", "owner");
   ASSERT_FALSE(res.ok()) << "should fail";
-  //   ASSERT_EQ(res.code(), -EACCES) << "should return -EACCES";
-  //   ASSERT_EQ(res.err_type(), HandoffAuthResult::error_type::TRANSPORT_ERROR) << "should return TRANSPORT_ERROR";
 
   server().start();
   // Wait as short a time as the library allows.
   std::this_thread::sleep_for(std::chrono::milliseconds(SMALLEST_RECONNECT_DELAY_MS));
   //   res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
-  res = uci_.add_bucket_entry(&dpp_, "foo");
+  res = uci_.add_bucket_entry(&dpp_, "foo", "owner");
   EXPECT_TRUE(res.ok()) << "should now succeed";
-  //   EXPECT_EQ(res.err_type(), HandoffAuthResult::error_type::NO_ERROR) << "should now show no error";
 }
 
 /**
- * @brief Mock the chunks of HandoffHelperImpl we need to check that the
+ * @brief Mock the chunks of UBNSHelperImpl we need to check that the
  * config observer is working properly.
  *
- * See the notes on HandoffConfigObserver<T> for more details. This class
+ * See the notes on UBNSConfigObserver<T> for more details. This class
  * allows us to instantiate a config observer and make sure it's responding
  * correctly to configuration changes.
  */
@@ -353,7 +350,7 @@ public:
  * @brief Test that the config observer is hooked up properly for runtime
  * changes to variables we care about.
  */
-class TestHandoffConfigObserver : public ::testing::Test {
+class TestUBNSConfigObserver : public ::testing::Test {
 
 protected:
   void SetUp() override
@@ -366,7 +363,7 @@ protected:
   DoutPrefix dpp_ { g_ceph_context, ceph_subsys_rgw, "unittest " };
 };
 
-TEST_F(TestHandoffConfigObserver, Null)
+TEST_F(TestUBNSConfigObserver, Null)
 {
 }
 
@@ -381,7 +378,7 @@ TEST_F(TestHandoffConfigObserver, Null)
 // that if handle_conf_change() is called properly, then the configuration
 // will flow through to the helperimpl.
 //
-TEST_F(TestHandoffConfigObserver, GRPCChannelArgs)
+TEST_F(TestUBNSConfigObserver, GRPCChannelArgs)
 {
   // Parameters we'll 'change'.
   std::set<std::string> changed;
@@ -406,7 +403,7 @@ TEST_F(TestHandoffConfigObserver, GRPCChannelArgs)
   }
 }
 
-TEST_F(TestHandoffConfigObserver, GRPCURI)
+TEST_F(TestUBNSConfigObserver, GRPCURI)
 {
   // Parameters we'll 'change'.
   std::set<std::string> changed { "rgw_ubns_grpc_uri" };

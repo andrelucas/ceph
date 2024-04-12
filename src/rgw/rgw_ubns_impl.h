@@ -73,11 +73,11 @@ public:
     stub_ = ubdb::v1::UBDBService::NewStub(channel);
   }
 
-  UBNSClient::Result add_bucket_request(const ubdb::v1::AddBucketEntryRequest& req);
+  UBNSClientResult add_bucket_request(const ubdb::v1::AddBucketEntryRequest& req);
 
-  UBNSClient::Result delete_bucket_request(const ubdb::v1::DeleteBucketEntryRequest& req);
+  UBNSClientResult delete_bucket_request(const ubdb::v1::DeleteBucketEntryRequest& req);
 
-  UBNSClient::Result update_bucket_request(const ubdb::v1::UpdateBucketEntryRequest& req);
+  UBNSClientResult update_bucket_request(const ubdb::v1::UpdateBucketEntryRequest& req);
 
 }; // class UBNSgRPCClient
 
@@ -219,27 +219,27 @@ public:
    *
    * @param dpp DoutPrefixProvider.
    * @param bucket_name The bucket name.
-   * @return UBNSClient::Result A result object.
+   * @return UBNSClientResult A result object.
    */
-  UBNSClient::Result add_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name);
+  UBNSClientResult add_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner);
 
   /**
    * @brief Call ubdb.v1.DeleteBucketEntry() and return the result.
    *
    * @param dpp DoutPrefixProvider.
    * @param bucket_name The bucket name.
-   * @return UBNSClient::Result A result object.
+   * @return UBNSClientResult A result object.
    */
-  UBNSClient::Result delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name);
+  UBNSClientResult delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name);
 
   /**
    * @brief Call ubdb.v1.UpdateBucketEntry() and return the result.
    *
    * @param dpp DoutPrefixProvider.
    * @param bucket_name The bucket name.
-   * @return UBNSClient::Result A result object.
+   * @return UBNSClientResult A result object.
    */
-  UBNSClient::Result update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name);
+  UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner);
 
   /**
    * @brief Set the gRPC channel URI.
