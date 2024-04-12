@@ -149,6 +149,12 @@ public:
   friend std::ostream& operator<<(std::ostream& os, const UBNSClientResult& ep);
 };
 
+enum class UBNSBucketUpdateState {
+  Unspecified,
+  Created,
+  Deleting
+}; // enum class UBNSBucketUpdateState
+
 /**
  * @brief UBNS client class. A shell for UBNSClientImpl.
  *
@@ -218,7 +224,7 @@ public:
    * @param bucket_name The bucket name.
    * @return UBNSClient::Result the implementation's result object.
    */
-  UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner);
+  UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner, UBNSBucketUpdateState state);
 };
 
 /**
@@ -231,67 +237,71 @@ template <typename T>
 class UBNSCreateStateMachine {
 
 public:
-  enum class State {
-    Init,
-    CreateStart,
-    CreateRPCSucceeded,
-    CreateRPCFailed,
-    UpdateStart,
-    UpdateRPCSucceeded,
-    UpdateRPCFailed,
-    RollbackCreateStart,
-    RollbackCreateFailed,
-    Complete,
+  enum class CreateMachineState {
+    INIT,
+    CREATE_START,
+    CREATE_RPC_SUCCEEDED,
+    CREATE_RPC_FAILED,
+    UPDATE_START,
+    UPDATE_RPC_SUCCEEDED,
+    UPDATE_RPC_FAILED,
+    ROLLBACK_CREATE_START,
+    ROLLBACK_CREATE_SUCCEEDED,
+    ROLLBACK_CREATE_FAILED,
+    COMPLETE,
   }; // enum class UBNSCreateMachine::State
 
-  std::string to_str(State state)
+  std::string to_str(CreateMachineState state)
   {
     switch (state) {
-    case State::Init:
-      return "Init";
-    case State::CreateStart:
-      return "CreateStart";
-    case State::CreateRPCSucceeded:
-      return "CreateRPCSucceeded";
-    case State::CreateRPCFailed:
-      return "CreateFailed";
-    case State::UpdateStart:
-      return "UpdateStart";
-    case State::UpdateRPCSucceeded:
-      return "UpdateRPCSucceeded";
-    case State::UpdateRPCFailed:
-      return "UpdateRPCFailed";
-    case State::RollbackCreateStart:
-      return "RollbackCreateStart";
-    case State::RollbackCreateFailed:
-      return "RollbackCreateFailed";
-    case State::Complete:
-      return "Complete";
+    case CreateMachineState::INIT:
+      return "INIT";
+    case CreateMachineState::CREATE_START:
+      return "CREATE_START";
+    case CreateMachineState::CREATE_RPC_SUCCEEDED:
+      return "CREATE_RPC_SUCCEEDED";
+    case CreateMachineState::CREATE_RPC_FAILED:
+      return "CREATE_FAILED";
+    case CreateMachineState::UPDATE_START:
+      return "UPDATE_START";
+    case CreateMachineState::UPDATE_RPC_SUCCEEDED:
+      return "UPDATE_RPC_SUCCEEDED";
+    case CreateMachineState::UPDATE_RPC_FAILED:
+      return "UPDATE_RPC_FAILED";
+    case CreateMachineState::ROLLBACK_CREATE_START:
+      return "ROLLBACK_CREATE_START";
+    case CreateMachineState::ROLLBACK_CREATE_SUCCEEDED:
+      return "ROLLBACK_CREATE_SUCCEEDED";
+    case CreateMachineState::ROLLBACK_CREATE_FAILED:
+      return "ROLLBACK_CREATE_FAILED";
+    case CreateMachineState::COMPLETE:
+      return "COMPLETE";
     }
   } // UBNSCreateMachine::to_str(State)
 
-  UBNSCreateStateMachine(const DoutPrefixProvider* dpp, std::shared_ptr<UBNSClient> client, const std::string& bucket_name, const std::string& owner)
+  UBNSCreateStateMachine(const DoutPrefixProvider* dpp, std::shared_ptr<T> client, const std::string& bucket_name, const std::string& owner)
       : dpp_ { dpp }
       , client_ { client }
       , bucket_name_ { bucket_name }
       , owner_ { owner }
-      , state_ { State::Init }
+      , state_ { CreateMachineState::INIT }
   {
   }
 
   ~UBNSCreateStateMachine()
   {
     ldpp_dout(dpp_, 20) << fmt::format(FMT_STRING("~UBNSCreateMachine")) << dendl;
-    if (state_ == State::CreateRPCSucceeded) {
+    if (state_ == CreateMachineState::CREATE_RPC_SUCCEEDED) {
       ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: Rolling back bucket creation for {}"), bucket_name_) << dendl;
       // Start the rollback. Ignore the result.
-      (void)set_state(State::RollbackCreateStart);
+      (void)set_state(CreateMachineState::ROLLBACK_CREATE_START);
     }
     ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("~UBNSCreateMachine bucket '{}' owner '{}' end state {}"), bucket_name_, owner_, to_str(state_)) << dendl;
   }
 
-  State state() const noexcept { return state_; }
-  bool set_state(State new_state) noexcept
+  CreateMachineState state() const noexcept { return state_; }
+
+  bool set_state(CreateMachineState new_state) noexcept
   {
     ldpp_dout(dpp_, 20) << fmt::format(FMT_STRING("UBNSCreateMachine: attempt state transition {} -> {}"), to_str(state_), to_str(new_state)) << dendl;
     UBNSClientResult result;
@@ -299,71 +309,75 @@ public:
     // Implement our state machine. A 'break' means an illegal state
     // transition.
     switch (new_state) {
-    case State::Init:
+    case CreateMachineState::INIT:
       break;
 
-    case State::CreateStart:
-      if (state_ != State::Init) {
+    case CreateMachineState::CREATE_START:
+      if (state_ != CreateMachineState::INIT) {
         break;
       }
       result = client_->add_bucket_entry(dpp_, bucket_name_, owner_);
       if (result.ok()) {
-        state_ = State::CreateRPCSucceeded;
+        state_ = CreateMachineState::CREATE_RPC_SUCCEEDED;
         return true;
       } else {
         ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: add_bucket_entry() rpc for bucket {} failed: {}"), bucket_name_, result.to_string()) << dendl;
-        state_ = State::CreateRPCFailed;
+        state_ = CreateMachineState::CREATE_RPC_FAILED;
         saved_result_ = result;
         return false;
       }
       break;
 
-    case State::CreateRPCSucceeded:
-    case State::CreateRPCFailed:
+    case CreateMachineState::CREATE_RPC_SUCCEEDED:
+    case CreateMachineState::CREATE_RPC_FAILED:
       break;
 
-    case State::UpdateStart:
-      if (state_ != State::CreateRPCSucceeded && state_ != State::UpdateRPCFailed) {
+    case CreateMachineState::UPDATE_START:
+      if (state_ != CreateMachineState::CREATE_RPC_SUCCEEDED && state_ != CreateMachineState::UPDATE_RPC_FAILED) {
         break;
       }
-      result = client_->update_bucket_entry(dpp_, bucket_name_, owner_);
+      result = client_->update_bucket_entry(dpp_, bucket_name_, owner_, UBNSBucketUpdateState::Created);
       if (result.ok()) {
-        state_ = State::UpdateRPCSucceeded;
+        state_ = CreateMachineState::UPDATE_RPC_SUCCEEDED;
         return true;
       } else {
         ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: update_bucket_entry() rpc for bucket {} failed: {}"), bucket_name_, result.to_string()) << dendl;
-        state_ = State::UpdateRPCFailed;
+        state_ = CreateMachineState::UPDATE_RPC_FAILED;
         saved_result_ = result;
         return false;
       }
       break;
 
-    case State::UpdateRPCSucceeded:
+    case CreateMachineState::UPDATE_RPC_SUCCEEDED:
       break;
 
-    case State::UpdateRPCFailed:
+    case CreateMachineState::UPDATE_RPC_FAILED:
       break;
 
-    case State::RollbackCreateStart:
-      if (state_ != State::CreateRPCSucceeded && state_ != State::UpdateRPCFailed) {
+    case CreateMachineState::ROLLBACK_CREATE_START:
+      if (state_ != CreateMachineState::CREATE_RPC_SUCCEEDED && state_ != CreateMachineState::UPDATE_RPC_FAILED) {
         break;
       }
       result = client_->delete_bucket_entry(dpp_, bucket_name_);
       if (result.ok()) {
-        state_ = State::Complete;
+        state_ = CreateMachineState::ROLLBACK_CREATE_SUCCEEDED;
         return true;
       } else {
-        state_ = State::RollbackCreateFailed;
+        state_ = CreateMachineState::ROLLBACK_CREATE_FAILED;
         saved_result_ = result;
         return false;
       }
       break;
 
-    case State::RollbackCreateFailed:
+    case CreateMachineState::ROLLBACK_CREATE_FAILED:
       break;
 
-    case State::Complete:
-      break;
+    case CreateMachineState::COMPLETE:
+      if (state_ != CreateMachineState::UPDATE_RPC_SUCCEEDED) {
+        break;
+      }
+      state_ = CreateMachineState::COMPLETE;
+      return true;
     }
     // If we didn't return from the state switch, we're attempting an invalid
     // transition.
@@ -378,149 +392,160 @@ private:
   std::shared_ptr<T> client_;
   std::string bucket_name_;
   std::string owner_;
-  State state_;
+  CreateMachineState state_;
   std::optional<UBNSClientResult> saved_result_;
 }; // class UBNSCreateMachine
 
 using UBNSCreateMachine = UBNSCreateStateMachine<UBNSClient>;
+using UBNSCreateState = UBNSCreateMachine::CreateMachineState;
 
 template <typename T>
 class UBNSDeleteStateMachine {
 
 public:
-  enum class State {
-    Init,
-    UpdateStart,
-    UpdateRPCSucceeded,
-    UpdateRPCFailed,
-    DeleteStart,
-    DeleteRPCSucceeded,
-    DeleteRPCFailed,
-    RollbackUpdateStart,
-    RollbackUpdateFailed,
-    Complete
+  enum class DeleteMachineState {
+    INIT,
+    UPDATE_START,
+    UPDATE_RPC_SUCCEEDED,
+    UPDATE_RPC_FAILED,
+    DELETE_START,
+    DELETE_RPC_SUCCEEDED,
+    DELETE_RPC_FAILED,
+    ROLLBACK_UPDATE_START,
+    ROLLBACK_UPDATE_SUCCEEDED,
+    ROLLBACK_UPDATE_FAILED,
+    COMPLETE
   }; // enum class UBNSDeleteMachine::State
 
-  std::string to_str(State state)
+  std::string to_str(DeleteMachineState state)
   {
     switch (state) {
-    case State::Init:
-      return "Init";
-    case State::UpdateStart:
-      return "UpdateStart";
-    case State::UpdateRPCSucceeded:
-      return "UpdateRPCSucceeded";
-    case State::UpdateRPCFailed:
-      return "UpdateRPCFailed";
-    case State::DeleteStart:
-      return "DeleteStart";
-    case State::DeleteRPCSucceeded:
-      return "DeleteRPCSucceeded";
-    case State::DeleteRPCFailed:
-      return "DeleteRPCFailed";
-    case State::RollbackUpdateStart:
-      return "RollbackUpdateStart";
-    case State::RollbackUpdateFailed:
-      return "RollbackUpdateFailed";
-    case State::Complete:
-      return "Complete";
+    case DeleteMachineState::INIT:
+      return "INIT";
+    case DeleteMachineState::UPDATE_START:
+      return "UPDATE_START";
+    case DeleteMachineState::UPDATE_RPC_SUCCEEDED:
+      return "UPDATE_RPC_SUCCEEDED";
+    case DeleteMachineState::UPDATE_RPC_FAILED:
+      return "UPDATE_RPC_FAILED";
+    case DeleteMachineState::DELETE_START:
+      return "DELETE_START";
+    case DeleteMachineState::DELETE_RPC_SUCCEEDED:
+      return "DELETE_RPC_SUCCEEDED";
+    case DeleteMachineState::DELETE_RPC_FAILED:
+      return "DELETE_RPC_FAILED";
+    case DeleteMachineState::ROLLBACK_UPDATE_START:
+      return "ROLLBACK_UPDATE_START";
+    case DeleteMachineState::ROLLBACK_UPDATE_SUCCEEDED:
+      return "ROLLBACK_UPDATE_SUCCEEDED";
+    case DeleteMachineState::ROLLBACK_UPDATE_FAILED:
+      return "ROLLBACK_UPDATE_FAILED";
+    case DeleteMachineState::COMPLETE:
+      return "COMPLETE";
     }
   }; // UBNSDeleteMachine::to_str(State)
 
-  UBNSDeleteStateMachine(const DoutPrefixProvider* dpp, std::shared_ptr<UBNSClient> client, const std::string& bucket_name, const std::string& owner)
+  UBNSDeleteStateMachine(const DoutPrefixProvider* dpp, std::shared_ptr<T> client, const std::string& bucket_name, const std::string& owner)
       : dpp_ { dpp }
       , client_ { client }
       , bucket_name_ { bucket_name }
       , owner_ { owner }
-      , state_ { State::Init }
+      , state_ { DeleteMachineState::INIT }
   {
   }
 
   ~UBNSDeleteStateMachine()
   {
     ldpp_dout(dpp_, 20) << fmt::format(FMT_STRING("~UBNSDeleteMachine")) << dendl;
-    if (state_ == State::UpdateRPCSucceeded) {
+    if (state_ == DeleteMachineState::UPDATE_RPC_SUCCEEDED) {
       ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: Rolling back bucket deletion update for {}"), bucket_name_) << dendl;
       // Start the rollback. Ignore the result.
-      (void)set_state(State::RollbackUpdateStart);
+      (void)set_state(DeleteMachineState::ROLLBACK_UPDATE_START);
     }
     ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("~UBNSDeleteMachine bucket '{}' owner '{}' end state {}"), bucket_name_, owner_, to_str(state_)) << dendl;
   }
 
-  State state() const noexcept { return state_; }
-  bool set_state(State new_state) noexcept
+  DeleteMachineState state() const noexcept { return state_; }
+
+  bool set_state(DeleteMachineState new_state) noexcept
   {
-    ldpp_dout(dpp_, 20) << fmt::format(FMT_STRING("UBNSDeleteMachine: attempt state transition {} -> {}"), to_str(state_), to_str(state_)) << dendl;
+    ldpp_dout(dpp_, 20) << fmt::format(FMT_STRING("UBNSDeleteMachine: attempt state transition {} -> {}"), to_str(state_), to_str(new_state)) << dendl;
     UBNSClientResult result;
 
     // Implement our state machine. A 'break' means an illegal state
     // transition.
     switch (new_state) {
-    case State::Init:
+    case DeleteMachineState::INIT:
       break;
 
-    case State::UpdateStart:
-      if (state_ != State::Init) {
+    case DeleteMachineState::UPDATE_START:
+      if (state_ != DeleteMachineState::INIT) {
         break;
       }
-      result = client_->update_bucket_entry(dpp_, bucket_name_, owner_);
+      result = client_->update_bucket_entry(dpp_, bucket_name_, owner_, UBNSBucketUpdateState::Deleting);
       if (result.ok()) {
-        state_ = State::UpdateRPCSucceeded;
+        state_ = DeleteMachineState::UPDATE_RPC_SUCCEEDED;
         return true;
       } else {
         ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: update_bucket_entry() rpc for bucket {} failed: {}"), bucket_name_, result.to_string()) << dendl;
-        state_ = State::UpdateRPCFailed;
+        state_ = DeleteMachineState::UPDATE_RPC_FAILED;
         saved_result_ = result;
         return false;
       }
       break;
 
-    case State::UpdateRPCSucceeded:
+    case DeleteMachineState::UPDATE_RPC_SUCCEEDED:
       break;
 
-    case State::UpdateRPCFailed:
+    case DeleteMachineState::UPDATE_RPC_FAILED:
       break;
 
-    case State::DeleteStart:
-      if (state_ != State::UpdateRPCSucceeded && state_ != State::DeleteRPCFailed) {
+    case DeleteMachineState::DELETE_START:
+      if (state_ != DeleteMachineState::UPDATE_RPC_SUCCEEDED && state_ != DeleteMachineState::DELETE_RPC_FAILED) {
         break;
       }
       result = client_->delete_bucket_entry(dpp_, bucket_name_);
       if (result.ok()) {
-        state_ = State::DeleteRPCSucceeded;
+        state_ = DeleteMachineState::DELETE_RPC_SUCCEEDED;
         return true;
       } else {
         ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: delete_bucket_entry() rpc for bucket {} failed: {}"), bucket_name_, result.to_string()) << dendl;
-        state_ = State::DeleteRPCFailed;
+        state_ = DeleteMachineState::DELETE_RPC_FAILED;
         saved_result_ = result;
         return false;
       }
       break;
 
-    case State::DeleteRPCSucceeded:
-    case State::DeleteRPCFailed:
+    case DeleteMachineState::DELETE_RPC_SUCCEEDED:
       break;
 
-    case State::RollbackUpdateStart:
-      if (state_ != State::UpdateRPCSucceeded && state_ != State::DeleteRPCFailed) {
+    case DeleteMachineState::DELETE_RPC_FAILED:
+      break;
+
+    case DeleteMachineState::ROLLBACK_UPDATE_START:
+      if (state_ != DeleteMachineState::UPDATE_RPC_SUCCEEDED && state_ != DeleteMachineState::DELETE_RPC_FAILED) {
         break;
       }
-      result = client_->update_bucket_entry(dpp_, bucket_name_, owner_);
+      result = client_->update_bucket_entry(dpp_, bucket_name_, owner_, UBNSBucketUpdateState::Created);
       if (result.ok()) {
-        state_ = State::Complete;
+        state_ = DeleteMachineState::ROLLBACK_UPDATE_SUCCEEDED;
         return true;
       } else {
-        state_ = State::RollbackUpdateFailed;
+        state_ = DeleteMachineState::ROLLBACK_UPDATE_FAILED;
         saved_result_ = result;
         return false;
       }
       break;
 
-    case State::RollbackUpdateFailed:
+    case DeleteMachineState::ROLLBACK_UPDATE_FAILED:
       break;
 
-    case State::Complete:
-      break;
+    case DeleteMachineState::COMPLETE:
+      if (state_ != DeleteMachineState::DELETE_RPC_SUCCEEDED) {
+        break;
+      }
+      state_ = DeleteMachineState::COMPLETE;
+      return true;
     }
 
     // If we didn't return from the state switch, we're attempting an invalid
@@ -536,10 +561,11 @@ private:
   std::shared_ptr<T> client_;
   std::string bucket_name_;
   std::string owner_;
-  State state_;
+  DeleteMachineState state_;
   std::optional<UBNSClientResult> saved_result_;
 }; // class UBNSDeleteMachine
 
 using UBNSDeleteMachine = UBNSDeleteStateMachine<UBNSClient>;
+using UBNSDeleteState = UBNSDeleteMachine::DeleteMachineState;
 
 } // namespace rgw

@@ -13,14 +13,15 @@
 #include <boost/optional.hpp>
 #include <boost/utility/in_place_factory.hpp>
 
-#include "include/scope_guard.h"
 #include "common/Clock.h"
 #include "common/armor.h"
+#include "common/ceph_json.h"
+#include "common/dout.h"
 #include "common/errno.h"
 #include "common/mime.h"
-#include "common/utf8.h"
-#include "common/ceph_json.h"
 #include "common/static_ptr.h"
+#include "common/utf8.h"
+#include "include/scope_guard.h"
 #include "rgw_tracer.h"
 
 #include "rgw_rados.h"
@@ -3175,17 +3176,8 @@ void RGWCreateBucket::execute(optional_yield y)
   if (op_ret < 0)
     return;
 
-  // // XXX check sequencing with documentation, this is just to test the flow.
-  // if (s->ubns_client) {
-  //   auto result = s->ubns_client->add_bucket_entry(this, bucket_name, s->user->get_id().to_str());
-  //   if (result.err()) {
-  //     ldpp_dout(this, 0) << "UBNS rejected bucket creation: " << result.message() << dendl;
-  //     op_ret = -EEXIST;
-  //     return;
-  //   }
-  // }
   if (ubns_creater) {
-    bool success = ubns_creater->set_state(rgw::UBNSCreateMachine::State::CreateStart);
+    bool success = ubns_creater->set_state(rgw::UBNSCreateMachine::CreateMachineState::CREATE_START);
     if (!success) {
       auto result = ubns_creater->saved_grpc_result();
       if (result) {
@@ -3381,7 +3373,7 @@ void RGWCreateBucket::execute(optional_yield y)
   }
 
   if (ubns_creater) {
-    bool success = ubns_creater->set_state(rgw::UBNSCreateMachine::State::UpdateStart);
+    bool success = ubns_creater->set_state(rgw::UBNSCreateMachine::CreateMachineState::UPDATE_START);
     if (!success) {
       auto result = ubns_creater->saved_grpc_result();
       if (result) {
@@ -3422,17 +3414,8 @@ void RGWDeleteBucket::execute(optional_yield y)
     ubns_deleter = rgw::UBNSDeleteMachine(this, s->ubns_client, s->bucket_name, s->user->get_id().to_str());
   }
 
-  // // XXX check sequencing with documentation, this is just to test the flow.
-  // if (s->ubns_client) {
-  //   auto result = s->ubns_client->delete_bucket_entry(this, s->bucket_name);
-  //   if (result.err()) {
-  //     ldpp_dout(this, 0) << "UBNS rejected bucket deletion: " << result.message() << dendl;
-  //     op_ret = -EEXIST;
-  //     return;
-  //   }
-  // }
   if (ubns_deleter) {
-    bool success = ubns_deleter->set_state(rgw::UBNSDeleteMachine::State::UpdateStart);
+    bool success = ubns_deleter->set_state(rgw::UBNSDeleteMachine::DeleteMachineState::UPDATE_START);
     if (!success) {
       auto result = ubns_deleter->saved_grpc_result();
       if (result) {
@@ -3504,7 +3487,7 @@ void RGWDeleteBucket::execute(optional_yield y)
   }
 
   if (ubns_deleter) {
-    bool success = ubns_deleter->set_state(rgw::UBNSDeleteMachine::State::DeleteStart);
+    bool success = ubns_deleter->set_state(rgw::UBNSDeleteMachine::DeleteMachineState::DELETE_START);
     if (!success) {
       auto result = ubns_deleter->saved_grpc_result();
       if (result) {

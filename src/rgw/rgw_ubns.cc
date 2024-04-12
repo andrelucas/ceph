@@ -52,9 +52,9 @@ UBNSClientResult UBNSClient::delete_bucket_entry(const DoutPrefixProvider* dpp, 
 {
   return impl_->delete_bucket_entry(dpp, bucket_name);
 }
-UBNSClientResult UBNSClient::update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner)
+UBNSClientResult UBNSClient::update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner, UBNSBucketUpdateState state)
 {
-  return impl_->update_bucket_entry(dpp, bucket_name, owner);
+  return impl_->update_bucket_entry(dpp, bucket_name, owner, state);
 }
 
 std::string UBNSClientResult::to_string() const
@@ -62,7 +62,7 @@ std::string UBNSClientResult::to_string() const
   if (ok()) {
     return "UBNSClientResult(success,code=0)";
   } else {
-    return fmt::format(FMT_STRING("UBNSClientResult(failure,code={},message='{}'"), code(), message());
+    return fmt::format(FMT_STRING("UBNSClientResult(failure,code={},message='{}')"), code(), message());
   }
 }
 

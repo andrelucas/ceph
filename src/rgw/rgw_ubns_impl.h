@@ -239,7 +239,7 @@ public:
    * @param bucket_name The bucket name.
    * @return UBNSClientResult A result object.
    */
-  UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner);
+  UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster, UBNSBucketUpdateState state);
 
   /**
    * @brief Set the gRPC channel URI.

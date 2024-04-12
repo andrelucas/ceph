@@ -12,6 +12,7 @@
 #include "rgw_ubns_impl.h"
 
 #include <errno.h>
+#include <rgw_ubns.h>
 
 #include "common/dout.h"
 #include "rgw/rgw_common.h"
@@ -128,7 +129,7 @@ UBNSClientResult UBNSClientImpl::delete_bucket_entry(const DoutPrefixProvider* d
   return client->delete_bucket_request(req);
 }
 
-UBNSClientResult UBNSClientImpl::update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner)
+UBNSClientResult UBNSClientImpl::update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster, UBNSBucketUpdateState state)
 {
   ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << dendl;
   auto client = safe_get_client(dpp);
@@ -138,7 +139,20 @@ UBNSClientResult UBNSClientImpl::update_bucket_entry(const DoutPrefixProvider* d
   ldpp_dout(dpp, 1) << "UBNS: sending gRPC UpdateBucketRequest" << dendl;
   ubdb::v1::UpdateBucketEntryRequest req;
   req.set_bucket(bucket_name);
-  req.set_owner(owner);
+  req.set_cluster(cluster);
+  ubdb::v1::BucketState rpc_state;
+  switch (state) {
+  case rgw::UBNSBucketUpdateState::Unspecified:
+    rpc_state = ubdb::v1::BucketState::BUCKET_STATE_UNSPECIFIED;
+    break;
+  case rgw::UBNSBucketUpdateState::Created:
+    rpc_state = ubdb::v1::BucketState::BUCKET_STATE_CREATED;
+    break;
+  case rgw::UBNSBucketUpdateState::Deleting:
+    rpc_state = ubdb::v1::BucketState::BUCKET_STATE_DELETING;
+    break;
+  }
+  req.set_state(rpc_state);
   return client->update_bucket_request(req);
 }
 
