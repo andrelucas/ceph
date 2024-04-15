@@ -91,11 +91,14 @@ public:
   {
     ldpp_dout(dpp_, 20) << fmt::format(FMT_STRING("UBNSCreateMachine: attempt state transition {} -> {}"), to_str(state_), to_str(new_state)) << dendl;
     UBNSClientResult result;
+    bool nonuser_state = false; // Set to true if this is a state the user should never set.
 
-    // Implement our state machine. A 'break' means an illegal state
-    // transition.
+    // Implement our state machine. Return from here if the state was handled.
+    // A 'break' here means an illegal state transition was attempted, and the
+    // following code will log an error.
     switch (new_state) {
     case CreateMachineState::INIT:
+      nonuser_state = true;
       break;
 
     case CreateMachineState::CREATE_START:
@@ -115,7 +118,11 @@ public:
       break;
 
     case CreateMachineState::CREATE_RPC_SUCCEEDED:
+      nonuser_state = true;
+      break;
+
     case CreateMachineState::CREATE_RPC_FAILED:
+      nonuser_state = true;
       break;
 
     case CreateMachineState::UPDATE_START:
@@ -135,9 +142,11 @@ public:
       break;
 
     case CreateMachineState::UPDATE_RPC_SUCCEEDED:
+      nonuser_state = true;
       break;
 
     case CreateMachineState::UPDATE_RPC_FAILED:
+      nonuser_state = true;
       break;
 
     case CreateMachineState::ROLLBACK_CREATE_START:
@@ -156,9 +165,11 @@ public:
       break;
 
     case CreateMachineState::ROLLBACK_CREATE_SUCCEEDED:
+      nonuser_state = true;
       break;
 
     case CreateMachineState::ROLLBACK_CREATE_FAILED:
+      nonuser_state = true;
       break;
 
     case CreateMachineState::COMPLETE:
@@ -168,9 +179,12 @@ public:
       state_ = CreateMachineState::COMPLETE;
       return true;
     }
-    // If we didn't return from the state switch, we're attempting an invalid
+    // If we didn't return directly from the state switch, we're attempting an invalid
     // transition.
-    ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNSCreateMachine: Invalid state transition {} -> {}"), to_str(state_), to_str(new_state)) << dendl;
+    ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNSCreateMachine: invalid state transition {} -> {}"), to_str(state_), to_str(new_state)) << dendl;
+    if (nonuser_state) {
+      ceph_assertf_always(false, "%s: invalid user state transition %s -> %a attempted", __func__, to_str(state_).c_str(), to_str(new_state).c_str());
+    }
     return false;
   }
 
@@ -249,7 +263,7 @@ public:
   {
     ldpp_dout(dpp_, 20) << fmt::format(FMT_STRING("~UBNSDeleteMachine")) << dendl;
     if (state_ == DeleteMachineState::UPDATE_RPC_SUCCEEDED) {
-      ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: Rolling back bucket deletion update for {}"), bucket_name_) << dendl;
+      ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: rolling back bucket deletion update for {}"), bucket_name_) << dendl;
       // Start the rollback. Ignore the result.
       (void)set_state(DeleteMachineState::ROLLBACK_UPDATE_START);
     }
@@ -262,11 +276,13 @@ public:
   {
     ldpp_dout(dpp_, 20) << fmt::format(FMT_STRING("UBNSDeleteMachine: attempt state transition {} -> {}"), to_str(state_), to_str(new_state)) << dendl;
     UBNSClientResult result;
+    bool nonuser_state = false;
 
     // Implement our state machine. A 'break' means an illegal state
     // transition.
     switch (new_state) {
     case DeleteMachineState::INIT:
+      nonuser_state = true;
       break;
 
     case DeleteMachineState::UPDATE_START:
@@ -286,9 +302,11 @@ public:
       break;
 
     case DeleteMachineState::UPDATE_RPC_SUCCEEDED:
+      nonuser_state = true;
       break;
 
     case DeleteMachineState::UPDATE_RPC_FAILED:
+      nonuser_state = true;
       break;
 
     case DeleteMachineState::DELETE_START:
@@ -308,9 +326,11 @@ public:
       break;
 
     case DeleteMachineState::DELETE_RPC_SUCCEEDED:
+      nonuser_state = true;
       break;
 
     case DeleteMachineState::DELETE_RPC_FAILED:
+      nonuser_state = true;
       break;
 
     case DeleteMachineState::ROLLBACK_UPDATE_START:
@@ -329,9 +349,11 @@ public:
       break;
 
     case DeleteMachineState::ROLLBACK_UPDATE_SUCCEEDED:
+      nonuser_state = true;
       break;
 
     case DeleteMachineState::ROLLBACK_UPDATE_FAILED:
+      nonuser_state = true;
       break;
 
     case DeleteMachineState::COMPLETE:
@@ -344,7 +366,10 @@ public:
 
     // If we didn't return from the state switch, we're attempting an invalid
     // transition.
-    ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNSDeleteMachine: Invalid state transition {} -> {}"), to_str(state_), to_str(new_state)) << dendl;
+    ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNSDeleteMachine: invalid state transition {} -> {}"), to_str(state_), to_str(new_state)) << dendl;
+    if (nonuser_state) {
+      ceph_assertf_always(false, "%s: invalid user state transition %s -> %s attempted", __func__, to_str(state_).c_str(), to_str(new_state).c_str());
+    }
     return false;
   }
 
