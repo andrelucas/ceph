@@ -81,13 +81,7 @@ public:
     if (state_ == CreateMachineState::CREATE_RPC_SUCCEEDED) {
       ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: Rolling back bucket creation for {}"), bucket_name_) << dendl;
       // Start the rollback. Ignore the result.
-      //   (void)set_state(CreateMachineState::ROLLBACK_CREATE_START);
-      auto result = client_->delete_bucket_entry(dpp_, bucket_name_, cluster_id_);
-      if (result.ok()) {
-        state_ = CreateMachineState::ROLLBACK_CREATE_SUCCEEDED;
-      } else {
-        state_ = CreateMachineState::ROLLBACK_CREATE_FAILED;
-      }
+      (void)set_state(CreateMachineState::ROLLBACK_CREATE_START);
     }
     ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("~UBNSCreateMachine bucket '{}' owner '{}' end state {}"), bucket_name_, owner_, to_str(state_)) << dendl;
   }
@@ -274,14 +268,7 @@ public:
     if (state_ == DeleteMachineState::UPDATE_RPC_SUCCEEDED) {
       ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: rolling back bucket deletion update for {}"), bucket_name_) << dendl;
       // Start the rollback. Ignore the result.
-      //   (void)set_state(DeleteMachineState::ROLLBACK_UPDATE_START);
-      ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: rolling back bucket deletion update for {} / {}"), bucket_name_, cluster_id_) << dendl;
-      auto result = client_->update_bucket_entry(dpp_, bucket_name_, cluster_id_, UBNSBucketUpdateState::Created);
-      if (result.ok()) {
-        state_ = DeleteMachineState::ROLLBACK_UPDATE_SUCCEEDED;
-      } else {
-        state_ = DeleteMachineState::ROLLBACK_UPDATE_FAILED;
-      }
+      (void)set_state(DeleteMachineState::ROLLBACK_UPDATE_START);
     }
     ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("~UBNSDeleteMachine bucket '{}' owner '{}' end state {}"), bucket_name_, owner_, to_str(state_)) << dendl;
   }
