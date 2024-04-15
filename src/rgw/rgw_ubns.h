@@ -206,7 +206,7 @@ public:
    * @param bucket_name The bucket name.
    * @return UBNSClient::Result the implementation's result object.
    */
-  UBNSClientResult add_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner);
+  UBNSClientResult add_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, const std::string& owner);
 
   /**
    * @brief Pass to the implementation's delete_bucket_entry().
@@ -215,7 +215,7 @@ public:
    * @param bucket_name The bucket name.
    * @return UBNSClient::Result the implementation's result object.
    */
-  UBNSClientResult delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name);
+  UBNSClientResult delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id);
 
   /**
    * @brief Pass to the implementation's update_bucket_entry().
@@ -224,7 +224,7 @@ public:
    * @param bucket_name The bucket name.
    * @return UBNSClient::Result the implementation's result object.
    */
-  UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner, UBNSBucketUpdateState state);
+  UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, UBNSBucketUpdateState state);
 };
 
 } // namespace rgw

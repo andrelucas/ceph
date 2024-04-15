@@ -221,7 +221,7 @@ public:
    * @param bucket_name The bucket name.
    * @return UBNSClientResult A result object.
    */
-  UBNSClientResult add_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner);
+  UBNSClientResult add_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, const std::string& owner);
 
   /**
    * @brief Call ubdb.v1.DeleteBucketEntry() and return the result.
@@ -230,7 +230,7 @@ public:
    * @param bucket_name The bucket name.
    * @return UBNSClientResult A result object.
    */
-  UBNSClientResult delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name);
+  UBNSClientResult delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id);
 
   /**
    * @brief Call ubdb.v1.UpdateBucketEntry() and return the result.
@@ -239,7 +239,7 @@ public:
    * @param bucket_name The bucket name.
    * @return UBNSClientResult A result object.
    */
-  UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster, UBNSBucketUpdateState state);
+  UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, UBNSBucketUpdateState state);
 
   /**
    * @brief Set the gRPC channel URI.

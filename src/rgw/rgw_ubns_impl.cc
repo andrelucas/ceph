@@ -101,9 +101,9 @@ std::optional<UBNSgRPCClient> UBNSClientImpl::safe_get_client(const DoutPrefixPr
   return std::make_optional(std::move(client));
 }
 
-UBNSClientResult UBNSClientImpl::add_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner)
+UBNSClientResult UBNSClientImpl::add_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, const std::string& owner)
 {
-  ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << dendl;
+  ldpp_dout(dpp, 20) << __func__ << dendl;
   auto client = safe_get_client(dpp);
   if (!client) {
     return UBNSClientResult::error(ERR_INTERNAL_ERROR, "Internal error (could not fetch gRPC client)");
@@ -111,13 +111,14 @@ UBNSClientResult UBNSClientImpl::add_bucket_entry(const DoutPrefixProvider* dpp,
   ldpp_dout(dpp, 1) << "UBNS: sending gRPC AddBucketRequest" << dendl;
   ubdb::v1::AddBucketEntryRequest req;
   req.set_bucket(bucket_name);
+  req.set_cluster(cluster_id);
   req.set_owner(owner);
   return client->add_bucket_request(req);
 }
 
-UBNSClientResult UBNSClientImpl::delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name)
+UBNSClientResult UBNSClientImpl::delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id)
 {
-  ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << dendl;
+  ldpp_dout(dpp, 20) << __func__ << dendl;
   auto client = safe_get_client(dpp);
   if (!client) {
     return UBNSClientResult::error(ERR_INTERNAL_ERROR, "Internal error (could not fetch gRPC client)");
@@ -125,12 +126,13 @@ UBNSClientResult UBNSClientImpl::delete_bucket_entry(const DoutPrefixProvider* d
   ldpp_dout(dpp, 1) << "UBNS: sending gRPC DeleteBucketRequest" << dendl;
   ubdb::v1::DeleteBucketEntryRequest req;
   req.set_bucket(bucket_name);
+  req.set_cluster(cluster_id);
   return client->delete_bucket_request(req);
 }
 
-UBNSClientResult UBNSClientImpl::update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster, UBNSBucketUpdateState state)
+UBNSClientResult UBNSClientImpl::update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, UBNSBucketUpdateState state)
 {
-  ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << dendl;
+  ldpp_dout(dpp, 20) << __func__ << dendl;
   auto client = safe_get_client(dpp);
   if (!client) {
     return UBNSClientResult::error(ERR_INTERNAL_ERROR, "Internal error (could not fetch gRPC client)");
@@ -138,7 +140,7 @@ UBNSClientResult UBNSClientImpl::update_bucket_entry(const DoutPrefixProvider* d
   ldpp_dout(dpp, 1) << "UBNS: sending gRPC UpdateBucketRequest" << dendl;
   ubdb::v1::UpdateBucketEntryRequest req;
   req.set_bucket(bucket_name);
-  req.set_cluster(cluster);
+  req.set_cluster(cluster_id);
   ubdb::v1::BucketState rpc_state;
   switch (state) {
   case rgw::UBNSBucketUpdateState::Unspecified:

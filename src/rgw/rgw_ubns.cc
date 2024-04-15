@@ -44,17 +44,17 @@ void UBNSClient::shutdown()
   impl_->shutdown();
 }
 
-UBNSClientResult UBNSClient::add_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner)
+UBNSClientResult UBNSClient::add_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, const std::string& owner)
 {
-  return impl_->add_bucket_entry(dpp, bucket_name, owner);
+  return impl_->add_bucket_entry(dpp, bucket_name, cluster_id, owner);
 }
-UBNSClientResult UBNSClient::delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name)
+UBNSClientResult UBNSClient::delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id)
 {
-  return impl_->delete_bucket_entry(dpp, bucket_name);
+  return impl_->delete_bucket_entry(dpp, bucket_name, cluster_id);
 }
-UBNSClientResult UBNSClient::update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& owner, UBNSBucketUpdateState state)
+UBNSClientResult UBNSClient::update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, UBNSBucketUpdateState state)
 {
-  return impl_->update_bucket_entry(dpp, bucket_name, owner, state);
+  return impl_->update_bucket_entry(dpp, bucket_name, cluster_id, state);
 }
 
 std::string UBNSClientResult::to_string() const
