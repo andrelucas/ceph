@@ -12,7 +12,6 @@
 #include "rgw_ubns_impl.h"
 
 #include <errno.h>
-#include <rgw_ubns.h>
 
 #include "common/dout.h"
 #include "rgw/rgw_common.h"

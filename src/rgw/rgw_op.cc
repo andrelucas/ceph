@@ -54,6 +54,7 @@
 #include "rgw_sal.h"
 #include "rgw_sal_rados.h"
 #include "rgw_ubns.h"
+#include "rgw_ubns_machine.h"
 
 #include "services/svc_zone.h"
 #include "services/svc_quota.h"

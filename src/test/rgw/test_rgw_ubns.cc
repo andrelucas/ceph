@@ -19,6 +19,7 @@
 
 #include "rgw_ubns.h"
 #include "rgw_ubns_impl.h"
+#include "rgw_ubns_machine.h"
 #include "test_rgw_grpc_util.h"
 #include "ubdb/v1/ubdb.grpc.pb.h"
 
@@ -428,6 +429,13 @@ enum class MockBucketState {
   DELETED
 }; // enum class MockBucketState
 
+/**
+ * @brief Mock the UBNS client-side gRPC implementation.
+ *
+ * The state machines are templates, and we can instantiate them with an
+ * interface that looks like that of rgw::UBNSClient. This means we don't have
+ * to mock all the gRPC stuff in order to test the state machines.
+ */
 class MockUBNSClient {
 private:
   std::map<std::string, MockBucketState> buckets_;
@@ -511,6 +519,7 @@ TEST_F(TestUBNSStateMachines, Instantiate)
   MockUBNSDeleteMachine deleter(dpp, client_, "foo", "owner");
 }
 
+// A simple create of a non-previously existing bucket that should succeed.
 TEST_F(TestUBNSStateMachines, CreateSimple)
 {
   MockUBNSCreateMachine creater(dpp, client_, "foo", "owner");
@@ -587,6 +596,7 @@ TEST_F(TestUBNSStateMachines, CreateAfterAutoRollbackSucceeds)
   ASSERT_TRUE(creater.set_state(MockUBNSCreateMachine::CreateMachineState::CREATE_START));
 }
 
+// A simple delete of an existing bucket that should succeed.
 TEST_F(TestUBNSStateMachines, DeleteSimple)
 {
   MockUBNSDeleteMachine deleter(dpp, client_, "foo", "owner");
