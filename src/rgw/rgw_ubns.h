@@ -227,4 +227,18 @@ public:
   UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, UBNSBucketUpdateState state);
 };
 
+/**
+ * @brief Check that all relevant UBNS parameters are set in the
+ * configuration. Only call this if rgw_ubns_enabled is true.
+ *
+ * If the configuration is not validated, return false. This is expected to
+ * terminate the RGW process.
+ *
+ * @param conf Config Proxy.
+ * @return true The configuration is valid for startup.
+ * @return false The configuration is not valid for startup and the daemon
+ * should exit.
+ */
+bool ubns_validate_startup_configuration(ConfigProxy& conf);
+
 } // namespace rgw

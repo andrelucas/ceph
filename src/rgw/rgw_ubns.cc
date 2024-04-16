@@ -10,6 +10,10 @@
  */
 
 #include "rgw_ubns.h"
+
+#include "common/ceph_context.h"
+#include "common/debug.h"
+#include "include/ceph_assert.h"
 #include "rgw_ubns_impl.h"
 
 #include <fmt/format.h>
@@ -70,6 +74,70 @@ std::ostream& operator<<(std::ostream& os, const UBNSClientResult& r)
 {
   os << r.to_string();
   return os;
+}
+
+static bool _check_configured_file_path(ConfigProxy& conf, const std::string& config_key)
+{
+  std::string path;
+  dout(20) << __func__ << ": checking file for UBNS configuration key '" << config_key << "'." << dendl;
+  if (conf.get_val(config_key, &path) == 0) {
+    if (path.empty()) {
+      derr << "FATAL: UBNS is set to enabled, but " << config_key << " is not properly set." << dendl;
+      return false;
+    }
+    if (access(path.c_str(), R_OK) == -1) {
+      derr << fmt::format(
+          FMT_STRING("FATAL: UBNS is set to enabled, but {} file '{}' is not accessible: {}"),
+          config_key, path, strerror(errno))
+           << dendl;
+      return false;
+    }
+  } else {
+    derr << "FATAL: UBNS is set to enabled, but config key " << config_key << " is not set." << dendl;
+    return false;
+  }
+  return true;
+}
+
+bool ubns_validate_startup_configuration(ConfigProxy& conf)
+{
+  // Re-check the enabled state. If it's not set, we've been called
+  // inappropriately. This is a programming error.
+  ceph_assertf_always(conf->rgw_ubns_enabled, "UBNS is not enabled, but we were called to validate configuration.");
+
+  // The cluster_id *must* be set. UBNS won't work without this.
+  if (conf->rgw_ubns_cluster_id.empty() || conf->rgw_ubns_cluster_id.size() < 3) {
+    derr << "FATAL: UBNS is enabled, but rgw_cluster_id is not properly set." << dendl;
+    return false;
+  }
+
+  if (conf->rgw_ubns_grpc_uri.empty()) {
+    derr << "FATAL: UBNS is enabled, but rgw_ubns_grpc_uri is not properly set." << dendl;
+    return false;
+  }
+
+  // Carefully check the mTLS certificate configuration. Check not only that
+  // the configuration variables are set, but that the files themselves exist.
+  if (conf->rgw_ubns_grpc_mtls_enabled) {
+    std::vector<std::string> mtls_config_keys = {
+      "rgw_ubns_grpc_mtls_ca_cert_file",
+      "rgw_ubns_grpc_mtls_client_cert_file",
+      "rgw_ubns_grpc_mtls_client_key_file"
+    };
+    int tls_files_verified = 0;
+    for (const auto& key : mtls_config_keys) {
+      if (_check_configured_file_path(conf, key)) {
+        tls_files_verified++;
+      }
+    }
+    if (tls_files_verified != mtls_config_keys.size()) {
+      derr << "FATAL: UBNS mTLS is enabled, but one or more TLS files is not properly configured" << dendl;
+      return false;
+    }
+  }
+
+  dout(5) << "UBNS configuration validated." << dendl;
+  return true;
 }
 
 } // namespace rgw

@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include "global/global_context.h"
 #include "rgw_ubns.h"
 #include "rgw_ubns_impl.h"
 #include "rgw_ubns_machine.h"
@@ -105,7 +106,7 @@ public:
   bool exists(const std::string& key) const
   {
     std::shared_lock<lock_t> l(lock_);
-    return (set_.find(key) == set_.cend());
+    return (set_.find(key) != set_.cend());
   }
 
   void clear()
@@ -122,6 +123,11 @@ public:
 //
 constexpr int SMALLEST_RECONNECT_DELAY_MS = 105;
 
+// An oversimplified implementation of the gRPC server, so we can test the
+// gRPC client code in isolation. It doesn't simulate the server-side state
+// machine at all, and in particular the update semantics aren't followed.
+// All we're testing here is that the UBNSClientImpl results in servicable
+// gRPC calls to a remote server.
 class TestUBNSClientImpl : public ubdb::v1::UBDBService::Service {
 
 private:
@@ -148,13 +154,17 @@ public:
     return grpc::Status::OK;
   }
 
-  // XXX UNIMPLEMENTED
-  //   grpc::Status UpdateBucketEntry(grpc::ServerContext* context,
-  //       const UpdateBucketEntryRequest* request,
-  //       UpdateBucketEntryResponse* response) override
-  //   {
-  //     return grpc::Status::OK;
-  //   }
+  // This isn't a simulation of UpdateBucketEntry in any way, it just checks
+  // if the bucket exists.
+  grpc::Status UpdateBucketEntry(grpc::ServerContext* context,
+      const UpdateBucketEntryRequest* request,
+      UpdateBucketEntryResponse* response) override
+  {
+    if (!buckets_.exists(request->bucket())) {
+      return grpc::Status(grpc::StatusCode::NOT_FOUND, "Bucket not found");
+    }
+    return grpc::Status::OK;
+  }
 }; // class TestUBNSClientImpl
 
 class UBNSTestImplGRPCTest : public ::testing::Test {
@@ -280,6 +290,27 @@ TEST_F(UBNSTestImplGRPCTest, SecondDeleteFails)
   EXPECT_FALSE(res.ok()) << "second delete of non-nonexistent bucket should fail";
 }
 
+TEST_F(UBNSTestImplGRPCTest, Update)
+{
+  server().start();
+  helper_init();
+  TestClient cio;
+  DEFINE_REQ_STATE;
+  s.cio = &cio;
+  auto res = uci_.add_bucket_entry(&dpp_, "foo", "cluster", "owner");
+  EXPECT_TRUE(res.ok()) << "add should succeed, but got: " << res.message();
+  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::Created);
+  EXPECT_TRUE(res.ok()) << "update to Created should succeed, but got: " << res.message();
+  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::Deleting);
+  EXPECT_TRUE(res.ok()) << "update to Deleting should succeed, but got: " << res.message();
+  res = uci_.delete_bucket_entry(&dpp_, "foo", "cluster");
+  EXPECT_TRUE(res.ok()) << "delete of existing bucket should succeed, but got: " << res.message();
+  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::Created);
+  EXPECT_FALSE(res.ok()) << "update to Created should fail";
+  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::Deleting);
+  EXPECT_FALSE(res.ok()) << "update to Created should fail";
+}
+
 // Check the system doesn't fail if started with a non-functional UBNS server.
 TEST_F(UBNSTestImplGRPCTest, ChannelRecoversFromDeadAtStartup)
 {
@@ -311,6 +342,85 @@ TEST_F(UBNSTestImplGRPCTest, ChannelRecoversFromDeadAtStartup)
   //   res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
   res = uci_.add_bucket_entry(&dpp_, "foo", "cluster", "owner");
   EXPECT_TRUE(res.ok()) << "should now succeed";
+}
+
+// Check our config validation works properly.
+
+class UBNSConfigTest : public ::testing::Test {
+protected:
+  DoutPrefix dpp_ { g_ceph_context, ceph_subsys_rgw, "unittest " };
+}; // class UBNSConfigTest
+
+TEST_F(UBNSConfigTest, EnabledWithoutClusterIDFails)
+{
+  ceph_assert(g_ceph_context != nullptr);
+  auto conf = g_conf();
+  conf.set_safe_to_start_threads();
+  ASSERT_EQ(conf.set_val("rgw_ubns_enabled", "true"), 0);
+  // Defaults to true, turn it off for now.
+  ASSERT_EQ(conf.set_val("rgw_ubns_grpc_mtls_enabled", "false"), 0);
+  conf.apply_changes(nullptr);
+  ASSERT_EQ(conf->rgw_ubns_enabled, true);
+  ASSERT_FALSE(ubns_validate_startup_configuration(conf));
+}
+
+TEST_F(UBNSConfigTest, EnabledWithClusterIDSucceeds)
+{
+  ceph_assert(g_ceph_context != nullptr);
+  auto conf = g_conf();
+  ASSERT_EQ(conf.set_val("rgw_ubns_enabled", "true"), 0);
+  ASSERT_EQ(conf.set_val("rgw_ubns_cluster_id", "foo"), 0);
+  // Defaults to true, turn it off for now.
+  ASSERT_EQ(conf.set_val("rgw_ubns_grpc_mtls_enabled", "false"), 0);
+  conf.apply_changes(nullptr);
+  ASSERT_EQ(conf->rgw_ubns_enabled, true);
+  ASSERT_EQ(conf->rgw_ubns_cluster_id, "foo");
+  ASSERT_TRUE(ubns_validate_startup_configuration(conf));
+}
+
+TEST_F(UBNSConfigTest, MTLSEnabledButMissingConfig)
+{
+  ceph_assert(g_ceph_context != nullptr);
+  auto conf = g_conf();
+  ASSERT_EQ(conf.set_val("rgw_ubns_enabled", "true"), 0);
+  ASSERT_EQ(conf.set_val("rgw_ubns_cluster_id", "foo"), 0);
+  ASSERT_EQ(conf.set_val("rgw_ubns_grpc_mtls_enabled", "true"), 0);
+  conf.apply_changes(nullptr);
+  ASSERT_EQ(conf->rgw_ubns_enabled, true);
+  ASSERT_EQ(conf->rgw_ubns_cluster_id, "foo");
+  ASSERT_FALSE(ubns_validate_startup_configuration(conf));
+}
+
+TEST_F(UBNSConfigTest, MTLSEnabledButMissingFile)
+{
+  ceph_assert(g_ceph_context != nullptr);
+  auto conf = g_conf();
+  ASSERT_EQ(conf.set_val("rgw_ubns_enabled", "true"), 0);
+  ASSERT_EQ(conf.set_val("rgw_ubns_cluster_id", "foo"), 0);
+  ASSERT_EQ(conf.set_val("rgw_ubns_grpc_mtls_enabled", "true"), 0);
+  ASSERT_EQ(conf.set_val("rgw_ubns_grpc_mtls_ca_cert_file", "/dev/null"), 0);
+  ASSERT_EQ(conf.set_val("rgw_ubns_grpc_mtls_client_cert_file", "/dev/null"), 0);
+  ASSERT_EQ(conf.set_val("rgw_ubns_grpc_mtls_client_key_file", "/tmp/missing"), 0);
+  conf.apply_changes(nullptr);
+  ASSERT_EQ(conf->rgw_ubns_enabled, true);
+  ASSERT_EQ(conf->rgw_ubns_cluster_id, "foo");
+  ASSERT_FALSE(ubns_validate_startup_configuration(conf));
+}
+
+TEST_F(UBNSConfigTest, MTLSEnabledAllFilesPresent)
+{
+  ceph_assert(g_ceph_context != nullptr);
+  auto conf = g_conf();
+  ASSERT_EQ(conf.set_val("rgw_ubns_enabled", "true"), 0);
+  ASSERT_EQ(conf.set_val("rgw_ubns_cluster_id", "foo"), 0);
+  ASSERT_EQ(conf.set_val("rgw_ubns_grpc_mtls_enabled", "true"), 0);
+  ASSERT_EQ(conf.set_val("rgw_ubns_grpc_mtls_ca_cert_file", "/dev/null"), 0);
+  ASSERT_EQ(conf.set_val("rgw_ubns_grpc_mtls_client_cert_file", "/dev/null"), 0);
+  ASSERT_EQ(conf.set_val("rgw_ubns_grpc_mtls_client_key_file", "/dev/null"), 0);
+  conf.apply_changes(nullptr);
+  ASSERT_EQ(conf->rgw_ubns_enabled, true);
+  ASSERT_EQ(conf->rgw_ubns_cluster_id, "foo");
+  ASSERT_TRUE(ubns_validate_startup_configuration(conf));
 }
 
 /**
@@ -356,6 +466,7 @@ class UBNSConfigObserverTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
+    dpp_.get_cct()->_conf.set_val_or_die("rgw_ubns_enabled", "true");
     ASSERT_EQ(dpp_.get_cct()->_conf->rgw_ubns_enabled, true);
     ASSERT_EQ(uci_.init(g_ceph_context), 0);
   }
