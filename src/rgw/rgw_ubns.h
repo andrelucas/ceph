@@ -158,7 +158,7 @@ public:
   /// Return a string representation of this object.
   std::string to_string() const;
   friend std::ostream& operator<<(std::ostream& os, const UBNSClientResult& ep);
-};
+}; // class UBNSClientResult
 
 /**
  * @brief Supported states for UpdateBucketEntry gRPC calls.
@@ -167,10 +167,18 @@ public:
  * just to issue UpdateBucketEntry calls to the UBNS client.
  */
 enum class UBNSBucketUpdateState {
-  Unspecified,
-  Created,
-  Deleting
+  UNSPECIFIED,
+  CREATED,
+  DELETING
 }; // enum class UBNSBucketUpdateState
+
+/**
+ * @brief Return a string representation of a UBNSBucketUpdateState enum.
+ *
+ * @param state The state.
+ * @return std::string A string representation of the state.
+ */
+std::string to_str(UBNSBucketUpdateState state);
 
 /**
  * @brief UBNS client class. A shell for UBNSClientImpl.

@@ -9,6 +9,7 @@
  *
  */
 
+#include "common/dout.h"
 #include "rgw_ubns.h"
 
 namespace rgw {
@@ -24,6 +25,7 @@ class UBNSCreateStateMachine {
 
 public:
   enum class CreateMachineState {
+    EMPTY,
     INIT,
     CREATE_START,
     CREATE_RPC_SUCCEEDED,
@@ -40,6 +42,8 @@ public:
   std::string to_str(CreateMachineState state)
   {
     switch (state) {
+    case CreateMachineState::EMPTY:
+      return "EMPTY";
     case CreateMachineState::INIT:
       return "INIT";
     case CreateMachineState::CREATE_START:
@@ -65,6 +69,13 @@ public:
     }
   } // UBNSCreateMachine::to_str(State)
 
+  UBNSCreateStateMachine()
+      : dpp_ { nullptr }
+      , client_ { nullptr }
+      , state_ { CreateMachineState::EMPTY }
+  {
+  }
+
   UBNSCreateStateMachine(const DoutPrefixProvider* dpp, std::shared_ptr<T> client, const std::string& bucket_name, const std::string cluster_id, const std::string& owner)
       : dpp_ { dpp }
       , client_ { client }
@@ -77,20 +88,26 @@ public:
 
   ~UBNSCreateStateMachine()
   {
-    ldpp_dout(dpp_, 20) << fmt::format(FMT_STRING("~UBNSCreateMachine")) << dendl;
     if (state_ == CreateMachineState::CREATE_RPC_SUCCEEDED) {
-      ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: Rolling back bucket creation for {}"), bucket_name_) << dendl;
+      ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: Rolling back bucket creation for {}"), machine_id, bucket_name_) << dendl;
       // Start the rollback. Ignore the result.
       (void)set_state(CreateMachineState::ROLLBACK_CREATE_START);
     }
-    ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("~UBNSCreateMachine bucket '{}' owner '{}' end state {}"), bucket_name_, owner_, to_str(state_)) << dendl;
+    ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: destructor: bucket '{}' owner '{}' end state {}"), machine_id, bucket_name_, owner_, to_str(state_)) << dendl;
   }
+
+  UBNSCreateStateMachine(const UBNSCreateStateMachine&) = delete;
+  UBNSCreateStateMachine(UBNSCreateStateMachine&&) = delete;
+  UBNSCreateStateMachine& operator=(const UBNSCreateStateMachine&) = delete;
+  UBNSCreateStateMachine& operator=(UBNSCreateStateMachine&&) = delete;
 
   CreateMachineState state() const noexcept { return state_; }
 
   bool set_state(CreateMachineState new_state) noexcept
   {
-    ldpp_dout(dpp_, 20) << fmt::format(FMT_STRING("UBNSCreateMachine: attempt state transition {} -> {}"), to_str(state_), to_str(new_state)) << dendl;
+    ceph_assertf_always(state_ != CreateMachineState::EMPTY, "{}: attempt to set state on empty machine", machine_id);
+
+    ldpp_dout(dpp_, 5) << fmt::format(FMT_STRING("{}: attempt state transition {} -> {}"), machine_id, to_str(state_), to_str(new_state)) << dendl;
     UBNSClientResult result;
     bool nonuser_state = false; // Set to true if this is a state the user should never set.
 
@@ -98,6 +115,10 @@ public:
     // A 'break' here means an illegal state transition was attempted, and the
     // following code will log an error.
     switch (new_state) {
+    case CreateMachineState::EMPTY:
+      nonuser_state = true;
+      break;
+
     case CreateMachineState::INIT:
       nonuser_state = true;
       break;
@@ -109,9 +130,10 @@ public:
       result = client_->add_bucket_entry(dpp_, bucket_name_, cluster_id_, owner_);
       if (result.ok()) {
         state_ = CreateMachineState::CREATE_RPC_SUCCEEDED;
+        ldpp_dout(dpp_, 5) << fmt::format(FMT_STRING("{}: add_bucket_entry() rpc for bucket {} succeeded"), machine_id, bucket_name_) << dendl;
         return true;
       } else {
-        ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: add_bucket_entry() rpc for bucket {} failed: {}"), bucket_name_, result.to_string()) << dendl;
+        ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: add_bucket_entry() rpc for bucket {} failed: {}"), machine_id, bucket_name_, result.to_string()) << dendl;
         state_ = CreateMachineState::CREATE_RPC_FAILED;
         saved_result_ = result;
         return false;
@@ -130,12 +152,13 @@ public:
       if (state_ != CreateMachineState::CREATE_RPC_SUCCEEDED && state_ != CreateMachineState::UPDATE_RPC_FAILED) {
         break;
       }
-      result = client_->update_bucket_entry(dpp_, bucket_name_, cluster_id_, UBNSBucketUpdateState::Created);
+      result = client_->update_bucket_entry(dpp_, bucket_name_, cluster_id_, UBNSBucketUpdateState::CREATED);
       if (result.ok()) {
         state_ = CreateMachineState::UPDATE_RPC_SUCCEEDED;
+        ldpp_dout(dpp_, 5) << fmt::format(FMT_STRING("{}: update_bucket_entry() rpc for bucket {} succeeded"), machine_id, bucket_name_) << dendl;
         return true;
       } else {
-        ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: update_bucket_entry() rpc for bucket {} failed: {}"), bucket_name_, result.to_string()) << dendl;
+        ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: update_bucket_entry() rpc for bucket {} failed: {}"), machine_id, bucket_name_, result.to_string()) << dendl;
         state_ = CreateMachineState::UPDATE_RPC_FAILED;
         saved_result_ = result;
         return false;
@@ -157,6 +180,7 @@ public:
       result = client_->delete_bucket_entry(dpp_, bucket_name_, cluster_id_);
       if (result.ok()) {
         state_ = CreateMachineState::ROLLBACK_CREATE_SUCCEEDED;
+        ldpp_dout(dpp_, 5) << fmt::format(FMT_STRING("{}: rollback delete_bucket_entry() rpc for bucket {} succeeded"), machine_id, bucket_name_) << dendl;
         return true;
       } else {
         state_ = CreateMachineState::ROLLBACK_CREATE_FAILED;
@@ -182,9 +206,9 @@ public:
     }
     // If we didn't return directly from the state switch, we're attempting an invalid
     // transition.
-    ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNSCreateMachine: invalid state transition {} -> {}"), to_str(state_), to_str(new_state)) << dendl;
+    ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: invalid state transition {} -> {}"), machine_id, to_str(state_), to_str(new_state)) << dendl;
     if (nonuser_state) {
-      ceph_assertf_always(false, "%s: invalid user state transition %s -> %a attempted", __func__, to_str(state_).c_str(), to_str(new_state).c_str());
+      ceph_assertf_always(false, "%s: invalid user state transition %s -> %a attempted", machine_id, to_str(state_).c_str(), to_str(new_state).c_str());
     }
     return false;
   }
@@ -199,6 +223,7 @@ private:
   std::string owner_;
   CreateMachineState state_;
   std::optional<UBNSClientResult> saved_result_;
+  constexpr static const char* machine_id = "UBNSCreate";
 }; // class UBNSCreateMachine
 
 /// Convenience typedef for rgw_op.cc.
@@ -211,6 +236,7 @@ class UBNSDeleteStateMachine {
 
 public:
   enum class DeleteMachineState {
+    EMPTY,
     INIT,
     UPDATE_START,
     UPDATE_RPC_SUCCEEDED,
@@ -227,6 +253,8 @@ public:
   std::string to_str(DeleteMachineState state)
   {
     switch (state) {
+    case DeleteMachineState::EMPTY:
+      return "EMPTY";
     case DeleteMachineState::INIT:
       return "INIT";
     case DeleteMachineState::UPDATE_START:
@@ -252,6 +280,13 @@ public:
     }
   }; // UBNSDeleteMachine::to_str(State)
 
+  UBNSDeleteStateMachine()
+      : dpp_ { nullptr }
+      , client_ { nullptr }
+      , state_ { DeleteMachineState::EMPTY }
+  {
+  }
+
   UBNSDeleteStateMachine(const DoutPrefixProvider* dpp, std::shared_ptr<T> client, const std::string& bucket_name, const std::string& cluster_id, const std::string& owner)
       : dpp_ { dpp }
       , client_ { client }
@@ -264,26 +299,35 @@ public:
 
   ~UBNSDeleteStateMachine()
   {
-    ldpp_dout(dpp_, 20) << fmt::format(FMT_STRING("~UBNSDeleteMachine")) << dendl;
     if (state_ == DeleteMachineState::UPDATE_RPC_SUCCEEDED) {
-      ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: rolling back bucket deletion update for {}"), bucket_name_) << dendl;
+      ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: rolling back bucket deletion update for {}"), machine_id, bucket_name_) << dendl;
       // Start the rollback. Ignore the result.
       (void)set_state(DeleteMachineState::ROLLBACK_UPDATE_START);
     }
-    ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("~UBNSDeleteMachine bucket '{}' owner '{}' end state {}"), bucket_name_, owner_, to_str(state_)) << dendl;
+    ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: destructor: bucket '{}' owner '{}' end state {}"), machine_id, bucket_name_, owner_, to_str(state_)) << dendl;
   }
+
+  UBNSDeleteStateMachine(const UBNSDeleteStateMachine&) = delete;
+  UBNSDeleteStateMachine& operator=(const UBNSDeleteStateMachine&) = delete;
+  UBNSDeleteStateMachine(UBNSDeleteStateMachine&&) = delete;
+  UBNSDeleteStateMachine& operator=(UBNSDeleteStateMachine&&) = delete;
 
   DeleteMachineState state() const noexcept { return state_; }
 
   bool set_state(DeleteMachineState new_state) noexcept
   {
-    ldpp_dout(dpp_, 20) << fmt::format(FMT_STRING("UBNSDeleteMachine: attempt state transition {} -> {}"), to_str(state_), to_str(new_state)) << dendl;
+    ceph_assertf_always(state_ != DeleteMachineState::EMPTY, "%s: attempt to set state on empty machine", __func__);
+    ldpp_dout(dpp_, 5) << fmt::format(FMT_STRING("{}: attempt state transition {} -> {}"), machine_id, to_str(state_), to_str(new_state)) << dendl;
     UBNSClientResult result;
     bool nonuser_state = false;
 
     // Implement our state machine. A 'break' means an illegal state
     // transition.
     switch (new_state) {
+    case DeleteMachineState::EMPTY:
+      nonuser_state = true;
+      break;
+
     case DeleteMachineState::INIT:
       nonuser_state = true;
       break;
@@ -292,12 +336,13 @@ public:
       if (state_ != DeleteMachineState::INIT) {
         break;
       }
-      result = client_->update_bucket_entry(dpp_, bucket_name_, cluster_id_, UBNSBucketUpdateState::Deleting);
+      result = client_->update_bucket_entry(dpp_, bucket_name_, cluster_id_, UBNSBucketUpdateState::DELETING);
       if (result.ok()) {
         state_ = DeleteMachineState::UPDATE_RPC_SUCCEEDED;
+        ldpp_dout(dpp_, 5) << fmt::format(FMT_STRING("{}: update_bucket_entry() rpc for bucket {} succeeded"), machine_id, bucket_name_) << dendl;
         return true;
       } else {
-        ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: update_bucket_entry() rpc for bucket {} failed: {}"), bucket_name_, result.to_string()) << dendl;
+        ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: update_bucket_entry() rpc for bucket {} failed: {}"), machine_id, bucket_name_, result.to_string()) << dendl;
         state_ = DeleteMachineState::UPDATE_RPC_FAILED;
         saved_result_ = result;
         return false;
@@ -319,9 +364,10 @@ public:
       result = client_->delete_bucket_entry(dpp_, bucket_name_, cluster_id_);
       if (result.ok()) {
         state_ = DeleteMachineState::DELETE_RPC_SUCCEEDED;
+        ldpp_dout(dpp_, 5) << fmt::format(FMT_STRING("{}: delete_bucket_entry() rpc for bucket {} succeeded"), machine_id, bucket_name_) << dendl;
         return true;
       } else {
-        ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: delete_bucket_entry() rpc for bucket {} failed: {}"), bucket_name_, result.to_string()) << dendl;
+        ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: delete_bucket_entry() rpc for bucket {} failed: {}"), machine_id, bucket_name_, result.to_string()) << dendl;
         state_ = DeleteMachineState::DELETE_RPC_FAILED;
         saved_result_ = result;
         return false;
@@ -340,10 +386,11 @@ public:
       if (state_ != DeleteMachineState::UPDATE_RPC_SUCCEEDED && state_ != DeleteMachineState::DELETE_RPC_FAILED) {
         break;
       }
-      ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNS: rolling back bucket deletion update for {} / {}"), bucket_name_, cluster_id_) << dendl;
-      result = client_->update_bucket_entry(dpp_, bucket_name_, owner_, UBNSBucketUpdateState::Created);
+      ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: rolling back bucket deletion update for {} / {}"), machine_id, bucket_name_, cluster_id_) << dendl;
+      result = client_->update_bucket_entry(dpp_, bucket_name_, owner_, UBNSBucketUpdateState::CREATED);
       if (result.ok()) {
         state_ = DeleteMachineState::ROLLBACK_UPDATE_SUCCEEDED;
+        ldpp_dout(dpp_, 5) << fmt::format(FMT_STRING("{}: rollback update_bucket_entry() rpc for bucket {} succeeded"), machine_id, bucket_name_) << dendl;
         return true;
       } else {
         state_ = DeleteMachineState::ROLLBACK_UPDATE_FAILED;
@@ -370,9 +417,9 @@ public:
 
     // If we didn't return from the state switch, we're attempting an invalid
     // transition.
-    ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("UBNSDeleteMachine: invalid state transition {} -> {}"), to_str(state_), to_str(new_state)) << dendl;
+    ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: invalid state transition {} -> {}"), machine_id, to_str(state_), to_str(new_state)) << dendl;
     if (nonuser_state) {
-      ceph_assertf_always(false, "%s: invalid user state transition %s -> %s attempted", __func__, to_str(state_).c_str(), to_str(new_state).c_str());
+      ceph_assertf_always(false, "%s: invalid user state transition %s -> %s attempted", machine_id, to_str(state_).c_str(), to_str(new_state).c_str());
     }
     return false;
   }
@@ -387,6 +434,7 @@ private:
   std::string owner_;
   DeleteMachineState state_;
   std::optional<UBNSClientResult> saved_result_;
+  constexpr static const char* machine_id = "UBNSDelete";
 }; // class UBNSDeleteMachine
 
 /// Convenience typedef for rgw_op.cc.

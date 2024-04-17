@@ -11,7 +11,6 @@
 
 #include "rgw_ubns.h"
 
-#include "common/ceph_context.h"
 #include "common/debug.h"
 #include "include/ceph_assert.h"
 #include "rgw_ubns_impl.h"
@@ -24,6 +23,18 @@
 #define dout_subsys ceph_subsys_rgw
 
 namespace rgw {
+
+std::string to_str(UBNSBucketUpdateState state)
+{
+  switch (state) {
+  case UBNSBucketUpdateState::UNSPECIFIED:
+    return "UNSPECIFIED";
+  case UBNSBucketUpdateState::CREATED:
+    return "CREATED";
+  case UBNSBucketUpdateState::DELETING:
+    return "DELETING";
+  }
+}
 
 // This has to be here, in a .cc file where we know the size of
 // UBNSClientImpl. It can't be in the header file. See

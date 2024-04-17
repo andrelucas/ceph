@@ -3168,9 +3168,14 @@ void RGWCreateBucket::execute(optional_yield y)
   string bucket_name = rgw_make_bucket_entry_name(s->bucket_tenant, s->bucket_name);
   rgw_raw_obj obj(store->get_zone()->get_params().domain_root, bucket_name);
 
-  std::optional<rgw::UBNSCreateMachine> ubns_creater;
+  // UBNS: Create an empty optional<UBNSCreateMachine>. This will be used
+  // later to decide whether or not UBNS is active.
+  std::optional<rgw::UBNSCreateMachine> ubns_creater(std::nullopt);
+
   if (s->ubns_client) {
-    ubns_creater = rgw::UBNSCreateMachine(this, s->ubns_client, bucket_name, s->ubns_client->cluster_id(), s->user->get_id().to_str());
+    // Create a real ubns_creater. We'll use this at appropriate points in the
+    // function to interact with UBNS.
+    ubns_creater.emplace(this, s->ubns_client, bucket_name, s->ubns_client->cluster_id(), s->user->get_id().to_str());
   }
 
   op_ret = get_params(y);
@@ -3189,6 +3194,7 @@ void RGWCreateBucket::execute(optional_yield y)
       op_ret = -EEXIST;
       return;
     }
+    // creater state is CREATE_RPC_SUCCEEDED.
   }
 
   if (!relaxed_region_enforcement &&
@@ -3374,6 +3380,7 @@ void RGWCreateBucket::execute(optional_yield y)
   }
 
   if (ubns_creater) {
+    // Move the state machine from CREATE_RPC_SUCCEEDED to UPDATE_START.
     bool success = ubns_creater->set_state(rgw::UBNSCreateMachine::CreateMachineState::UPDATE_START);
     if (!success) {
       auto result = ubns_creater->saved_grpc_result();
@@ -3382,6 +3389,7 @@ void RGWCreateBucket::execute(optional_yield y)
       }
       op_ret = -EEXIST; // XXX is this appropriate?
     }
+    // creater state is UPDATE_RPC_SUCCEEDED.
   }
 }
 
@@ -3410,9 +3418,14 @@ void RGWDeleteBucket::execute(optional_yield y)
     return;
   }
 
-  std::optional<rgw::UBNSDeleteMachine> ubns_deleter;
+  // UBNS: Create an empty optional<UBNSDeleteMachine>. This will be used
+  // later to decide whether or not UBNS is active.
+  std::optional<rgw::UBNSDeleteMachine> ubns_deleter(std::nullopt);
+
   if (s->ubns_client) {
-    ubns_deleter = rgw::UBNSDeleteMachine(this, s->ubns_client, s->bucket_name, s->ubns_client->cluster_id(), s->user->get_id().to_str());
+    // Create a real ubns_deleter. We'll use this at appropriate points in the
+    // function to interact with UBNS.
+    ubns_deleter.emplace(this, s->ubns_client, s->bucket_name, s->ubns_client->cluster_id(), s->user->get_id().to_str());
   }
 
   if (ubns_deleter) {
@@ -3427,6 +3440,7 @@ void RGWDeleteBucket::execute(optional_yield y)
       op_ret = -EINVAL; // XXX what's the right error here?
       return;
     }
+    // deleter state is UPDATE_RPC_SUCCEEDED.
   }
 
   if (!s->bucket_exists) {
@@ -3496,6 +3510,7 @@ void RGWDeleteBucket::execute(optional_yield y)
       }
       op_ret = -EINVAL; // XXX what's the right error here? We deleted it!
     }
+    // deleter state is DELETE_RPC_SUCCEEDED.
   }
 
   return;

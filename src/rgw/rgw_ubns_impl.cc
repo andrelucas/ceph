@@ -13,6 +13,7 @@
 
 #include <errno.h>
 #include <fstream>
+#include <string>
 
 #include "common/dout.h"
 #include "rgw/rgw_common.h"
@@ -116,11 +117,11 @@ UBNSClientResult UBNSClientImpl::add_bucket_entry(const DoutPrefixProvider* dpp,
   if (!client) {
     return UBNSClientResult::error(ERR_INTERNAL_ERROR, "Internal error (could not fetch gRPC client)");
   }
-  ldpp_dout(dpp, 1) << "UBNS: sending gRPC AddBucketRequest" << dendl;
   ubdb::v1::AddBucketEntryRequest req;
   req.set_bucket(bucket_name);
   req.set_cluster(cluster_id);
   req.set_owner(owner);
+  ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("UBNS: sending gRPC AddBucketRequest(bucket={},cluster={},owner={})"), req.bucket(), req.cluster(), req.owner()) << dendl;
   return client->add_bucket_request(req);
 }
 
@@ -131,10 +132,10 @@ UBNSClientResult UBNSClientImpl::delete_bucket_entry(const DoutPrefixProvider* d
   if (!client) {
     return UBNSClientResult::error(ERR_INTERNAL_ERROR, "Internal error (could not fetch gRPC client)");
   }
-  ldpp_dout(dpp, 1) << "UBNS: sending gRPC DeleteBucketRequest" << dendl;
   ubdb::v1::DeleteBucketEntryRequest req;
   req.set_bucket(bucket_name);
   req.set_cluster(cluster_id);
+  ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("UBNS: sending gRPC DeleteBucketRequest(bucket={},cluster={})"), req.bucket(), req.cluster()) << dendl;
   return client->delete_bucket_request(req);
 }
 
@@ -145,23 +146,23 @@ UBNSClientResult UBNSClientImpl::update_bucket_entry(const DoutPrefixProvider* d
   if (!client) {
     return UBNSClientResult::error(ERR_INTERNAL_ERROR, "Internal error (could not fetch gRPC client)");
   }
-  ldpp_dout(dpp, 1) << "UBNS: sending gRPC UpdateBucketRequest" << dendl;
   ubdb::v1::UpdateBucketEntryRequest req;
   req.set_bucket(bucket_name);
   req.set_cluster(cluster_id);
   ubdb::v1::BucketState rpc_state;
   switch (state) {
-  case rgw::UBNSBucketUpdateState::Unspecified:
+  case rgw::UBNSBucketUpdateState::UNSPECIFIED:
     rpc_state = ubdb::v1::BucketState::BUCKET_STATE_UNSPECIFIED;
     break;
-  case rgw::UBNSBucketUpdateState::Created:
+  case rgw::UBNSBucketUpdateState::CREATED:
     rpc_state = ubdb::v1::BucketState::BUCKET_STATE_CREATED;
     break;
-  case rgw::UBNSBucketUpdateState::Deleting:
+  case rgw::UBNSBucketUpdateState::DELETING:
     rpc_state = ubdb::v1::BucketState::BUCKET_STATE_DELETING;
     break;
   }
   req.set_state(rpc_state);
+  ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("UBNS: sending gRPC UpdateBucketRequest(bucket={},cluster={},state={})"), req.bucket(), req.cluster(), to_str(state)) << dendl;
   return client->update_bucket_request(req);
 }
 
@@ -225,6 +226,30 @@ static std::optional<std::string> load_credential_from_file(CephContext* const c
   }
 }
 
+/**
+ * @brief Write zero bytes to the credential, then clear it.
+ *
+ * @param cred The credential optional-string returned by
+ * load_credential_from_file().
+ */
+static void wipe_credential(std::optional<std::string>& cred)
+{
+  std::fill(cred->begin(), cred->end(), '\0');
+  cred->clear();
+  cred.reset();
+}
+
+/**
+ * @brief Write zero bytes to the string, then clear it.
+ *
+ * @param s A std::string.
+ */
+static void wipe_string(std::string& s)
+{
+  std::fill(s.begin(), s.end(), '\0');
+  s.clear();
+}
+
 bool UBNSClientImpl::_set_mtls_channel(CephContext* const cct, const std::string& new_uri)
 {
   auto& conf = cct->_conf;
@@ -244,19 +269,26 @@ bool UBNSClientImpl::_set_mtls_channel(CephContext* const cct, const std::string
     return false;
   }
   cred_options.pem_root_certs = *ca_cert;
+  wipe_credential(ca_cert);
   auto client_cert = load_credential_from_file(cct, "Client cert", conf->rgw_ubns_grpc_mtls_client_cert_file);
   if (!client_cert) {
     return false;
   }
   cred_options.pem_cert_chain = *client_cert;
+  wipe_credential(client_cert);
   auto client_key = load_credential_from_file(cct, "Client key", conf->rgw_ubns_grpc_mtls_client_key_file);
   if (!client_key) {
     return false;
   }
   cred_options.pem_private_key = *client_key;
+  wipe_credential(client_key);
   auto channel_creds = grpc::SslCredentials(cred_options);
 
   auto new_channel = grpc::CreateCustomChannel(new_uri, channel_creds, *channel_args_);
+  wipe_string(cred_options.pem_root_certs);
+  wipe_string(cred_options.pem_cert_chain);
+  wipe_string(cred_options.pem_private_key);
+
   if (!new_channel) {
     ldout(cct, 0) << __func__ << ": ERROR: Failed to create new gRPC channel for uri a" << new_uri << dendl;
     return false;

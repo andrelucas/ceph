@@ -300,15 +300,15 @@ TEST_F(UBNSTestImplGRPCTest, Update)
   s.cio = &cio;
   auto res = uci_.add_bucket_entry(&dpp_, "foo", "cluster", "owner");
   EXPECT_TRUE(res.ok()) << "add should succeed, but got: " << res.message();
-  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::Created);
+  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::CREATED);
   EXPECT_TRUE(res.ok()) << "update to Created should succeed, but got: " << res.message();
-  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::Deleting);
+  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::DELETING);
   EXPECT_TRUE(res.ok()) << "update to Deleting should succeed, but got: " << res.message();
   res = uci_.delete_bucket_entry(&dpp_, "foo", "cluster");
   EXPECT_TRUE(res.ok()) << "delete of existing bucket should succeed, but got: " << res.message();
-  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::Created);
+  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::CREATED);
   EXPECT_FALSE(res.ok()) << "update to Created should fail";
-  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::Deleting);
+  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::DELETING);
   EXPECT_FALSE(res.ok()) << "update to Created should fail";
 }
 
@@ -584,7 +584,7 @@ public:
   UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, UBNSBucketUpdateState state)
   {
     auto cur_state = buckets_[bucket_name];
-    if (state == UBNSBucketUpdateState::Created) {
+    if (state == UBNSBucketUpdateState::CREATED) {
       // This is an update from the Create path.
       if (cur_state != MockBucketState::CREATING && cur_state != MockBucketState::DELETING) {
         return UBNSClientResult::error(ERR_INTERNAL_ERROR, "Bucket not in CREATING or DELETING state");
@@ -592,7 +592,7 @@ public:
       buckets_[bucket_name] = MockBucketState::CREATED;
       return UBNSClientResult::success();
 
-    } else if (state == UBNSBucketUpdateState::Deleting) {
+    } else if (state == UBNSBucketUpdateState::DELETING) {
       // This is an update from the Delete path.
       if (cur_state != MockBucketState::CREATED) {
         return UBNSClientResult::error(ERR_INTERNAL_ERROR, "Bucket not in CREATED state");
@@ -691,8 +691,8 @@ TEST_F(UBNSStateMachinesTest, CreateCompleteRecreateFails)
   ASSERT_EQ(creater.state(), MockUBNSCreateState::UPDATE_RPC_SUCCEEDED);
   ASSERT_TRUE(creater.set_state(MockUBNSCreateState::COMPLETE));
 
-  creater = MockUBNSCreateMachine(dpp, client_, "foo", "cluster", "owner");
-  ASSERT_FALSE(creater.set_state(MockUBNSCreateState::CREATE_START));
+  MockUBNSCreateMachine creater2(dpp, client_, "foo", "cluster", "owner");
+  ASSERT_FALSE(creater2.set_state(MockUBNSCreateState::CREATE_START));
 }
 
 // Attempt to create again a partially-created bucket should not succeed.
@@ -702,8 +702,8 @@ TEST_F(UBNSStateMachinesTest, CreatePartialRecreateFails)
   ASSERT_TRUE(creater.set_state(MockUBNSCreateState::CREATE_START));
   ASSERT_EQ(creater.state(), MockUBNSCreateState::CREATE_RPC_SUCCEEDED);
 
-  creater = MockUBNSCreateMachine(dpp, client_, "foo", "cluster", "owner");
-  ASSERT_FALSE(creater.set_state(MockUBNSCreateState::CREATE_START));
+  MockUBNSCreateMachine creater2(dpp, client_, "foo", "cluster", "owner");
+  ASSERT_FALSE(creater2.set_state(MockUBNSCreateState::CREATE_START));
 }
 
 // If we roll back a create, a subsequent create should succeed.
@@ -716,8 +716,8 @@ TEST_F(UBNSStateMachinesTest, CreateAfterManualRollbackSucceeds)
   ASSERT_EQ(creater.state(), MockUBNSCreateState::ROLLBACK_CREATE_SUCCEEDED);
   ASSERT_EQ(client_->get_bucket_state("foo"), MockBucketState::NONE);
 
-  creater = MockUBNSCreateMachine(dpp, client_, "foo", "cluster", "owner");
-  ASSERT_TRUE(creater.set_state(MockUBNSCreateState::CREATE_START));
+  MockUBNSCreateMachine creater2(dpp, client_, "foo", "cluster", "owner");
+  ASSERT_TRUE(creater2.set_state(MockUBNSCreateState::CREATE_START));
 }
 
 // If we roll back a create, a subsequent create should succeed.
@@ -809,8 +809,8 @@ TEST_F(UBNSStateMachinesTest, DeleteCompleteRedeleteFails)
   ASSERT_EQ(deleter.state(), MockUBNSDeleteState::DELETE_RPC_SUCCEEDED);
   ASSERT_TRUE(deleter.set_state(MockUBNSDeleteState::COMPLETE));
 
-  deleter = MockUBNSDeleteMachine(dpp, client_, "foo", "cluster", "owner");
-  ASSERT_FALSE(deleter.set_state(MockUBNSDeleteState::UPDATE_START));
+  MockUBNSDeleteMachine deleter2(dpp, client_, "foo", "cluster", "owner");
+  ASSERT_FALSE(deleter2.set_state(MockUBNSDeleteState::UPDATE_START));
 }
 
 // Attempting to delete a bucket when it's partially deleted will fail.
@@ -821,8 +821,8 @@ TEST_F(UBNSStateMachinesTest, DeletePartialRedeleteFails)
   ASSERT_TRUE(deleter.set_state(MockUBNSDeleteState::UPDATE_START));
   ASSERT_EQ(deleter.state(), MockUBNSDeleteState::UPDATE_RPC_SUCCEEDED);
 
-  deleter = MockUBNSDeleteMachine(dpp, client_, "foo", "cluster", "owner");
-  ASSERT_FALSE(deleter.set_state(MockUBNSDeleteState::UPDATE_START));
+  MockUBNSDeleteMachine deleter2(dpp, client_, "foo", "cluster", "owner");
+  ASSERT_FALSE(deleter2.set_state(MockUBNSDeleteState::UPDATE_START));
 }
 
 // Attempting to delete a bucket when it's partially deleted will fail.
