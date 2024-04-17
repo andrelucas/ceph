@@ -12,6 +12,7 @@
 #include "rgw_ubns_impl.h"
 
 #include <errno.h>
+#include <fstream>
 
 #include "common/dout.h"
 #include "rgw/rgw_common.h"
@@ -69,15 +70,27 @@ bool UBNSClientImpl::init(CephContext* cct, const std::string& grpc_uri)
 {
   ceph_assert(cct != nullptr);
 
+  auto& conf = cct->_conf;
+
   // Set up the configuration observer.
   config_obs_.init(cct);
 
+  cluster_id_ = cct->_conf->rgw_ubns_cluster_id;
+
   // Empty grpc_uri (the default) means use the configuration value.
-  auto uri = grpc_uri.empty() ? cct->_conf->rgw_ubns_grpc_uri : grpc_uri;
-  if (!set_channel_uri(cct, uri)) {
-    // This is unlikely, but no gRPC channel in gRPC mode is a critical error.
-    ldout(cct, 0) << "Failed to create initial gRPC channel" << dendl;
-    return false;
+  auto uri = grpc_uri.empty() ? conf->rgw_ubns_grpc_uri : grpc_uri;
+
+  if (conf->rgw_ubns_grpc_mtls_enabled) {
+    if (!set_mtls_channel(cct)) {
+      ldout(cct, 0) << "UBNS: Failed to create initial mTLS gRPC channel" << dendl;
+      return false;
+    }
+  } else {
+    if (!set_channel_uri(cct, uri)) {
+      // This is unlikely, but no gRPC channel in gRPC mode is a critical error.
+      ldout(cct, 0) << "UBNS: Failed to create initial gRPC channel" << dendl;
+      return false;
+    }
   }
   return true;
 }
@@ -183,7 +196,8 @@ bool UBNSClientImpl::set_channel_uri(CephContext* const cct, const std::string& 
     // Don't use set_channel_args(), which takes lock m_channel_.
     channel_args_ = std::make_optional(std::move(args));
   }
-  // XXX grpc::InsecureChannelCredentials()...
+  // grpc::InsecureChannelCredentials() is appropriate here. For a TLS-enabled
+  // channel, see set_mtls_channel().
   auto new_channel = grpc::CreateCustomChannel(new_uri, grpc::InsecureChannelCredentials(), *channel_args_);
   if (!new_channel) {
     ldout(cct, 0) << "UBNSClientImpl::set_channel_uri(): ERROR: Failed to create new gRPC channel " << new_uri << dendl;
@@ -194,6 +208,72 @@ bool UBNSClientImpl::set_channel_uri(CephContext* const cct, const std::string& 
     channel_uri_ = new_uri;
     return true;
   }
+}
+
+// Given a filename, return the contents, or nullopt on failure.
+static std::optional<std::string> load_credential_from_file(CephContext* const cct, const std::string& descr, const std::string& path)
+{
+  ldout(cct, 0) << fmt::format(FMT_STRING("{}: Load credential '{}' from file '{}'"), __func__, descr, path) << dendl;
+  try {
+    std::ifstream f(path, std::ios::in | std::ios::binary);
+    std::string buffer;
+    f.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+    f.seekg(0, std::ios::end);
+    buffer.resize(f.tellg());
+    f.seekg(0, std::ios::beg);
+    f.read(&buffer[0], buffer.size());
+    f.close();
+    return buffer;
+  } catch (std::ifstream::failure& e) {
+    ldout(cct, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to load {} from file '{}': {}"), __func__, descr, path, e.what()) << dendl;
+    return std::nullopt;
+  }
+}
+
+bool UBNSClientImpl::set_mtls_channel(CephContext* const cct)
+{
+  auto& conf = cct->_conf;
+  std::string new_uri = conf->rgw_ubns_grpc_uri;
+
+  std::unique_lock<chan_lock_t> g(m_channel_);
+  if (!channel_args_) {
+    auto args = get_default_channel_args(cct);
+    // Don't use set_channel_args(), which takes lock m_channel_.
+    channel_args_ = std::make_optional(std::move(args));
+  }
+
+  // gRPC authentication: See https://grpc.io/docs/guides/auth/ .
+
+  auto cred_options = grpc::SslCredentialsOptions();
+  auto ca_cert = load_credential_from_file(cct, "CA cert", conf->rgw_ubns_grpc_mtls_ca_cert_file);
+  if (!ca_cert) {
+    return false;
+  }
+  cred_options.pem_root_certs = *ca_cert;
+  auto client_cert = load_credential_from_file(cct, "Client cert", conf->rgw_ubns_grpc_mtls_client_cert_file);
+  if (!client_cert) {
+    return false;
+  }
+  cred_options.pem_cert_chain = *client_cert;
+  auto client_key = load_credential_from_file(cct, "Client key", conf->rgw_ubns_grpc_mtls_client_key_file);
+  if (!client_key) {
+    return false;
+  }
+  cred_options.pem_private_key = *client_key;
+  auto channel_creds = grpc::SslCredentials(cred_options);
+
+  auto new_channel = grpc::CreateCustomChannel(new_uri, channel_creds, *channel_args_);
+  if (!new_channel) {
+    ldout(cct, 0) << __func__ << ": ERROR: Failed to create new gRPC channel for uri a" << new_uri << dendl;
+    return false;
+  } else {
+    ldout(cct, 1) << "UBNS: " << __func__ << "(" << new_uri << ") success" << dendl;
+    channel_ = std::move(new_channel);
+    channel_uri_ = new_uri;
+    return true;
+  }
+
+  return false;
 }
 
 } // namespace rgw

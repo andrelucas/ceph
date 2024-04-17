@@ -3170,7 +3170,7 @@ void RGWCreateBucket::execute(optional_yield y)
 
   std::optional<rgw::UBNSCreateMachine> ubns_creater;
   if (s->ubns_client) {
-    ubns_creater = rgw::UBNSCreateMachine(this, s->ubns_client, bucket_name, "XXX", s->user->get_id().to_str());
+    ubns_creater = rgw::UBNSCreateMachine(this, s->ubns_client, bucket_name, s->ubns_client->cluster_id(), s->user->get_id().to_str());
   }
 
   op_ret = get_params(y);
@@ -3412,7 +3412,7 @@ void RGWDeleteBucket::execute(optional_yield y)
 
   std::optional<rgw::UBNSDeleteMachine> ubns_deleter;
   if (s->ubns_client) {
-    ubns_deleter = rgw::UBNSDeleteMachine(this, s->ubns_client, s->bucket_name, "XXX", s->user->get_id().to_str());
+    ubns_deleter = rgw::UBNSDeleteMachine(this, s->ubns_client, s->bucket_name, s->ubns_client->cluster_id(), s->user->get_id().to_str());
   }
 
   if (ubns_deleter) {

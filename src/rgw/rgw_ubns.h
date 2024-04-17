@@ -9,6 +9,10 @@
  *
  */
 
+/*****************************************************************************
+ * Try REALLY REALLY hard to not include "rgw_ubns_impl.h" here.
+ * ****************************************************************************/
+
 #pragma once
 
 #include <iosfwd>
@@ -23,6 +27,13 @@ namespace rgw {
 
 class UBNSClientImpl; // Forward declaration.
 
+/**
+ * @brief Return type for gRPC operations on the UBNS client.
+ *
+ * This is a sanitized return type that doesn't require the inclusion of any
+ * gRPC headers. It allows us to pass error codes and messages back to the RGW
+ * operations without requiring explosions in compilation time and complexity.
+ */
 class UBNSClientResult {
 private:
   int code_;
@@ -33,22 +44,22 @@ private:
   /**
    * @brief Construct a failure-type Result object.
    *
-   *  RGWOp seems to work with a mix of error code types. Some are are
-   *  standard UNIX errors, e.g. EEXIST, EPERM, etc. These are defined by
-   *  including <errno.h>, and are positive integers. Others are
-   *  RGW-specific errors, e.g. ERR_BUCKET_EXISTS, defined in rgw_common.h.
+   * RGWOp seems to work with a mix of error code types. Some are are standard
+   * UNIX errors, e.g. EEXIST, EPERM, etc. These are defined by including
+   * <errno.h>, and are positive integers. Others are RGW-specific errors,
+   * e.g. ERR_BUCKET_EXISTS, defined in rgw_common.h.
    *
    * We're integrating with existing code. The safest thing to do is look at
-   * existing code, match as close as you can the errors you return, and
-   * test carefully.
+   * existing code, match as close as you can the errors you return, and test
+   * carefully.
    *
    * The error message is just for the logs. In the RGWOp classes we don't
    * have direct control over the error responses, we simply set a code.
    *
    * @param code The error code. Should be a positive integer of a type
    * recognised by RGW as explained above.
-   * @param message A human-readable error message. Won't be seen by the
-   * user but will be logged.
+   * @param message A human-readable error message. Won't be seen by the user
+   * but will be logged.
    */
   explicit UBNSClientResult(int code, const std::string& message)
       : code_ { code }
@@ -149,6 +160,12 @@ public:
   friend std::ostream& operator<<(std::ostream& os, const UBNSClientResult& ep);
 };
 
+/**
+ * @brief Supported states for UpdateBucketEntry gRPC calls.
+ *
+ * They're here so the callers don't have to include the gRPC headers
+ * just to issue UpdateBucketEntry calls to the UBNS client.
+ */
 enum class UBNSBucketUpdateState {
   Unspecified,
   Created,
@@ -167,6 +184,14 @@ enum class UBNSBucketUpdateState {
  * compilation time, and hopes to limit future compatibility problems by
  * minimising the codebase's exposure to gRPC, a large and complex codebase
  * with its own dependencies and quirks.
+ *
+ * This means that almost nothing involving the implementation class
+ * (excepting the unique_ptr) can appear in this header - it has to be in the
+ * .cc file, where the implementation's header *is* included. In particular,
+ * any attempt to call a method on impl_ will result in 'incomplete type'
+ * errors. This is intentional; anything else would mean that the
+ * implementation would have to be included, and that would defeat the
+ * purpose.
  */
 class UBNSClient {
 private:
@@ -185,10 +210,13 @@ public:
    * @brief Initialise the UBNS client. This will create a gRPC channel, so we
    * need access to configuration.
    *
+   * @param cct Ceph Context, used for config and logging.
+   * @param grpc_uri The URI of the gRPC server. If empty, will use
+   * configuration. (Non-empty is intended for testing.)
    * @return true Success, UBNS may be used.
    * @return false Failure, the probably best action is to fail startup.
    */
-  bool init(CephContext* cct, const std::string& grpc_uri);
+  bool init(CephContext* cct, const std::string& grpc_uri = "");
 
   /**
    * @brief Shut down the UBNS client and free resources.
@@ -225,6 +253,15 @@ public:
    * @return UBNSClient::Result the implementation's result object.
    */
   UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, UBNSBucketUpdateState state);
+
+  /**
+   * @brief Return the configured cluster ID.
+   *
+   * @return const std::string& The cluster ID from configuration.
+   * @throws std::runtime_error If the cluster ID is not set (meaning init()
+   * has not been called).
+   */
+  std::string cluster_id() const;
 };
 
 /**

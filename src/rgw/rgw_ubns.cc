@@ -61,6 +61,11 @@ UBNSClientResult UBNSClient::update_bucket_entry(const DoutPrefixProvider* dpp, 
   return impl_->update_bucket_entry(dpp, bucket_name, cluster_id, state);
 }
 
+std::string UBNSClient::cluster_id() const
+{
+  return impl_->cluster_id();
+}
+
 std::string UBNSClientResult::to_string() const
 {
   if (ok()) {

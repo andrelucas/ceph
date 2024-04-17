@@ -182,6 +182,7 @@ class UBNSClientImpl {
 
 private:
   UBNSConfigObserver<UBNSClientImpl> config_obs_;
+  std::string cluster_id_;
   // The gRPC channel pointer needs to be behind a mutex. Changing channel_,
   // channel_args_ or channel_uri_ must be under a unique lock of m_channel_.
   std::shared_mutex m_channel_;
@@ -241,6 +242,14 @@ public:
    */
   UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, UBNSBucketUpdateState state);
 
+  std::string cluster_id() const
+  {
+    if (cluster_id_.empty()) {
+      throw new std::runtime_error("UBNSClientImpl: cluster ID not set");
+    }
+    return cluster_id_;
+  }
+
   /**
    * @brief Set the gRPC channel URI.
    *
@@ -251,11 +260,26 @@ public:
    * Do not call from an RGWOp unless you _know_ you've not taken a lock on
    * m_config_!
    *
-   * @param grpc_uri
+   * @param cct The Ceph context for logging and config.
+   * @param grpc_uri The URI of the gRPC server. If empty, use the configured
+   * value. Non-empty is intended for testing.
    * @return true on success.
    * @return false on failure.
    */
   bool set_channel_uri(CephContext* const cct, const std::string& grpc_uri);
+
+  /**
+   * @brief Set up the gRPC channel in mTLS mode.
+   *
+   * This will use configuration variables to configure the channel. We assume
+   * that the configuration has already been validated, but this can still
+   * fail for any number of reasons.
+   *
+   * @param cct The Ceph Context for logging and config.
+   * @return true on success.
+   * @return false on failure.
+   */
+  bool set_mtls_channel(CephContext* const cct);
 
   /**
    * @brief Get our default grpc::ChannelArguments value.
