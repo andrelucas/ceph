@@ -75,22 +75,17 @@ bool UBNSClientImpl::init(CephContext* cct, const std::string& grpc_uri)
   // Set up the configuration observer.
   config_obs_.init(cct);
 
-  cluster_id_ = cct->_conf->rgw_ubns_cluster_id;
+  cluster_id_ = conf->rgw_ubns_cluster_id;
 
   // Empty grpc_uri (the default) means use the configuration value.
   auto uri = grpc_uri.empty() ? conf->rgw_ubns_grpc_uri : grpc_uri;
 
-  if (conf->rgw_ubns_grpc_mtls_enabled) {
-    if (!set_mtls_channel(cct)) {
-      ldout(cct, 0) << "UBNS: Failed to create initial mTLS gRPC channel" << dendl;
-      return false;
-    }
-  } else {
-    if (!set_channel_uri(cct, uri)) {
-      // This is unlikely, but no gRPC channel in gRPC mode is a critical error.
-      ldout(cct, 0) << "UBNS: Failed to create initial gRPC channel" << dendl;
-      return false;
-    }
+  mtls_enabled_ = conf->rgw_ubns_grpc_mtls_enabled;
+  ldout(cct, 1) << fmt::format(FMT_STRING("UBNS: mTLS {}"), mtls_enabled_ ? "enabled" : "disabled") << dendl;
+
+  if (!set_channel(cct, uri)) {
+    lderr(cct) << "UBNS: failed to create initial gRPC channel" << dendl;
+    return false;
   }
   return true;
 }
@@ -188,7 +183,7 @@ grpc::ChannelArguments UBNSClientImpl::get_default_channel_args(CephContext* con
   return grpc::ChannelArguments();
 }
 
-bool UBNSClientImpl::set_channel_uri(CephContext* const cct, const std::string& new_uri)
+bool UBNSClientImpl::_set_insecure_channel(CephContext* const cct, const std::string& new_uri)
 {
   std::unique_lock<chan_lock_t> g(m_channel_);
   if (!channel_args_) {
@@ -230,10 +225,9 @@ static std::optional<std::string> load_credential_from_file(CephContext* const c
   }
 }
 
-bool UBNSClientImpl::set_mtls_channel(CephContext* const cct)
+bool UBNSClientImpl::_set_mtls_channel(CephContext* const cct, const std::string& new_uri)
 {
   auto& conf = cct->_conf;
-  std::string new_uri = conf->rgw_ubns_grpc_uri;
 
   std::unique_lock<chan_lock_t> g(m_channel_);
   if (!channel_args_) {

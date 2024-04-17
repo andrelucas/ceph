@@ -185,6 +185,7 @@ protected:
   void helper_init()
   {
     dpp_.get_cct()->_conf.set_val_or_die("rgw_ubns_enabled", "true");
+    dpp_.get_cct()->_conf.set_val_or_die("rgw_ubns_grpc_mtls_enabled", "false");
     dpp_.get_cct()->_conf.apply_changes(nullptr);
     ASSERT_EQ(dpp_.get_cct()->_conf->rgw_ubns_enabled, true);
     // Note init() can take the server address URI, it's normally defaulted to
@@ -448,7 +449,7 @@ public:
     return grpc::ChannelArguments();
   }
   void set_channel_args(CephContext* const cct, const grpc::ChannelArguments& args) { channel_args_set_ = true; }
-  void set_channel_uri(CephContext* const cct, const std::string& uri) { channel_uri_ = uri; }
+  void set_channel(CephContext* const cct, const std::string& uri) { channel_uri_ = uri; }
 
 public:
   UBNSConfigObserver<MockHelperForConfigObserver> observer_;

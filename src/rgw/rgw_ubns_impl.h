@@ -89,7 +89,7 @@ public:
  * Class T has to implement:
  * - get_default_channel_args(CephContext* cct) -> grpc::ChannelArguments
  * - set_channel_args(CephContext* cct, grpc::ChannelArguments args) -> void
- * - set_channel_uri(CephContext* cct, const std::string& uri) -> void
+ * - set_channel(CephContext* cct, const std::string& uri) -> void
  *
  * @tparam T A class implementing the functionality of the above-listed
  * methods. Typically UBNSClientImpl.
@@ -101,10 +101,10 @@ public:
    * @brief Construct a new UBNS Config Observer object with a
    * backreference to the owning template class, typically UBNSClientImpl.
    *
-   * @param helper
+   * @param impl The UBNSClientImpl-like object.
    */
-  explicit UBNSConfigObserver(T& helper)
-      : helper_(helper)
+  explicit UBNSConfigObserver(T& impl)
+      : impl_(impl)
   {
   }
 
@@ -148,17 +148,17 @@ public:
   {
     // You should bundle any gRPC arguments changes into this first block.
     if (changed.count("rgw_ubns_grpc_arg_initial_reconnect_backoff_ms") || changed.count("rgw_ubns_grpc_arg_max_reconnect_backoff_ms") || changed.count("rgw_ubns_grpc_arg_min_reconnect_backoff_ms")) {
-      auto args = helper_.get_default_channel_args(cct_);
-      helper_.set_channel_args(cct_, args);
+      auto args = impl_.get_default_channel_args(cct_);
+      impl_.set_channel_args(cct_, args);
     }
     // The gRPC channel change needs to come after the arguments setting, if any.
     if (changed.count("rgw_ubns_grpc_uri")) {
-      helper_.set_channel_uri(cct_, conf->rgw_ubns_grpc_uri);
+      impl_.set_channel(cct_, conf->rgw_ubns_grpc_uri);
     }
   }
 
 private:
-  T& helper_;
+  T& impl_;
   CephContext* cct_ = nullptr;
   bool observer_added_ = false;
 }; // class UBNSConfigObserver
@@ -189,6 +189,7 @@ private:
   std::shared_ptr<grpc::Channel> channel_;
   std::optional<grpc::ChannelArguments> channel_args_;
   std::string channel_uri_;
+  bool mtls_enabled_ = true; // Set only during init().
 
 public:
   using chan_lock_t = std::shared_mutex;
@@ -266,7 +267,7 @@ public:
    * @return true on success.
    * @return false on failure.
    */
-  bool set_channel_uri(CephContext* const cct, const std::string& grpc_uri);
+  bool _set_insecure_channel(CephContext* const cct, const std::string& grpc_uri);
 
   /**
    * @brief Set up the gRPC channel in mTLS mode.
@@ -276,10 +277,33 @@ public:
    * fail for any number of reasons.
    *
    * @param cct The Ceph Context for logging and config.
+   * @param grpc_uri The URI of the gRPC server. If empty, use the configured
+   * value. Non-empty is intended for testing.
    * @return true on success.
    * @return false on failure.
    */
-  bool set_mtls_channel(CephContext* const cct);
+  bool _set_mtls_channel(CephContext* const cct, const std::string& grpc_uri);
+
+  /**
+   * @brief Set up the gRPC channel.
+   *
+   * Based on the value of mtls_enabled_, set up the gRPC channel. Calls
+   * either _set_insecure_channel() or _set_mtls_channel() as appropriate.
+   *
+   * @param cct The Ceph Context for logging and config.
+   * @param grpc_uri The URI of the gRPC server. If empty, use the configured
+   * value. Non-empty is intended for testing.
+   * @return true on success.
+   * @return false on failure.
+   */
+  bool set_channel(CephContext* const cct, const std::string& grpc_uri)
+  {
+    if (mtls_enabled_) {
+      return _set_mtls_channel(cct, grpc_uri);
+    } else {
+      return _set_insecure_channel(cct, grpc_uri);
+    }
+  }
 
   /**
    * @brief Get our default grpc::ChannelArguments value.
