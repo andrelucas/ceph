@@ -39,7 +39,7 @@ namespace rgw {
  * non-gRPC version in the unit tests and test the machine completely
  * standalone.
  *
- * The machine itself is very simple. Given two gRPC services, one for the
+ * The machine itself is very simple. Given three gRPC services, one for the
  * initial Bucket Create request, one to Update the bucket to the 'created'
  * state once the bucket has really been created, and one to Delete the bucket
  * if the creation process fails, then the machine manages the sequencing of
@@ -73,7 +73,8 @@ namespace rgw {
  *
  * If something goes wrong in RGW during bucket creation and we exit
  * ::execute() in state CREATE_RPC_SUCCEEDED, we need to rollback the create
- * with a Delete operation. This is implemented in the destructor.
+ * with a Delete operation. This is implemented in the destructor but can be
+ * invoked manually if desired.
  *
  * ```
  * ... -> CREATE_RPC_SUCCEEDED -> *ROLLBACK_CREATE_START* ->
@@ -83,8 +84,8 @@ namespace rgw {
  * ```
  *
  * Other state transitions are not allowed, and an attempt will generate an
- * error in the logs. Again, an attempt to set a state not deemed 'user accessible'
- * will assert, because that's a programming error.
+ * error in the logs. Again, an attempt to set a state not deemed 'user
+ * accessible' will assert, because that's a programming error.
  *
  * @tparam T The UBNSClient implementation to use.
  */
@@ -137,6 +138,15 @@ public:
     }
   } // UBNSCreateMachine::to_str(State)
 
+  /**
+   * @brief Construct an 'empty' UBNSCreateStateMachine object.
+   *
+   * This is necessary so we can create a std::optional of these objects. The
+   * compiler will object if there's not a default constructor.
+   *
+   * DO NOT attempt to turn an empty machine into a real machine by changing
+   * its state - it'll assert!
+   */
   UBNSCreateStateMachine()
       : dpp_ { nullptr }
       , client_ { nullptr }
@@ -144,6 +154,18 @@ public:
   {
   }
 
+  /**
+   * @brief Construct a new UBNSCreateStateMachine object.
+   *
+   * Construct a machine with all the parameters it needs to send proper gRPC
+   * requests. The machine is created in the INIT state.
+   *
+   * @param dpp DoutPrefixProvider for logging.
+   * @param client The UBNSClient object to use.
+   * @param bucket_name The bucket name.
+   * @param cluster_id The cluster ID, set at startup.
+   * @param owner The bucket owner.
+   */
   UBNSCreateStateMachine(const DoutPrefixProvider* dpp, std::shared_ptr<T> client, const std::string& bucket_name, const std::string cluster_id, const std::string& owner)
       : dpp_ { dpp }
       , client_ { client }
@@ -154,6 +176,14 @@ public:
   {
   }
 
+  /**
+   * @brief Destroy the UBNSCreateStateMachine object, performing rollback if
+   * required.
+   *
+   * This is not a passive destructor. If the machine is in a
+   * partially-completed state, the destructor will send RPCs to try to keep
+   * the upstream state machine in sync.
+   */
   ~UBNSCreateStateMachine()
   {
     if (state_ == CreateMachineState::CREATE_RPC_SUCCEEDED) {
@@ -174,6 +204,7 @@ public:
 
   CreateMachineState state() const noexcept { return state_; }
 
+  /// Return whether or not the state is valid for user transitions.
   bool is_user_state(CreateMachineState state) const noexcept
   {
     switch (state) {
@@ -187,6 +218,17 @@ public:
     }
   }
 
+  /**
+   * @brief Attempt to move the state machine.
+   *
+   * As documented in the class, there are only a few valid state transitions.
+   * Invalid transitions will generate an error in the logs and return false.
+   * Attempts to set a state not deemed user-accessible will assert.
+   *
+   * @param new_state The requested new state.
+   * @return true on success.
+   * @return false on failure.
+   */
   bool set_state(CreateMachineState new_state) noexcept
   {
     ceph_assertf_always(state_ != CreateMachineState::EMPTY, "{}: attempt to set state on empty machine", machine_id);
@@ -293,6 +335,14 @@ public:
     return false;
   }
 
+  /**
+   * @brief Return the last gRPC failure result, if any.
+   *
+   * The result is unpacked into an object that's safe to return to non-gRPC
+   * code world.
+   *
+   * @return std::optional<UBNSClientResult> an optional UBNSClientResult.
+   */
   std::optional<UBNSClientResult> saved_grpc_result() const noexcept { return saved_result_; }
 
 private:
@@ -311,6 +361,73 @@ using UBNSCreateMachine = UBNSCreateStateMachine<UBNSClient>;
 /// Convenience typedef for rgw_op.cc.
 using UBNSCreateState = UBNSCreateMachine::CreateMachineState;
 
+/**
+ * @brief State machine implementing the client Delete side of the UBNS
+ * protocol.
+ *
+ * This state machine is used to implement the two-phase commit protocol for
+ * UBNS bucket deletion. The formality is so that we can create a RAII object
+ * that does the proper rollback regardless of the method by which
+ * RGWDeleteBucket::execute() is exited.
+ *
+ * (The majority of exit points from RGWDeleteBucket::execute() are error
+ * exits; manually cleaning up the UBNS state in each would be messy,
+ * error-prone and hard-to-maintain.)
+ *
+ * The state machine is implemented as a template so we can instantiate a
+ * non-gRPC version in the unit tests and test the machine completely
+ * standalone.
+ *
+ * The machine is simple. Given three gRPC services, one for the initial
+ * Bucket Update request to set the bucket in the 'deleting' state, one Delete
+ * request to actually mark the bucket as deleted once the RGW deletion has
+ * succeeded, and one Update request to rollback the 'deleting' state if the
+ * RGW delete fails.
+ *
+ * 'User accessible' states are marked with asterisks in the diagrams below.
+ * Other states are not user accessible, and an attempt to set them will
+ * assert.
+ *
+ * This is the happy path:
+ * ```
+ * INIT -> *UPDATE_START* -> ( UPDATE_RPC_SUCCEEDED | UPDATE_RPC_FAILED )
+ *
+ * UPDATE_RPC_SUCCEEDED -> *DELETE_START* -> ( DELETE_RPC_SUCCEEDED | DELETE_RPC_FAILED )
+ *
+ * DELETE_RPC_SUCCEEDED -> *COMPLETE*
+ *
+ * (EXIT SUCCESS)
+ * ```
+ *
+ * If the Update RPC fails, perhaps because the bucket is not in the 'created'
+ * state, we go to UPDATE_RPC_FAILED and return a failure to the caller. This
+ * would typically exit RGWDeleteBucket::execute() with an error opcode.
+ *
+ * ```
+ * ... -> UPDATE_RPC_FAILED
+ *
+ * (EXIT FAILURE)
+ * ```
+ *
+ * If something goes wrong in RGW during bucket deletion and we exit
+ * ::execute() in state DELETE_RPC_SUCCEEDED, we need to rollback the update
+ * so the bucket is back in its 'created' state. This is implemented in the
+ * destructor but can be invoked manually if desired.
+ *
+ * ```
+ * ... -> DELETE_RPC_SUCCEEDED -> *ROLLBACK_UPDATE_START* ->
+ *    ( ROLLBACK_UPDATE_SUCCEEDED | ROLLBACK_UPDATE_FAILED )
+ *
+ * (EXIT DESTRUCTOR (no status))
+ * ```
+ *
+ * Other state transitions are not allowed, and an attempt will generate an
+ * error in the logs. Again, an attempt to set a state not deemed 'user
+ * accessible' will assert, because that's a programming error.
+ *
+ * @tparam T The UBNSClient implementation to use.
+
+ */
 template <typename T>
 class UBNSDeleteStateMachine {
 
@@ -360,6 +477,15 @@ public:
     }
   }; // UBNSDeleteMachine::to_str(State)
 
+  /**
+   * @brief Construct an 'empty' UBNSDeleteStateMachine object.
+   *
+   * This is necessary so we can create a std::optional of these objects. The
+   * compiler will object if there's not a default constructor.
+   *
+   * DO NOT attempt to turn an empty machine into a real machine by changing
+   * its state - it'll assert!
+   */
   UBNSDeleteStateMachine()
       : dpp_ { nullptr }
       , client_ { nullptr }
@@ -367,6 +493,18 @@ public:
   {
   }
 
+  /**
+   * @brief Construct a new UBNSDeleteStateMachine object.
+   *
+   * Construct a machine with all the parameters it needs to send proper gRPC
+   * requests. The machine is created in the INIT state.
+   *
+   * @param dpp DoutPrefixProvider for logging.
+   * @param client The UBNSClient object to use.
+   * @param bucket_name The bucket name.
+   * @param cluster_id The cluster ID, set at startup.
+   * @param owner The bucket owner (not really used for delete, but set here anyway).
+   */
   UBNSDeleteStateMachine(const DoutPrefixProvider* dpp, std::shared_ptr<T> client, const std::string& bucket_name, const std::string& cluster_id, const std::string& owner)
       : dpp_ { dpp }
       , client_ { client }
@@ -377,6 +515,14 @@ public:
   {
   }
 
+  /**
+   * @brief Destroy the UBNSDeleteStateMachine object, performing rollback if
+   * required.
+   *
+   * This is not a passive destructor. If the machine is in a
+   * partially-completed state, the destructor will send RPCs to try to keep
+   * the upstream state machine in sync.
+   */
   ~UBNSDeleteStateMachine()
   {
     if (state_ == DeleteMachineState::UPDATE_RPC_SUCCEEDED) {
@@ -397,6 +543,7 @@ public:
 
   DeleteMachineState state() const noexcept { return state_; }
 
+  /// Return whether or not the state is valid for user transitions.
   bool is_user_state(DeleteMachineState state) const noexcept
   {
     switch (state) {
@@ -410,6 +557,17 @@ public:
     }
   }
 
+  /**
+   * @brief Attempt to move the state machine.
+   *
+   * As documented in the class, there are only a few valid state transitions.
+   * Invalid transitions will generate an error in the logs and return false.
+   * Attempts to set a state not deemed user-accessible will assert.
+   *
+   * @param new_state The requested new state.
+   * @return true on success.
+   * @return false on failure.
+   */
   bool set_state(DeleteMachineState new_state) noexcept
   {
     ceph_assertf_always(state_ != DeleteMachineState::EMPTY, "%s: attempt to set state on empty machine", __func__);
@@ -516,6 +674,14 @@ public:
     return false;
   }
 
+  /**
+   * @brief Return the last gRPC failure result, if any.
+   *
+   * The result is unpacked into an object that's safe to return to non-gRPC
+   * code world.
+   *
+   * @return std::optional<UBNSClientResult> an optional UBNSClientResult.
+   */
   std::optional<UBNSClientResult> saved_grpc_result() const noexcept { return saved_result_; }
 
 private:
