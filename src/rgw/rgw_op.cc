@@ -3174,7 +3174,9 @@ void RGWCreateBucket::execute(optional_yield y)
 
   if (s->ubns_client) {
     // Create a real ubns_creater. We'll use this at appropriate points in the
-    // function to interact with UBNS.
+    // function to interact with UBNS. Notice the use of emplace() here - the
+    // state machine's copy and move constructors are deleted, and most forms
+    // of std::optional creation have an implicit move.
     ubns_creater.emplace(this, s->ubns_client, bucket_name, s->ubns_client->cluster_id(), s->user->get_id().to_str());
   }
 
@@ -3424,7 +3426,9 @@ void RGWDeleteBucket::execute(optional_yield y)
 
   if (s->ubns_client) {
     // Create a real ubns_deleter. We'll use this at appropriate points in the
-    // function to interact with UBNS.
+    // function to interact with UBNS. Notice the use of emplace() here - the
+    // state machine's copy and move constructors are deleted, and most forms
+    // of std::optional creation have an implicit move.
     ubns_deleter.emplace(this, s->ubns_client, s->bucket_name, s->ubns_client->cluster_id(), s->user->get_id().to_str());
   }
 

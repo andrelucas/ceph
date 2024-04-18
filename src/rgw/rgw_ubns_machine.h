@@ -9,6 +9,14 @@
  *
  */
 
+#pragma once
+
+/*
+ * Don't include this except in .cc files where it's actually needed! There's
+ * literally no need to have hundreds of files include a template which they
+ * have to check only to discard.
+ */
+
 #include "common/dout.h"
 #include "rgw_ubns.h"
 
@@ -18,7 +26,67 @@ namespace rgw {
  * @brief State machine implementing the client Create side of the UBNS
  * protocol.
  *
- * XXX
+ * This state machine is used to implement the two-phase commit protocol for
+ * UBNS bucket creation. The formality is so that we can create a RAII object
+ * that does the proper rollback regardless of the method by which
+ * RGWCreateBucket::execute() is exited.
+ *
+ * (The majority of exit points from RGWCreateBucket::execute() are error
+ * exits; manually cleaning up the UBNS state in each would be messy,
+ * error-prone and hard-to-maintain.)
+ *
+ * The state machine is implemented as a template so we can instantiate a
+ * non-gRPC version in the unit tests and test the machine completely
+ * standalone.
+ *
+ * The machine itself is very simple. Given two gRPC services, one for the
+ * initial Bucket Create request, one to Update the bucket to the 'created'
+ * state once the bucket has really been created, and one to Delete the bucket
+ * if the creation process fails, then the machine manages the sequencing of
+ * the calls and any rollback.
+ *
+ * 'User accessible' states are marked with asterisks in the diagrams below.
+ * Other states are not user accessible, and an attempt to set them will
+ * assert.
+ *
+ * This is the happy path:
+ * ```
+ * INIT -> *CREATE_START* -> ( CREATE_RPC_SUCCEEDED | CREATE_RPC_FAILED )
+ *
+ * CREATE_RPC_SUCCEEDED -> *UPDATE_START* ->
+ *   ( UPDATE_RPC_SUCCEEDED | UPDATE_RPC_FAILED )
+ *
+ * UPDATE_RPC_SUCCEEDED -> *COMPLETE*
+ *
+ * (EXIT SUCCESS)
+ * ```
+ *
+ * If the Create RPC fails, perhaps because the bucket already exists, we go
+ * to CREATE_RPC_FAILED and return a failure to the caller. This would
+ * typically exit RGWCreateBucket::execute() with an error opcode.
+ *
+ * ```
+ * ... -> CREATE_RPC_FAILED
+ *
+ * (EXIT FAILURE)
+ * ```
+ *
+ * If something goes wrong in RGW during bucket creation and we exit
+ * ::execute() in state CREATE_RPC_SUCCEEDED, we need to rollback the create
+ * with a Delete operation. This is implemented in the destructor.
+ *
+ * ```
+ * ... -> CREATE_RPC_SUCCEEDED -> *ROLLBACK_CREATE_START* ->
+ *    ( ROLLBACK_CREATE_SUCCEEDED | ROLLBACK_CREATE_FAILED )
+ *
+ * (EXIT DESTRUCTOR (no status))
+ * ```
+ *
+ * Other state transitions are not allowed, and an attempt will generate an
+ * error in the logs. Again, an attempt to set a state not deemed 'user accessible'
+ * will assert, because that's a programming error.
+ *
+ * @tparam T The UBNSClient implementation to use.
  */
 template <typename T>
 class UBNSCreateStateMachine {
@@ -96,6 +164,9 @@ public:
     ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: destructor: bucket '{}' owner '{}' end state {}"), machine_id, bucket_name_, owner_, to_str(state_)) << dendl;
   }
 
+  // Delete copy and move constructors. We want to be very explicit about how
+  // these machines are created. Leaving constructors around, especially move,
+  // leaves opportunities for confusing log messages and bugs.
   UBNSCreateStateMachine(const UBNSCreateStateMachine&) = delete;
   UBNSCreateStateMachine(UBNSCreateStateMachine&&) = delete;
   UBNSCreateStateMachine& operator=(const UBNSCreateStateMachine&) = delete;
@@ -103,24 +174,42 @@ public:
 
   CreateMachineState state() const noexcept { return state_; }
 
+  bool is_user_state(CreateMachineState state) const noexcept
+  {
+    switch (state) {
+    case CreateMachineState::CREATE_START:
+    case CreateMachineState::UPDATE_START:
+    case CreateMachineState::ROLLBACK_CREATE_START:
+    case CreateMachineState::COMPLETE:
+      return true;
+    default:
+      return false;
+    }
+  }
+
   bool set_state(CreateMachineState new_state) noexcept
   {
     ceph_assertf_always(state_ != CreateMachineState::EMPTY, "{}: attempt to set state on empty machine", machine_id);
 
     ldpp_dout(dpp_, 5) << fmt::format(FMT_STRING("{}: attempt state transition {} -> {}"), machine_id, to_str(state_), to_str(new_state)) << dendl;
     UBNSClientResult result;
-    bool nonuser_state = false; // Set to true if this is a state the user should never set.
+
+    if (!is_user_state(new_state)) {
+      ceph_assertf_always(false, "%s: non-user state transition %s", machine_id, to_str(new_state).c_str());
+    }
 
     // Implement our state machine. Return from here if the state was handled.
     // A 'break' here means an illegal state transition was attempted, and the
-    // following code will log an error.
+    // following code will log an error. We're implementing cases that will be
+    // caught by !is_user_state() above in order to keep the compiler happy
+    // (it will be annoyed if we're missing enum case instances) and because I
+    // think it's clearer.
+    //
     switch (new_state) {
     case CreateMachineState::EMPTY:
-      nonuser_state = true;
       break;
 
     case CreateMachineState::INIT:
-      nonuser_state = true;
       break;
 
     case CreateMachineState::CREATE_START:
@@ -141,11 +230,9 @@ public:
       break;
 
     case CreateMachineState::CREATE_RPC_SUCCEEDED:
-      nonuser_state = true;
       break;
 
     case CreateMachineState::CREATE_RPC_FAILED:
-      nonuser_state = true;
       break;
 
     case CreateMachineState::UPDATE_START:
@@ -166,11 +253,9 @@ public:
       break;
 
     case CreateMachineState::UPDATE_RPC_SUCCEEDED:
-      nonuser_state = true;
       break;
 
     case CreateMachineState::UPDATE_RPC_FAILED:
-      nonuser_state = true;
       break;
 
     case CreateMachineState::ROLLBACK_CREATE_START:
@@ -190,11 +275,9 @@ public:
       break;
 
     case CreateMachineState::ROLLBACK_CREATE_SUCCEEDED:
-      nonuser_state = true;
       break;
 
     case CreateMachineState::ROLLBACK_CREATE_FAILED:
-      nonuser_state = true;
       break;
 
     case CreateMachineState::COMPLETE:
@@ -207,9 +290,6 @@ public:
     // If we didn't return directly from the state switch, we're attempting an invalid
     // transition.
     ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: invalid state transition {} -> {}"), machine_id, to_str(state_), to_str(new_state)) << dendl;
-    if (nonuser_state) {
-      ceph_assertf_always(false, "%s: invalid user state transition %s -> %a attempted", machine_id, to_str(state_).c_str(), to_str(new_state).c_str());
-    }
     return false;
   }
 
@@ -307,6 +387,9 @@ public:
     ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: destructor: bucket '{}' owner '{}' end state {}"), machine_id, bucket_name_, owner_, to_str(state_)) << dendl;
   }
 
+  // Delete copy and move constructors. We want to be very explicit about how
+  // these machines are created. Leaving constructors around, especially move,
+  // leaves opportunities for confusing log messages and bugs.
   UBNSDeleteStateMachine(const UBNSDeleteStateMachine&) = delete;
   UBNSDeleteStateMachine& operator=(const UBNSDeleteStateMachine&) = delete;
   UBNSDeleteStateMachine(UBNSDeleteStateMachine&&) = delete;
@@ -314,22 +397,40 @@ public:
 
   DeleteMachineState state() const noexcept { return state_; }
 
+  bool is_user_state(DeleteMachineState state) const noexcept
+  {
+    switch (state) {
+    case DeleteMachineState::UPDATE_START:
+    case DeleteMachineState::DELETE_START:
+    case DeleteMachineState::ROLLBACK_UPDATE_START:
+    case DeleteMachineState::COMPLETE:
+      return true;
+    default:
+      return false;
+    }
+  }
+
   bool set_state(DeleteMachineState new_state) noexcept
   {
     ceph_assertf_always(state_ != DeleteMachineState::EMPTY, "%s: attempt to set state on empty machine", __func__);
     ldpp_dout(dpp_, 5) << fmt::format(FMT_STRING("{}: attempt state transition {} -> {}"), machine_id, to_str(state_), to_str(new_state)) << dendl;
     UBNSClientResult result;
-    bool nonuser_state = false;
 
-    // Implement our state machine. A 'break' means an illegal state
-    // transition.
+    if (!is_user_state(new_state)) {
+      ceph_assertf_always(false, "%s: non-user state transition %s attempted", machine_id, to_str(new_state).c_str());
+    }
+
+    // Implement our state machine. Return from here if the state was handler.
+    // A 'break' means an illegal state transition. We're implementing cases
+    // that will be caught by !is_user_state() above in order to keep the
+    // compiler happy (it will be annoyed if we're missing enum case
+    // instances) and because I think it's clearer.
+    //
     switch (new_state) {
     case DeleteMachineState::EMPTY:
-      nonuser_state = true;
       break;
 
     case DeleteMachineState::INIT:
-      nonuser_state = true;
       break;
 
     case DeleteMachineState::UPDATE_START:
@@ -350,11 +451,9 @@ public:
       break;
 
     case DeleteMachineState::UPDATE_RPC_SUCCEEDED:
-      nonuser_state = true;
       break;
 
     case DeleteMachineState::UPDATE_RPC_FAILED:
-      nonuser_state = true;
       break;
 
     case DeleteMachineState::DELETE_START:
@@ -375,11 +474,9 @@ public:
       break;
 
     case DeleteMachineState::DELETE_RPC_SUCCEEDED:
-      nonuser_state = true;
       break;
 
     case DeleteMachineState::DELETE_RPC_FAILED:
-      nonuser_state = true;
       break;
 
     case DeleteMachineState::ROLLBACK_UPDATE_START:
@@ -400,11 +497,9 @@ public:
       break;
 
     case DeleteMachineState::ROLLBACK_UPDATE_SUCCEEDED:
-      nonuser_state = true;
       break;
 
     case DeleteMachineState::ROLLBACK_UPDATE_FAILED:
-      nonuser_state = true;
       break;
 
     case DeleteMachineState::COMPLETE:
@@ -418,9 +513,6 @@ public:
     // If we didn't return from the state switch, we're attempting an invalid
     // transition.
     ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: invalid state transition {} -> {}"), machine_id, to_str(state_), to_str(new_state)) << dendl;
-    if (nonuser_state) {
-      ceph_assertf_always(false, "%s: invalid user state transition %s -> %s attempted", machine_id, to_str(state_).c_str(), to_str(new_state).c_str());
-    }
     return false;
   }
 

@@ -664,7 +664,7 @@ TEST_F(UBNSStateMachinesDeathTest, CreateNonUserStatesAssert)
   };
   for (auto s : non_user_states) {
     MockUBNSCreateMachine creater(dpp, client_, "foo", "cluster", "owner");
-    ASSERT_DEATH(creater.set_state(s), "invalid user state transition");
+    ASSERT_DEATH(creater.set_state(s), "non-user state transition");
   }
 }
 
@@ -766,7 +766,7 @@ TEST_F(UBNSStateMachinesDeathTest, DeleteNonUserStatesAssert)
 
   for (auto s : non_user_states) {
     MockUBNSDeleteMachine deleter(dpp, client_, "foo", "cluster", "owner");
-    ASSERT_DEATH(deleter.set_state(s), "invalid user state transition");
+    ASSERT_DEATH(deleter.set_state(s), "non-user state transition");
   }
 }
 
