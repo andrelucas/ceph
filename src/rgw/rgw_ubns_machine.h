@@ -71,6 +71,9 @@ namespace rgw {
  * (EXIT FAILURE)
  * ```
  *
+ * If the Update RPC fails, we enter state UPDATE_RPC_FAILED and return an
+ * error to the user. This would typically exit RGWCreateBucket::execute().
+ *
  * If something goes wrong in RGW during bucket creation and we exit
  * ::execute() in state CREATE_RPC_SUCCEEDED, we need to rollback the create
  * with a Delete operation. This is implemented in the destructor but can be
@@ -408,6 +411,9 @@ using UBNSCreateState = UBNSCreateMachine::CreateMachineState;
  *
  * (EXIT FAILURE)
  * ```
+ *
+ * If the Delete RPC fails, we enter state DELETE_RPC_FAILED and return an
+ * error to the user. This would typically exit RGWDeleteBucket::execute().
  *
  * If something goes wrong in RGW during bucket deletion and we exit
  * ::execute() in state DELETE_RPC_SUCCEEDED, we need to rollback the update
