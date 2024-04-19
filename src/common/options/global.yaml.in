@@ -6382,7 +6382,7 @@ options:
 - name: jaeger_agent_host
   type: str
   level: advanced
-  desc: port number of the jaeger agent
+  desc: hostname or address of the jaeger agent
   default: 127.0.0.1
   services:
   - rgw
