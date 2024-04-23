@@ -12,6 +12,12 @@ ifneq (,$(findstring WITH_STATIC_LIBSTDCXX,$(CEPH_EXTRA_CMAKE_ARGS)))
   # exception, so strip this linker option,
   # see http://tracker.ceph.com/issues/25209
   export DEB_LDFLAGS_MAINT_STRIP = -Wl,-Bsymbolic-functions
+else
+  # OBJGEN1-917 
+  # Similar problem with the issue above - OSD crashes
+  # Removing this flags when building with static libstdc++
+  REMOVE_FLAG := -Wl,-Bsymbolic-functions
+  LDFLAGS:=$(filter-out $(REMOVE_FLAG),$(LDFLAGS))
 endif
 ifeq (,$(findstring WITH_SEASTAR,$(CEPH_EXTRA_CMAKE_ARGS)))
   export CEPH_OSD_BASENAME = ceph-osd
