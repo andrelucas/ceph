@@ -6379,6 +6379,14 @@ options:
   - rgw
   - osd
   with_legacy: true
+- name: jaeger_agent_host
+  type: str
+  level: advanced
+  desc: hostname or address of the jaeger agent
+  default: 127.0.0.1
+  services:
+  - rgw
+  - osd
 - name: jaeger_agent_port
   type: int
   level: advanced
