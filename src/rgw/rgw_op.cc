@@ -2,6 +2,7 @@
 // vim: ts=8 sw=2 smarttab ft=cpp
 
 #include <errno.h>
+#include <rgw_common.h>
 #include <stdlib.h>
 #include <system_error>
 #include <unistd.h>
@@ -3389,9 +3390,12 @@ void RGWCreateBucket::execute(optional_yield y)
       if (result) {
         ldpp_dout(this, 0) << "UBNS failed UpdateBucketEntry request: " << result->message() << dendl;
       }
-      op_ret = -EEXIST; // XXX is this appropriate?
+      // This is an internal error. However, we've created the bucket! We
+      // will need to be reconcile this externally, there's no obvious way to
+      // roll this back from RGWCreateBucket::execute().
+      op_ret = -ERR_INTERNAL_ERROR;
     }
-    // creater state is UPDATE_RPC_SUCCEEDED.
+    // creater state is UPDATE_RPC_SUCCEEDED or UPDATE_RPC_FAILED.
   }
 }
 
@@ -3441,7 +3445,8 @@ void RGWDeleteBucket::execute(optional_yield y)
       } else {
         ldpp_dout(this, 0) << "UBNS failed DeleteBucketEntry request with unknown error" << dendl;
       }
-      op_ret = -EINVAL; // XXX what's the right error here?
+      // This is an internal error, it has nothing to do with the bucket.
+      op_ret = -ERR_INTERNAL_ERROR;
       return;
     }
     // deleter state is UPDATE_RPC_SUCCEEDED.
@@ -3512,9 +3517,13 @@ void RGWDeleteBucket::execute(optional_yield y)
       if (result) {
         ldpp_dout(this, 0) << "UBNS failed DeleteBucketEntry request: " << result->message() << dendl;
       }
-      op_ret = -EINVAL; // XXX what's the right error here? We deleted it!
+      // This is an internal error. However, we've deleted the bucket! We need
+      // to reconcile this externally, there's no obvious way to roll this
+      // back (What do we do? Recreate the bucket!) from
+      // RGWDeleteBucket::execute().
+      op_ret = -ERR_INTERNAL_ERROR;
     }
-    // deleter state is DELETE_RPC_SUCCEEDED.
+    // deleter state is DELETE_RPC_SUCCEEDED or DELETE_RPC_FAILED.
   }
 
   return;
