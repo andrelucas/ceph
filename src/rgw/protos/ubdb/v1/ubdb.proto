@@ -82,6 +82,17 @@ message UpdateBucketEntryRequest {
   //
   // @gotags: xml:"State" json:"State"
   BucketState state = 3;
+  // The owner of the bucket.
+  //
+  // It can be any value that uniquely identifies the owner of
+  // the bucket (externally to Ceph cluster and within a region)
+  // since it isn't used for any UBNS operations aside from simple
+  // string comparisons.
+  // Used in conjunction with the bucket name to uniquely identify
+  // a bucket within a region.
+  //
+  // @gotags: xml:"Owner" json:"Owner"
+  string owner = 4;
 }
 
 // Response message for updating a bucket entry.
@@ -101,6 +112,17 @@ message DeleteBucketEntryRequest {
   //
   // @gotags: xml:"Cluster" json:"Cluster"
   string cluster = 2;
+  // The owner of the bucket.
+  //
+  // It can be any value that uniquely identifies the owner of
+  // the bucket (externally to Ceph cluster and within a region)
+  // since it isn't used for any UBNS operations aside from simple
+  // string comparisons.
+  // Used in conjunction with the bucket name to uniquely identify
+  // a bucket within a region.
+  //
+  // @gotags: xml:"Owner" json:"Owner"
+  string owner = 3;
 }
 
 // Response message for deleting a bucket entry.
