@@ -232,7 +232,7 @@ public:
    * @param bucket_name The bucket name.
    * @return UBNSClientResult A result object.
    */
-  UBNSClientResult delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id);
+  UBNSClientResult delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, const std::string& owner);
 
   /**
    * @brief Call ubdb.v1.UpdateBucketEntry() and return the result.
@@ -241,7 +241,7 @@ public:
    * @param bucket_name The bucket name.
    * @return UBNSClientResult A result object.
    */
-  UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, UBNSBucketUpdateState state);
+  UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, const std::string& owner, UBNSBucketUpdateState state);
 
   std::string cluster_id() const
   {

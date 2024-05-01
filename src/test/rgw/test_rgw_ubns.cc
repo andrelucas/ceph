@@ -259,7 +259,7 @@ TEST_F(UBNSTestImplGRPCTest, AddRemoveAddSucceeds)
   s.cio = &cio;
   auto res = uci_.add_bucket_entry(&dpp_, "foo", "cluster", "owner");
   EXPECT_TRUE(res.ok()) << "first add should succeed, but got: " << res.message();
-  res = uci_.delete_bucket_entry(&dpp_, "foo", "cluster");
+  res = uci_.delete_bucket_entry(&dpp_, "foo", "cluster", "owner");
   EXPECT_TRUE(res.ok()) << "remove same bucket should succeed, but got: " << res.message();
   res = uci_.add_bucket_entry(&dpp_, "foo", "cluster", "owner");
   EXPECT_TRUE(res.ok()) << "re-add of same bucket after deletion should succeed, but got: " << res.message();
@@ -272,7 +272,7 @@ TEST_F(UBNSTestImplGRPCTest, DeleteNonexistentFails)
   TestClient cio;
   DEFINE_REQ_STATE;
   s.cio = &cio;
-  auto res = uci_.delete_bucket_entry(&dpp_, "foo", "cluster");
+  auto res = uci_.delete_bucket_entry(&dpp_, "foo", "cluster", "owner");
   EXPECT_FALSE(res.ok()) << "delete of nonexistent bucket should fail";
 }
 
@@ -285,9 +285,9 @@ TEST_F(UBNSTestImplGRPCTest, SecondDeleteFails)
   s.cio = &cio;
   auto res = uci_.add_bucket_entry(&dpp_, "foo", "cluster", "owner");
   EXPECT_TRUE(res.ok()) << "add should succeed, but got: " << res.message();
-  res = uci_.delete_bucket_entry(&dpp_, "foo", "cluster");
+  res = uci_.delete_bucket_entry(&dpp_, "foo", "cluster", "owner");
   EXPECT_TRUE(res.ok()) << "delete of existing bucket should succeed, but got: " << res.message();
-  res = uci_.delete_bucket_entry(&dpp_, "foo", "cluster");
+  res = uci_.delete_bucket_entry(&dpp_, "foo", "cluster", "owner");
   EXPECT_FALSE(res.ok()) << "second delete of non-nonexistent bucket should fail";
 }
 
@@ -300,15 +300,15 @@ TEST_F(UBNSTestImplGRPCTest, Update)
   s.cio = &cio;
   auto res = uci_.add_bucket_entry(&dpp_, "foo", "cluster", "owner");
   EXPECT_TRUE(res.ok()) << "add should succeed, but got: " << res.message();
-  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::CREATED);
+  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", "owner", UBNSBucketUpdateState::CREATED);
   EXPECT_TRUE(res.ok()) << "update to Created should succeed, but got: " << res.message();
-  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::DELETING);
+  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", "owner", UBNSBucketUpdateState::DELETING);
   EXPECT_TRUE(res.ok()) << "update to Deleting should succeed, but got: " << res.message();
-  res = uci_.delete_bucket_entry(&dpp_, "foo", "cluster");
+  res = uci_.delete_bucket_entry(&dpp_, "foo", "cluster", "owner");
   EXPECT_TRUE(res.ok()) << "delete of existing bucket should succeed, but got: " << res.message();
-  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::CREATED);
+  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", "owner", UBNSBucketUpdateState::CREATED);
   EXPECT_FALSE(res.ok()) << "update to Created should fail";
-  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", UBNSBucketUpdateState::DELETING);
+  res = uci_.update_bucket_entry(&dpp_, "foo", "cluster", "owner", UBNSBucketUpdateState::DELETING);
   EXPECT_FALSE(res.ok()) << "update to Created should fail";
 }
 
@@ -572,7 +572,7 @@ public:
     buckets_[bucket_name] = MockBucketState::CREATING;
     return UBNSClientResult::success();
   }
-  UBNSClientResult delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id)
+  UBNSClientResult delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, const std::string& owner)
   {
     auto cur_state = buckets_[bucket_name];
     if (cur_state != MockBucketState::DELETING && cur_state != MockBucketState::CREATING) {
@@ -581,7 +581,7 @@ public:
     buckets_.erase(bucket_name);
     return UBNSClientResult::success();
   }
-  UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, UBNSBucketUpdateState state)
+  UBNSClientResult update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, const std::string& owner, UBNSBucketUpdateState state)
   {
     auto cur_state = buckets_[bucket_name];
     if (state == UBNSBucketUpdateState::CREATED) {

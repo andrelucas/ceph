@@ -3429,11 +3429,17 @@ void RGWDeleteBucket::execute(optional_yield y)
   std::optional<rgw::UBNSDeleteMachine> ubns_deleter(std::nullopt);
 
   if (s->ubns_client) {
+    // Fetch the user ID from the bucket. UBNS requires us to pass a matching
+    // owner, and there's no guarantee that the user requesting bucket
+    // deletion is the owner of the bucket.
+    const std::string& user_id = s->bucket->get_owner()->get_id().id;
+    ldpp_dout(this, 5) << fmt::format(FMT_STRING("UBNS RGWDeleteBucket::execute(): bucket('{}','{}',''): fetched owner '{}'"), s->bucket_name, s->ubns_client->cluster_id(), user_id) << dendl;
+
     // Create a real ubns_deleter. We'll use this at appropriate points in the
     // function to interact with UBNS. Notice the use of emplace() here - the
     // state machine's copy and move constructors are deleted, and most forms
     // of std::optional creation have an implicit move.
-    ubns_deleter.emplace(this, s->ubns_client, s->bucket_name, s->ubns_client->cluster_id(), s->user->get_id().to_str());
+    ubns_deleter.emplace(this, s->ubns_client, s->bucket_name, s->ubns_client->cluster_id(), user_id);
   }
 
   if (ubns_deleter) {

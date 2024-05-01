@@ -125,7 +125,7 @@ UBNSClientResult UBNSClientImpl::add_bucket_entry(const DoutPrefixProvider* dpp,
   return client->add_bucket_request(req);
 }
 
-UBNSClientResult UBNSClientImpl::delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id)
+UBNSClientResult UBNSClientImpl::delete_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, const std::string& owner)
 {
   ldpp_dout(dpp, 20) << __func__ << dendl;
   auto client = safe_get_client(dpp);
@@ -135,11 +135,12 @@ UBNSClientResult UBNSClientImpl::delete_bucket_entry(const DoutPrefixProvider* d
   ubdb::v1::DeleteBucketEntryRequest req;
   req.set_bucket(bucket_name);
   req.set_cluster(cluster_id);
-  ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("UBNS: sending gRPC DeleteBucketRequest(bucket={},cluster={})"), req.bucket(), req.cluster()) << dendl;
+  req.set_owner(owner);
+  ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("UBNS: sending gRPC DeleteBucketRequest(bucket={},cluster={},owner={})"), req.bucket(), req.cluster(), req.owner()) << dendl;
   return client->delete_bucket_request(req);
 }
 
-UBNSClientResult UBNSClientImpl::update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, UBNSBucketUpdateState state)
+UBNSClientResult UBNSClientImpl::update_bucket_entry(const DoutPrefixProvider* dpp, const std::string& bucket_name, const std::string& cluster_id, const std::string& owner, UBNSBucketUpdateState state)
 {
   ldpp_dout(dpp, 20) << __func__ << dendl;
   auto client = safe_get_client(dpp);
@@ -149,6 +150,7 @@ UBNSClientResult UBNSClientImpl::update_bucket_entry(const DoutPrefixProvider* d
   ubdb::v1::UpdateBucketEntryRequest req;
   req.set_bucket(bucket_name);
   req.set_cluster(cluster_id);
+  req.set_owner(owner);
   ubdb::v1::BucketState rpc_state;
   switch (state) {
   case rgw::UBNSBucketUpdateState::UNSPECIFIED:
@@ -162,7 +164,7 @@ UBNSClientResult UBNSClientImpl::update_bucket_entry(const DoutPrefixProvider* d
     break;
   }
   req.set_state(rpc_state);
-  ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("UBNS: sending gRPC UpdateBucketRequest(bucket={},cluster={},state={})"), req.bucket(), req.cluster(), to_str(state)) << dendl;
+  ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("UBNS: sending gRPC UpdateBucketRequest(bucket={},cluster={},owner={},state={})"), req.bucket(), req.cluster(), req.owner(), to_str(state)) << dendl;
   return client->update_bucket_request(req);
 }
 
