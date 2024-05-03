@@ -995,10 +995,10 @@ options:
 - name: rgw_handoff_enable_grpc
   type: bool
   level: advanced
-  desc: Enable handoff authentication via gRPC (rather than HTTP).
-  long_desc: If enabled, the handoff authentication service will be available via
-    gRPC. Otherwise, it will be available via HTTP. Both modes will most
-    likely require additional configuration.
+  desc: Backward-compatibility only - Handoff always uses gRPC.
+  long_desc: Backwards-compatiblity configuration option only. Handoff always
+    uses gRPC for communication, the initial HTTP mode has been removed. This
+    value will be ignored.
   default: true
   services:
   - rgw
@@ -1088,24 +1088,6 @@ options:
   default: dns:127.0.0.1:8002
   flags:
   - runtime
-  services:
-  - rgw
-  with_legacy: true
-- name: rgw_handoff_http_uri
-  type: str
-  level: advanced
-  desc: URI for the S3 authentication handoff service via HTTP.
-  long_desc: The HTTP(S) server to use.
-  default: http://127.0.0.1:8001
-  services:
-  - rgw
-  with_legacy: true
-- name: rgw_handoff_verify_ssl
-  type: bool
-  level: advanced
-  desc: Should handoff verify the remote HTTP server TLS certificate.
-  long_desc: In HTTP mode, verify the remote TLS certificate.
-  default: true
   services:
   - rgw
   with_legacy: true
