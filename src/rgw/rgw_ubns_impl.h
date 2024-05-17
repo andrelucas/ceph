@@ -38,6 +38,42 @@ namespace rgw {
 
 /**
  * @brief Thin wrapper around the gRPC client.
+ *
+ * Error return codes are based on the following guidance from the service
+ * developers:
+ *
+ * ```
+ * Create:
+ *    Internal errors: grpc code Internal
+ *    Terminated due to context: grpc code DeadlineExceeded
+ *    Invalid or missing parameter: grpc code InvalidArgument
+ *    Aborted due to being duplicated: grpc code FailedPrecondition
+ *    User already owns bucket: grpc code AlreadyExists
+ *    Another user owns the bucket: grpc code Aborted
+ *    OK: nil
+ *
+ * Update:
+ *    Internal errors: grpc code Internal
+ *    Terminated due to context: grpc code DeadlineExceeded
+ *    Invalid or missing parameter: grpc code InvalidArgument
+ *    Invalid state transition (start a delete for a bucket not yet marked as created in ubns): grpc code InvalidArgument
+ *    BucketEntry not found: grpc code NotFound
+ *    Aborted due to being duplicated: grpc code FailedPrecondition
+ *    Bucket is hosted on another cluster: grpc code FailedPrecondition
+ *    OK: nil
+ *
+ * Delete:
+ *    Internal errors: grpc code Internal
+ *    Terminated due to context: grpc code DeadlineExceeded
+ *    Invalid or missing parameter: grpc code InvalidArgument
+ *    Bucket is hosted on another cluster: grpc code FailedPrecondition
+ *    OK: nil
+ * ```
+ *
+ * Note that in two instances in Update, we get the same error code for
+ * multiple causes. The error message we return will list both potential
+ * causes - what else can we do?
+ *
  */
 class UBNSgRPCClient {
 private:
@@ -73,11 +109,48 @@ public:
     stub_ = ubdb::v1::UBDBService::NewStub(channel);
   }
 
+  /**
+   * @brief Call the AddBucketEntry service and return a result suitable for
+   * returning to RGW.
+   *
+   * See the class documentation for the table of gRPC codes to RGW codes.
+   *
+   * @param req The request object.
+   * @return UBNSClientResult The result object.
+   */
   UBNSClientResult add_bucket_request(const ubdb::v1::AddBucketEntryRequest& req);
 
+  /**
+   * @brief Call the DeleteBucketEntry service and return a result suitable for
+   * returning to RGW.
+   *
+   * See the class documentation for the table of gRPC codes to RGW codes.
+   *
+   * @param req The request object.
+   * @return UBNSClientResult The result object.
+   */
   UBNSClientResult delete_bucket_request(const ubdb::v1::DeleteBucketEntryRequest& req);
 
+  /**
+   * @brief Call the UpdateBucketEntry service and return a result suitable for
+   * returning to RGW.
+   *
+   * See the class documentation for the table of gRPC codes to RGW codes.
+   *
+   * @param req The request object.
+   * @return UBNSClientResult The result object.
+   */
   UBNSClientResult update_bucket_request(const ubdb::v1::UpdateBucketEntryRequest& req);
+
+  /// @brief Return a UBNSClientResult object based on the return from the
+  /// AddBucketEntry service.
+  UBNSClientResult _add_bucket_xform_result(const grpc::Status& status);
+  /// @brief Return a UBNSClientResult object based on the return from the
+  /// DeleteBucketEntry service.
+  UBNSClientResult _delete_bucket_xform_result(const grpc::Status& status);
+  /// @brief Return a UBNSClientResult object based on the return from the
+  /// UpdateBucketEntry service.
+  UBNSClientResult _update_bucket_xform_result(const grpc::Status& status);
 
 }; // class UBNSgRPCClient
 

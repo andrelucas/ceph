@@ -3191,10 +3191,11 @@ void RGWCreateBucket::execute(optional_yield y)
       auto result = ubns_creater->saved_grpc_result();
       if (result) {
         ldpp_dout(this, 0) << "UBNS failed AddBucketEntry() request: " << result->message() << dendl;
+        op_ret = -result->code();
       } else {
         ldpp_dout(this, 0) << "UBNS failed AddBucketEntry() request failed with unknown error" << dendl;
+        op_ret = -EEXIST;
       }
-      op_ret = -EEXIST;
       return;
     }
     // creater state is CREATE_RPC_SUCCEEDED.
@@ -3386,14 +3387,16 @@ void RGWCreateBucket::execute(optional_yield y)
     // Move the state machine from CREATE_RPC_SUCCEEDED to UPDATE_START.
     bool success = ubns_creater->set_state(rgw::UBNSCreateMachine::CreateMachineState::UPDATE_START);
     if (!success) {
+      // We've created the bucket! We will need to be reconcile this
+      // externally, there's no obvious way to roll this back from
+      // RGWCreateBucket::execute().
       auto result = ubns_creater->saved_grpc_result();
       if (result) {
         ldpp_dout(this, 0) << "UBNS failed UpdateBucketEntry request: " << result->message() << dendl;
+        op_ret = -result->code();
+      } else {
+        op_ret = -ERR_INTERNAL_ERROR;
       }
-      // This is an internal error. However, we've created the bucket! We
-      // will need to be reconcile this externally, there's no obvious way to
-      // roll this back from RGWCreateBucket::execute().
-      op_ret = -ERR_INTERNAL_ERROR;
     }
     // creater state is UPDATE_RPC_SUCCEEDED or UPDATE_RPC_FAILED.
   }
@@ -3448,11 +3451,12 @@ void RGWDeleteBucket::execute(optional_yield y)
       auto result = ubns_deleter->saved_grpc_result();
       if (result) {
         ldpp_dout(this, 0) << "UBNS failed DeleteBucketEntry request: " << result->message() << dendl;
+        op_ret = -result->code();
       } else {
         ldpp_dout(this, 0) << "UBNS failed DeleteBucketEntry request with unknown error" << dendl;
+        // This is an internal error, it has nothing to do with the bucket.
+        op_ret = -ERR_INTERNAL_ERROR;
       }
-      // This is an internal error, it has nothing to do with the bucket.
-      op_ret = -ERR_INTERNAL_ERROR;
       return;
     }
     // deleter state is UPDATE_RPC_SUCCEEDED.
@@ -3519,15 +3523,17 @@ void RGWDeleteBucket::execute(optional_yield y)
   if (ubns_deleter) {
     bool success = ubns_deleter->set_state(rgw::UBNSDeleteMachine::DeleteMachineState::DELETE_START);
     if (!success) {
+      // There's an error, but we've already deleted the bucket! We need to
+      // reconcile this externally, there's no obvious way to roll this back
+      // from RGWDeleteBucket::execute() - what do we do, recreate the bucket?
       auto result = ubns_deleter->saved_grpc_result();
       if (result) {
         ldpp_dout(this, 0) << "UBNS failed DeleteBucketEntry request: " << result->message() << dendl;
+        op_ret = -result->code();
+      } else {
+        ldpp_dout(this, 0) << "UBNS failed DeleteBucketEntry request failed with unknown error" << dendl;
+        op_ret = -ERR_INTERNAL_ERROR;
       }
-      // This is an internal error. However, we've deleted the bucket! We need
-      // to reconcile this externally, there's no obvious way to roll this
-      // back (What do we do? Recreate the bucket!) from
-      // RGWDeleteBucket::execute().
-      op_ret = -ERR_INTERNAL_ERROR;
     }
     // deleter state is DELETE_RPC_SUCCEEDED or DELETE_RPC_FAILED.
   }

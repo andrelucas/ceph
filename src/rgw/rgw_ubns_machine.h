@@ -267,6 +267,7 @@ public:
       if (state_ != CreateMachineState::INIT) {
         break;
       }
+      saved_result_.reset();
       result = client_->add_bucket_entry(dpp_, bucket_name_, cluster_id_, owner_);
       if (result.ok()) {
         state_ = CreateMachineState::CREATE_RPC_SUCCEEDED;
@@ -290,6 +291,7 @@ public:
       if (state_ != CreateMachineState::CREATE_RPC_SUCCEEDED && state_ != CreateMachineState::UPDATE_RPC_FAILED) {
         break;
       }
+      saved_result_.reset();
       result = client_->update_bucket_entry(dpp_, bucket_name_, cluster_id_, owner_, UBNSBucketUpdateState::CREATED);
       if (result.ok()) {
         state_ = CreateMachineState::UPDATE_RPC_SUCCEEDED;
@@ -313,6 +315,7 @@ public:
       if (state_ != CreateMachineState::CREATE_RPC_SUCCEEDED && state_ != CreateMachineState::UPDATE_RPC_FAILED) {
         break;
       }
+      saved_result_.reset();
       result = client_->delete_bucket_entry(dpp_, bucket_name_, cluster_id_, owner_);
       if (result.ok()) {
         state_ = CreateMachineState::ROLLBACK_CREATE_SUCCEEDED;

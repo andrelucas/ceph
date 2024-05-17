@@ -36,11 +36,50 @@ UBNSClientResult UBNSgRPCClient::add_bucket_request(const ubdb::v1::AddBucketEnt
   ::grpc::ClientContext context;
   ubdb::v1::AddBucketEntryResponse resp;
   auto status = stub_->AddBucketEntry(&context, req, &resp);
-  // XXX precise error handling.
-  if (!status.ok()) {
-    return UBNSClientResult::error(EEXIST, fmt::format(FMT_STRING("gRPC error: {}"), status.error_message()));
+  return _add_bucket_xform_result(status);
+}
+
+UBNSClientResult UBNSgRPCClient::_add_bucket_xform_result(const ::grpc::Status& status)
+{
+  if (status.ok()) {
+    return UBNSClientResult::success();
   }
-  return UBNSClientResult::success();
+  switch (status.error_code()) {
+  case ::grpc::StatusCode::INTERNAL:
+    return UBNSClientResult::error(ERR_INTERNAL_ERROR,
+        fmt::format(FMT_STRING("ERR_INTERNAL_ERROR: gRPC code INTERNAL message: {}"),
+            status.error_message()));
+
+  case ::grpc::StatusCode::DEADLINE_EXCEEDED:
+    return UBNSClientResult::error(ETIMEDOUT,
+        fmt::format(FMT_STRING("ETIMEDOUT: Terminated due to context: gRPC code DEADLINE_EXCEEDED message: {}"),
+            status.error_message()));
+
+  case ::grpc::StatusCode::INVALID_ARGUMENT:
+    return UBNSClientResult::error(EINVAL,
+        fmt::format(FMT_STRING("EINVAL: Invalid or missing parameter: gRPC code INVALID_ARGUMENT message: {}"),
+            status.error_message()));
+
+  case ::grpc::StatusCode::FAILED_PRECONDITION:
+    return UBNSClientResult::error(ERR_INTERNAL_ERROR,
+        fmt::format(FMT_STRING("ERR_INTERNAL_ERROR: Aborted due to being duplicated: gRPC code FAILED_PRECONDITION message: {}"),
+            status.error_message()));
+
+  case ::grpc::StatusCode::ALREADY_EXISTS:
+    return UBNSClientResult::error(EEXIST,
+        fmt::format(FMT_STRING("EEXIST: User already owns bucket: gRPC code ALREADY_EXISTS message: {}"),
+            status.error_message()));
+
+  case ::grpc::StatusCode::ABORTED:
+    return UBNSClientResult::error(ERR_INTERNAL_ERROR,
+        fmt::format(FMT_STRING("ERR_INTERNAL_ERROR: Another user owns the bucket: gRPC code ABORTED message: {}"),
+            status.error_message()));
+
+  default:
+    return UBNSClientResult::error(ERR_INTERNAL_ERROR,
+        fmt::format(FMT_STRING("ERR_INTERNAL_ERROR: Unexpected gRPC numeric error code {} message: {}"),
+            status.error_code(), status.error_message()));
+  }
 }
 
 UBNSClientResult UBNSgRPCClient::delete_bucket_request(const ubdb::v1::DeleteBucketEntryRequest& req)
@@ -48,11 +87,40 @@ UBNSClientResult UBNSgRPCClient::delete_bucket_request(const ubdb::v1::DeleteBuc
   ::grpc::ClientContext context;
   ubdb::v1::DeleteBucketEntryResponse resp;
   auto status = stub_->DeleteBucketEntry(&context, req, &resp);
-  // XXX precise error handling.
-  if (!status.ok()) {
-    return UBNSClientResult::error(ERR_NO_SUCH_BUCKET, fmt::format(FMT_STRING("gRPC error: {}"), status.error_message()));
+  return _delete_bucket_xform_result(status);
+}
+
+UBNSClientResult UBNSgRPCClient::_delete_bucket_xform_result(const ::grpc::Status& status)
+{
+  if (status.ok()) {
+    return UBNSClientResult::success();
   }
-  return UBNSClientResult::success();
+  switch (status.error_code()) {
+  case ::grpc::StatusCode::INTERNAL:
+    return UBNSClientResult::error(ERR_INTERNAL_ERROR,
+        fmt::format(FMT_STRING("ERR_INTERNAL_ERROR: Internal error: gRPC code INTERNAL message: {}"),
+            status.error_message()));
+
+  case ::grpc::StatusCode::DEADLINE_EXCEEDED:
+    return UBNSClientResult::error(ETIMEDOUT,
+        fmt::format(FMT_STRING("ETIMEDOUT: Terminated due to context: gRPC code DEADLINE_EXCEEDED message: {}"),
+            status.error_message()));
+
+  case ::grpc::StatusCode::INVALID_ARGUMENT:
+    return UBNSClientResult::error(EINVAL,
+        fmt::format(FMT_STRING("EINVAL: Invalid or missing parameter: gRPC code INVALID_ARGUMENT message: {}"),
+            status.error_message()));
+
+  case ::grpc::StatusCode::FAILED_PRECONDITION:
+    return UBNSClientResult::error(ERR_INTERNAL_ERROR,
+        fmt::format(FMT_STRING("ERR_INTERNAL_ERROR: Bucket is hosted on another cluster: gRPC code FAILED_PRECONDITION message: {}"),
+            status.error_message()));
+
+  default:
+    return UBNSClientResult::error(ERR_INTERNAL_ERROR,
+        fmt::format(FMT_STRING("Unexpected gRPC numeric error code {} message: {}"),
+            status.error_code(), status.error_message()));
+  }
 }
 
 UBNSClientResult UBNSgRPCClient::update_bucket_request(const ubdb::v1::UpdateBucketEntryRequest& req)
@@ -60,11 +128,45 @@ UBNSClientResult UBNSgRPCClient::update_bucket_request(const ubdb::v1::UpdateBuc
   ::grpc::ClientContext context;
   ubdb::v1::UpdateBucketEntryResponse resp;
   auto status = stub_->UpdateBucketEntry(&context, req, &resp);
-  // XXX precise error handling.
-  if (!status.ok()) {
-    return UBNSClientResult::error(ERR_INTERNAL_ERROR, fmt::format(FMT_STRING("gRPC error: {}"), status.error_message()));
+  return _update_bucket_xform_result(status);
+}
+
+UBNSClientResult UBNSgRPCClient::_update_bucket_xform_result(const ::grpc::Status& status)
+{
+  if (status.ok()) {
+    return UBNSClientResult::success();
   }
-  return UBNSClientResult::success();
+  switch (status.error_code()) {
+  case ::grpc::StatusCode::INTERNAL:
+    return UBNSClientResult::error(ERR_INTERNAL_ERROR,
+        fmt::format(FMT_STRING("ERR_INTERNAL_ERROR: Internal error: gRPC code INTERNAL message: {}"),
+            status.error_message()));
+
+  case ::grpc::StatusCode::DEADLINE_EXCEEDED:
+    return UBNSClientResult::error(ETIMEDOUT,
+        fmt::format(FMT_STRING("ETIMEDOUT: Terminated due to context: gRPC code DEADLINE_EXCEEDED message: {}"),
+            status.error_message()));
+
+  case ::grpc::StatusCode::INVALID_ARGUMENT:
+    return UBNSClientResult::error(EINVAL,
+        fmt::format(FMT_STRING("EINVAL: Invalid or missing parameter, or invalid state transition: gRPC code INVALID_ARGUMENT message: {}"),
+            status.error_message()));
+
+  case ::grpc::StatusCode::NOT_FOUND:
+    return UBNSClientResult::error(ERR_NO_SUCH_BUCKET,
+        fmt::format(FMT_STRING("ERR_NO_SUCH_BUCKET: BucketEntry not found: gRPC code NOT_FOUND message: {}"),
+            status.error_message()));
+
+  case ::grpc::StatusCode::FAILED_PRECONDITION:
+    return UBNSClientResult::error(ERR_INTERNAL_ERROR,
+        fmt::format(FMT_STRING("ERR_INTERNAL_ERROR: Bucket is hosted on another cluster, or operation aborted due to being duplicated: gRPC code FAILED_PRECONDITION message: {}"),
+            status.error_message()));
+
+  default:
+    return UBNSClientResult::error(ERR_INTERNAL_ERROR,
+        fmt::format(FMT_STRING("Unexpected gRPC code {} gRPC message: {}"),
+            status.error_code(), status.error_message()));
+  }
 }
 
 bool UBNSClientImpl::init(CephContext* cct, const std::string& grpc_uri)
