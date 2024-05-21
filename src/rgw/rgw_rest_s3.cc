@@ -6228,7 +6228,7 @@ std::shared_ptr<rgw::HandoffHelper> rgw::auth::s3::g_handoff_helper;
 
 void rgw::auth::s3::HandoffEngine::init(CephContext* const cct, rgw::sal::Driver* store)
 {
-  // This can be called more than once. Only log our present-but-disabled
+  // init() can be called more than once. Only log our present-but-disabled
   // state exactly once.
   static std::once_flag logged_presence;
   if (!cct->_conf->rgw_s3_auth_use_handoff) {
@@ -6238,7 +6238,7 @@ void rgw::auth::s3::HandoffEngine::init(CephContext* const cct, rgw::sal::Driver
     return;
   }
 
-  // This can be called more than once. Only init our HandoffHelper exactly
+  // init() can be called more than once. Only init our HandoffHelper exactly
   // once, and only set the g_handoff_helper shared_ptr once.
   static std::once_flag hhinit;
   std::call_once(hhinit, [&]() {

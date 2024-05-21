@@ -563,10 +563,25 @@ class TestAuthImpl final : public authenticator::v1::AuthenticatorService::Servi
   }
 
   // Very simple implementation of the auth service. XXX Isn't as careful with
-  // return codes as it could be, and returns no authorization-related codes.
+  // return codes as it could be, and returns no authorization-related codes
+  // for authenticated requests. For anonymous requests, will return success
+  // for bucket 'public' and failure for any other bucket.
   grpc::Status AuthenticateREST(grpc::ServerContext* context, const authenticator::v1::AuthenticateRESTRequest* request, authenticator::v1::AuthenticateRESTResponse* response) override
   {
     ldpp_dout(&dpp_, 20) << __func__ << ": enter" << dendl;
+
+    // Check for an anonymous request.
+    if (request->authorization_header().empty()) {
+      if (request->has_bucket_name() && request->bucket_name() == "public") {
+        ldpp_dout(&dpp_, 20) << __func__ << ": exit OK (ANONYMOUS)" << dendl;
+        return grpc::Status::OK;
+      }
+      ldpp_dout(&dpp_, 20) << __func__ << ": exit UNAUTHENTICATED (ANONYMOUS)"
+                           << dendl;
+      return grpc_error(grpc::StatusCode::PERMISSION_DENIED,
+                        s3err_type::S3ErrorDetails_Type_TYPE_ACCESS_DENIED, 403,
+                        "anonymous access denied");
+    }
 
     auto maybe_akid = extract_access_key_id_from_authorization_header(request->authorization_header());
     if (!maybe_akid) {
@@ -730,6 +745,46 @@ TEST_F(HandoffHelperImplGRPCTest, FailIfMissingAuthorizationHeader)
   auto res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
   ASSERT_EQ(res.code(), -EACCES);
   ASSERT_THAT(res.message(), testing::ContainsRegex("missing Authorization"));
+}
+
+TEST_F(HandoffHelperImplGRPCTest, AnonymousExpectedSuccess) {
+  server().start();
+  helper_init();
+  TestClient cio;
+
+  DEFINE_REQ_STATE;
+  s.cio = &cio;
+
+  // Set up the request so it has a method and a bucket. This will allow the
+  // test gRPC server to return success for the 'public' bucket and failure
+  // for anything else.
+  s.info.method = "GET";
+  s.relative_uri = s.decoded_uri =
+      "/public/foo/bar"; // Bucket 'public', key 'foo/bar'.
+
+  auto res = hh_.anonymous_authorize(&dpp_, &s, y_);
+  ASSERT_TRUE(res.is_ok()) << fmt::format(
+      FMT_STRING("Expected success, got: {}"), res.message());
+}
+
+TEST_F(HandoffHelperImplGRPCTest, AnonymousExpectedFail) {
+  server().start();
+  helper_init();
+  TestClient cio;
+
+  DEFINE_REQ_STATE;
+  s.cio = &cio;
+
+  // Set up the request so it has a method and a bucket. This will allow the
+  // test gRPC server to return success for the 'public' bucket and failure
+  // for anything else.
+  s.info.method = "GET";
+  s.relative_uri = s.decoded_uri =
+      "/private/foo/bar"; // Bucket 'private', key 'foo/bar'.
+
+  auto res = hh_.anonymous_authorize(&dpp_, &s, y_);
+  ASSERT_TRUE(res.is_err())
+      << fmt::format(FMT_STRING("Expected failure, got: {}"), res.message());
 }
 
 TEST_F(HandoffHelperImplGRPCTest, SignatureV2CanBeDisabled)
