@@ -232,6 +232,19 @@ public:
    * @return false Anonymous authorization is disabled.
    */
   bool anonymous_authorization_enabled() const;
+
+  /**
+   * @brief Return true if local authorization may be bypassed because we've
+   * already authorized the request.
+   *
+   * Simply calls HandoffHelperImpl::local_authorization_bypass_allowed() and
+   * returns the result.
+   *
+   * @param s The request.
+   * @return true Local authorization may be bypassed.
+   * @return false Local authorization MUST NOT be bypassed.
+   */
+  bool local_authorization_bypass_allowed(const req_state *s) const;
 };
 
 } /* namespace rgw */

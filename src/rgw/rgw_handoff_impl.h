@@ -715,6 +715,16 @@ public:
   bool anonymous_authorization_enabled() const;
 
   /**
+   * @brief Return true if local authorization may be bypassed because we've
+   * already authorized the request.
+   *
+   * @param s The request.
+   * @return true Local authorization may be bypassed.
+   * @return false Local authorization MUST NOT be bypassed.
+   */
+  bool local_authorization_bypass_allowed(const req_state *s) const;
+
+  /**
    * @brief Authenticate the transaction using the Handoff engine.
    * @param dpp Debug prefix provider. Points to the Ceph context.
    * @param session_token Unused by Handoff.

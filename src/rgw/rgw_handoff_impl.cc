@@ -531,6 +531,25 @@ bool HandoffHelperImpl::anonymous_authorization_enabled() const
   return enable_anonymous_authorization_;
 }
 
+bool HandoffHelperImpl::local_authorization_bypass_allowed(
+    const req_state *s) const {
+
+  // XXX this is a stub for now. We'll need this API shortly. Note that it
+  // will *never* be called unless Handoff is enabled.
+
+  /* XXX TODO:
+   * - Check if the request is anonymous. If so, return true iff anonymous
+   *   auth is enabled.
+   * - Otherwise check the request was authenticated by Handoff. This will
+   *   require work; at the moment there's no way to know which engine
+   *   supplied the grant.
+   */
+
+  // XXX just return the value of the configuration variable for now, no
+  // checking of the request. This is wrong!
+  return s->get_cct()->_conf->rgw_handoff_enable_local_authorization_bypass;
+}
+
 std::optional<std::string> HandoffHelperImpl::synthesize_auth_header(
     const DoutPrefixProvider* dpp,
     const req_state* s)

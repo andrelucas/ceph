@@ -992,6 +992,20 @@ options:
   flags:
   - runtime
   with_legacy: true
+- name: rgw_handoff_enable_local_authorization_bypass
+  type: bool
+  level: advanced
+  desc: Enable bypassing of local authorization checks.
+  long_desc: If enabled, assume it is safe to bypass local ACL and policy
+    checks, because the request will have been authorized by the Handoff
+    external service. NOTE If Handoff isn't in use, this parameter will be
+    ignored and local authorization will be used.
+  default: true
+  services:
+  - rgw
+  flags:
+  - runtime
+  with_legacy: true
 - name: rgw_handoff_enable_chunked_upload
   type: bool
   level: advanced
