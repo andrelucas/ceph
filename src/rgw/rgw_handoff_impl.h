@@ -802,17 +802,18 @@ public:
    * @param signature The transaction signature provided by the user.
    * @param s Pointer to the req_state.
    * @param y An optional yield token.
+   * @param is_presigned_request True if this authentication call has been
+   * synthesised from a presigned request.
    * @return HandoffAuthResult The authentication result.
    */
-  HandoffAuthResult _grpc_auth(const DoutPrefixProvider* dpp,
-      const std::string& auth,
-      const std::optional<AuthorizationParameters>& authorization_param,
-      const std::string_view& session_token,
-      const std::string_view& access_key_id,
-      const std::string_view& string_to_sign,
-      const std::string_view& signature,
-      const req_state* const s,
-      optional_yield y);
+  HandoffAuthResult
+  _grpc_auth(const DoutPrefixProvider *dpp, const std::string &auth,
+             const std::optional<AuthorizationParameters> &authorization_param,
+             const std::string_view &session_token,
+             const std::string_view &access_key_id,
+             const std::string_view &string_to_sign,
+             const std::string_view &signature, const req_state *const s,
+             optional_yield y, bool is_presigned_request);
 
   /**
    * @brief Authorize an anonymous request.

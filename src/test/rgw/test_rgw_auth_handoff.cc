@@ -570,6 +570,13 @@ class TestAuthImpl final : public authenticator::v1::AuthenticatorService::Servi
   {
     ldpp_dout(&dpp_, 20) << __func__ << ": enter" << dendl;
 
+    // Just a debug note.
+    if (request->skip_timestamp_validation() == true) {
+      ldpp_dout(&dpp_, 1) << __func__
+                          << ": NOTE: skip_timestamp_validation is set"
+                          << dendl;
+    }
+
     // Check for an anonymous request.
     if (request->authorization_header().empty()) {
       if (request->has_bucket_name() && request->bucket_name() == "public") {

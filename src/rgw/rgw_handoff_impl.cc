@@ -756,6 +756,7 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
   // Retrieve the Authorization header if present. Otherwise, attempt to
   // synthesize one from the provided query parameters.
   std::string auth;
+  bool is_presigned_request = false;
   auto srch = envmap.find("HTTP_AUTHORIZATION");
   if (srch != envmap.end()) {
     auth = srch->second;
@@ -780,6 +781,9 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
         return HandoffAuthResult(-EACCES, "Presigned URL expiry check failed");
       }
     }
+    // This flag is needed by _grpc_auth() so we can properly set the
+    // skip_timestamp_validation flag in the request.
+    is_presigned_request = true;
   }
 
   // We might have disabled V2 signatures.
@@ -832,7 +836,9 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
   }
 
   // Perform the gRPC-specific parts of the auth* call.
-  auto result = _grpc_auth(dpp, auth, authorization_param, session_token, access_key_id, string_to_sign, signature, s, y);
+  auto result =
+      _grpc_auth(dpp, auth, authorization_param, session_token, access_key_id,
+                 string_to_sign, signature, s, y, is_presigned_request);
 
   if (result.is_err()) {
     return result;
@@ -854,16 +860,14 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
   }
 };
 
-HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp_in,
-    const std::string& auth,
-    const std::optional<AuthorizationParameters>& authorization_param,
-    [[maybe_unused]] const std::string_view& session_token,
-    const std::string_view& access_key_id,
-    const std::string_view& string_to_sign,
-    const std::string_view& signature,
-    [[maybe_unused]] const req_state* const s,
-    [[maybe_unused]] optional_yield y)
-{
+HandoffAuthResult HandoffHelperImpl::_grpc_auth(
+    const DoutPrefixProvider *dpp_in, const std::string &auth,
+    const std::optional<AuthorizationParameters> &authorization_param,
+    [[maybe_unused]] const std::string_view &session_token,
+    const std::string_view &access_key_id,
+    const std::string_view &string_to_sign, const std::string_view &signature,
+    [[maybe_unused]] const req_state *const s,
+    [[maybe_unused]] optional_yield y, bool is_presigned_request) {
   HandoffDoutPrefixPipe hdpp(*dpp_in, "grpc_auth");
   auto dpp = &hdpp;
 
@@ -873,6 +877,13 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp_in
   req.set_transaction_id(s->trans_id);
   req.set_string_to_sign(std::string { string_to_sign });
   req.set_authorization_header(auth);
+  // If we synthesised the Authorization header, we need to set this flag so
+  // that the Authenticator doesn't re-check the times. This is a special
+  // request from the Authenticator team. Note that this isn't a security
+  // problem, as RGW will have already checked the expiry time!
+  if (is_presigned_request) {
+    req.set_skip_timestamp_validation(true);
+  }
 
   // If we got authorization parameters, fill them in.
   if (authorization_param) {
@@ -971,7 +982,8 @@ HandoffAuthResult HandoffHelperImpl::anonymous_authorize(const DoutPrefixProvide
   }
 
   // Perform the gRPC-specific parts of the auth* call.
-  auto result = _grpc_auth(dpp, "", authorization_param, "", "", "", "", s, y);
+  auto result =
+      _grpc_auth(dpp, "", authorization_param, "", "", "", "", s, y, false);
 
   return result;
 };
