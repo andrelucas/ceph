@@ -26,7 +26,6 @@
 #include "common/async/yield_context.h"
 #include "common/ceph_argparse.h"
 #include "common/ceph_context.h"
-#include "common/ceph_json.h"
 #include "common/dout.h"
 #include "common/strtol.h"
 #include "global/global_context.h"
@@ -45,6 +44,7 @@
 #include "rgw/rgw_sal.h"
 #include "rgw_auth_registry.h"
 
+#include "rgw_rest_s3.h"
 #include "test_rgw_grpc_util.h"
 
 // These are 'standard' protobufs for the 'Richer error model'
@@ -226,8 +226,6 @@ static HandoffV4SigningKeyData sk_pass[] = {
 /* #region SupportCode */
 
 namespace ba = boost::algorithm;
-
-#define SSL_CHAR_CAST(x) reinterpret_cast<const unsigned char*>(x)
 
 // Wrap the rigmarole of hashing a buffer with OpenSSL.
 static std::optional<std::vector<uint8_t>> _hash_by(const std::vector<uint8_t>& key, const std::string& input, const std::string& hash_type)
@@ -462,68 +460,6 @@ static std::optional<std::string> verify_aws_signature(std::string string_to_sig
   }
 }
 
-// Stand in for the standard verify callout, which calls the authenticator
-// using HTTP. Here, we'll unpack the request and call the signature
-// implementation ourselves, package a JSON response and return it in the
-// provided bufferlist.
-//
-// As the real function, we return our result struct appropriately filled, and
-// on success we put the reply markup for the caller in the bufferlist.
-static rgw::HandoffHTTPVerifyResult http_verify_by_func(const DoutPrefixProvider* dpp, const std::string& request_json, ceph::bufferlist* resp_bl, [[maybe_unused]] optional_yield y)
-{
-
-  JSONParser parser;
-  if (!parser.parse(request_json.c_str(), request_json.size())) {
-    std::cerr << "Unable to parse request JSON" << std::endl;
-    return rgw::HandoffHTTPVerifyResult(-EACCES, 401);
-  }
-
-  std::string string_to_sign_base64;
-  std::string access_key_id;
-  std::string authorization;
-  try {
-    JSONDecoder::decode_json("stringToSign", string_to_sign_base64, &parser, true);
-    JSONDecoder::decode_json("accessKeyId", access_key_id, &parser, true);
-    JSONDecoder::decode_json("authorization", authorization, &parser, true);
-
-  } catch (const JSONDecoder::err& err) {
-    std::cerr << "request parse error: " << err.what() << std::endl;
-    return rgw::HandoffHTTPVerifyResult(-EACCES, 401);
-  }
-
-  std::string string_to_sign = rgw::from_base64(string_to_sign_base64);
-
-  auto info = info_for_credential(access_key_id);
-  if (!info) {
-    return rgw::HandoffHTTPVerifyResult(-EACCES, 404);
-  }
-  auto secret = (*info).secret;
-  // std::cerr << fmt::format(FMT_STRING("verify_by_func(): string_to_sign='{}' access_key_id='{}' secret_key='{}' authorization='{}'"), string_to_sign, access_key_id, secret, authorization) << std::endl;
-
-  auto gen_signature = verify_aws_signature(string_to_sign, secret, authorization);
-  std::string message;
-  if (gen_signature.has_value()) {
-    message = "OK";
-  } else {
-    return rgw::HandoffHTTPVerifyResult(-EACCES, 401);
-  }
-
-  // We only need to create the response body if we're about to return
-  // success.
-
-  JSONFormatter jf { true };
-  jf.open_object_section(""); // root
-  encode_json("message", message, &jf);
-  encode_json("uid", (*info).userid, &jf);
-  jf.close_section(); // root
-  std::ostringstream oss;
-  jf.flush(oss);
-
-  resp_bl->append(oss.str());
-
-  return rgw::HandoffHTTPVerifyResult(0, 200);
-}
-
 // Minimal client for req_state.
 class TestClient : public rgw::io::BasicClient {
   RGWEnv env;
@@ -592,114 +528,6 @@ TEST(HandoffHelper, Init)
   ASSERT_EQ(hh.init(g_ceph_context, nullptr), 0);
 }
 
-/* #region HandoffHelperImplHTTP tests */
-
-/**
- * @brief HTTP-mode HandoffHelperImpl end-to-end test fixture.
- *
- * Not using a parameterised test for HTTP and gRPC because I anticipate
- * removing the HTTP mode at some point, and it will be a pain to unpick.
- * Plus, the test harnesses for HTTP and gRPC are quite different.
- */
-class HandoffHelperImplHTTPTest : public ::testing::Test {
-protected:
-  void SetUp() override
-  {
-    dpp.get_cct()->_conf.set_val_or_die("rgw_handoff_enable_grpc", "false");
-    dpp.get_cct()->_conf.apply_changes(nullptr);
-    ASSERT_EQ(dpp.get_cct()->_conf->rgw_handoff_enable_grpc, false);
-    ASSERT_EQ(hh.init(g_ceph_context, nullptr), 0);
-  }
-
-  HandoffHelperImpl hh { http_verify_by_func };
-  optional_yield y = null_yield;
-  DoutPrefix dpp { g_ceph_context, ceph_subsys_rgw, "unittest " };
-};
-
-// Fail properly when the Authorization header is absent and one can't be
-// synthesized.
-TEST_F(HandoffHelperImplHTTPTest, FailIfMissingAuthorizationHeader)
-{
-  TestClient cio;
-
-  auto t = sigpass_tests[0];
-  DEFINE_REQ_STATE;
-  s.cio = &cio;
-  auto string_to_sign = rgw::from_base64(t.ss_base64);
-  auto res = hh.auth(&dpp, "", t.access_key, string_to_sign, t.signature, &s, y);
-  ASSERT_EQ(res.code(), -EACCES);
-  ASSERT_THAT(res.message(), testing::ContainsRegex("missing Authorization"));
-}
-
-TEST_F(HandoffHelperImplHTTPTest, SignatureV2CanBeDisabled)
-{
-  // // XXX I can't get the configuration observer to work in the harness.
-  // // Luckily there are methods on the helperimpl that I can call directly.
-
-  auto t = v2_sample;
-
-  TestClient cio;
-  // Set headers in the cio's env, not rgw_env (below).
-  cio.get_env().set("HTTP_AUTHORIZATION", t.authorization);
-  ldpp_dout(&dpp, 20) << fmt::format(FMT_STRING("Auth: {}"), t.authorization) << dendl;
-
-  DEFINE_REQ_STATE;
-  s.cio = &cio;
-  auto string_to_sign = rgw::from_base64(t.ss_base64);
-  // This is what the config observer would call.
-  hh.set_signature_v2(dpp.get_cct(), true);
-  auto res = hh.auth(&dpp, "", t.access_key, string_to_sign, t.signature, &s, y);
-  ASSERT_TRUE(res.is_ok());
-
-  // dpp.get_cct()->_conf->rgw_handoff_enable_signature_v2 = false;
-  // dpp.get_cct()->_conf.apply_changes(nullptr);
-  hh.set_signature_v2(dpp.get_cct(), false);
-  res = hh.auth(&dpp, "", t.access_key, string_to_sign, t.signature, &s, y);
-  ASSERT_TRUE(res.is_err());
-
-  // dpp.get_cct()->_conf->rgw_handoff_enable_signature_v2 = true;
-  // dpp.get_cct()->_conf.apply_changes(nullptr);
-  hh.set_signature_v2(dpp.get_cct(), true);
-  res = hh.auth(&dpp, "", t.access_key, string_to_sign, t.signature, &s, y);
-  ASSERT_TRUE(res.is_ok());
-}
-
-// Test working signatures with the verify_by_func handler above.
-TEST_F(HandoffHelperImplHTTPTest, HeaderHappyPath)
-{
-  for (const auto& t : sigpass_tests) {
-    TestClient cio;
-    // Set headers in the cio's env, not rgw_env (below).
-    cio.get_env().set("HTTP_AUTHORIZATION", t.authorization);
-    ldpp_dout(&dpp, 20) << fmt::format(FMT_STRING("Auth: {}"), t.authorization) << dendl;
-
-    DEFINE_REQ_STATE;
-    s.cio = &cio;
-    auto string_to_sign = rgw::from_base64(t.ss_base64);
-    auto res = hh.auth(&dpp, "", t.access_key, string_to_sign, t.signature, &s, y);
-    ASSERT_TRUE(res.is_ok()) << "should pass test '" << t.name << "'";
-  }
-}
-
-// Test deliberately broken signatures with the verify_by_func handler above.
-TEST_F(HandoffHelperImplHTTPTest, HeaderExpectBadSignature)
-{
-  for (const auto& t : sigfail_tests) {
-    TestClient cio;
-    // Set headers in the cio's env, not rgw_env (below).
-    cio.get_env().set("HTTP_AUTHORIZATION", t.authorization);
-    ldpp_dout(&dpp, 20) << fmt::format(FMT_STRING("Auth: {}"), t.authorization) << dendl;
-
-    DEFINE_REQ_STATE;
-    s.cio = &cio;
-    auto string_to_sign = rgw::from_base64(t.ss_base64);
-    auto res = hh.auth(&dpp, "", t.access_key, string_to_sign, t.signature, &s, y);
-    ASSERT_FALSE(res.is_ok()) << "should fail test '" << t.name << "'";
-  }
-}
-
-/* #endregion HandoffHelperImplHTTP tests */
-
 /* #region HandoffHelperImplGRPC tests */
 
 class TestAuthImpl final : public authenticator::v1::AuthenticatorService::Service {
@@ -735,10 +563,32 @@ class TestAuthImpl final : public authenticator::v1::AuthenticatorService::Servi
   }
 
   // Very simple implementation of the auth service. XXX Isn't as careful with
-  // return codes as it could be, and returns no authorization-related codes.
+  // return codes as it could be, and returns no authorization-related codes
+  // for authenticated requests. For anonymous requests, will return success
+  // for bucket 'public' and failure for any other bucket.
   grpc::Status AuthenticateREST(grpc::ServerContext* context, const authenticator::v1::AuthenticateRESTRequest* request, authenticator::v1::AuthenticateRESTResponse* response) override
   {
     ldpp_dout(&dpp_, 20) << __func__ << ": enter" << dendl;
+
+    // Just a debug note.
+    if (request->skip_timestamp_validation() == true) {
+      ldpp_dout(&dpp_, 1) << __func__
+                          << ": NOTE: skip_timestamp_validation is set"
+                          << dendl;
+    }
+
+    // Check for an anonymous request.
+    if (request->authorization_header().empty()) {
+      if (request->has_bucket_name() && request->bucket_name() == "public") {
+        ldpp_dout(&dpp_, 20) << __func__ << ": exit OK (ANONYMOUS)" << dendl;
+        return grpc::Status::OK;
+      }
+      ldpp_dout(&dpp_, 20) << __func__ << ": exit UNAUTHENTICATED (ANONYMOUS)"
+                           << dendl;
+      return grpc_error(grpc::StatusCode::PERMISSION_DENIED,
+                        s3err_type::S3ErrorDetails_Type_TYPE_ACCESS_DENIED, 403,
+                        "anonymous access denied");
+    }
 
     auto maybe_akid = extract_access_key_id_from_authorization_header(request->authorization_header());
     if (!maybe_akid) {
@@ -760,7 +610,7 @@ class TestAuthImpl final : public authenticator::v1::AuthenticatorService::Servi
       ldpp_dout(&dpp_, 20) << __func__ << ": exit SIGNATURE MISMATCH" << dendl;
       return grpc_error(grpc::StatusCode::UNAUTHENTICATED, s3err_type::S3ErrorDetails_Type_TYPE_SIGNATURE_DOES_NOT_MATCH, 403, "signature mismatch");
     }
-    response->set_user_id(info->userid);
+    response->set_canonical_user_id(info->userid);
     ldpp_dout(&dpp_, 20) << __func__ << ": exit OK" << dendl;
     return grpc::Status::OK;
   }
@@ -902,6 +752,46 @@ TEST_F(HandoffHelperImplGRPCTest, FailIfMissingAuthorizationHeader)
   auto res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
   ASSERT_EQ(res.code(), -EACCES);
   ASSERT_THAT(res.message(), testing::ContainsRegex("missing Authorization"));
+}
+
+TEST_F(HandoffHelperImplGRPCTest, AnonymousExpectedSuccess) {
+  server().start();
+  helper_init();
+  TestClient cio;
+
+  DEFINE_REQ_STATE;
+  s.cio = &cio;
+
+  // Set up the request so it has a method and a bucket. This will allow the
+  // test gRPC server to return success for the 'public' bucket and failure
+  // for anything else.
+  s.info.method = "GET";
+  s.relative_uri = s.decoded_uri =
+      "/public/foo/bar"; // Bucket 'public', key 'foo/bar'.
+
+  auto res = hh_.anonymous_authorize(&dpp_, &s, y_);
+  ASSERT_TRUE(res.is_ok()) << fmt::format(
+      FMT_STRING("Expected success, got: {}"), res.message());
+}
+
+TEST_F(HandoffHelperImplGRPCTest, AnonymousExpectedFail) {
+  server().start();
+  helper_init();
+  TestClient cio;
+
+  DEFINE_REQ_STATE;
+  s.cio = &cio;
+
+  // Set up the request so it has a method and a bucket. This will allow the
+  // test gRPC server to return success for the 'public' bucket and failure
+  // for anything else.
+  s.info.method = "GET";
+  s.relative_uri = s.decoded_uri =
+      "/private/foo/bar"; // Bucket 'private', key 'foo/bar'.
+
+  auto res = hh_.anonymous_authorize(&dpp_, &s, y_);
+  ASSERT_TRUE(res.is_err())
+      << fmt::format(FMT_STRING("Expected failure, got: {}"), res.message());
 }
 
 TEST_F(HandoffHelperImplGRPCTest, SignatureV2CanBeDisabled)
@@ -1129,13 +1019,8 @@ protected:
     ASSERT_EQ(hh.init(g_ceph_context, nullptr), 0);
   }
 
-  static rgw::HandoffHTTPVerifyResult verify_throw(const DoutPrefixProvider* dpp, const std::string& request_json, ceph::bufferlist* resp_bl, [[maybe_unused]] optional_yield y)
-  {
-    throw new std::runtime_error("Should not get here");
-  }
-
   bool grpc_enabled;
-  HandoffHelperImpl hh { verify_throw };
+  HandoffHelperImpl hh;
   optional_yield y = null_yield;
   DoutPrefix dpp { g_ceph_context, ceph_subsys_rgw, "unittest " };
 };
@@ -1202,6 +1087,7 @@ public:
   void set_channel_args(CephContext* const cct, const grpc::ChannelArguments& args) { channel_args_set_ = true; }
   void set_channel_uri(CephContext* const cct, const std::string& uri) { channel_uri_ = uri; }
   void set_signature_v2(CephContext* const cct, bool enable) { signature_v2_ = enable; }
+  void set_anonymous_authorization(CephContext* const cct, bool enable) { anonymous_authorization_ = enable; }
   void set_chunked_upload_mode(CephContext* const cct, bool enable) { chunked_upload_ = enable; }
   void set_authorization_mode(CephContext* const cct, AuthParamMode mode) { authparam_mode_ = mode; }
 
@@ -1212,6 +1098,7 @@ public:
   bool chunked_upload_;
   bool channel_args_set_ = false;
   std::string channel_uri_;
+  bool anonymous_authorization_;
 };
 
 /**
@@ -1267,6 +1154,23 @@ TEST_F(TestHandoffConfigObserver, ChunkedUploadMode)
   conf->rgw_handoff_enable_chunked_upload = false;
   hh_.observer_.handle_conf_change(conf, changed);
   EXPECT_EQ(hh_.chunked_upload_, false);
+}
+
+TEST_F(TestHandoffConfigObserver, AnonymousAuthorizationMode)
+{
+  // Parameters we'll 'change'.
+  std::set<std::string> changed { "rgw_handoff_enable_anonymous_authorization" };
+
+  auto cct = dpp_.get_cct();
+  auto conf = cct->_conf;
+
+  conf->rgw_handoff_enable_anonymous_authorization = true;
+  hh_.observer_.handle_conf_change(conf, changed);
+  EXPECT_EQ(hh_.anonymous_authorization_, true);
+
+  conf->rgw_handoff_enable_anonymous_authorization = false;
+  hh_.observer_.handle_conf_change(conf, changed);
+  EXPECT_EQ(hh_.anonymous_authorization_, false);
 }
 
 // Test that the config change propagates to the helper. We're not parsing the
