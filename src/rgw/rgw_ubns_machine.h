@@ -19,6 +19,7 @@
 
 #include "common/dout.h"
 #include "rgw_ubns.h"
+#include <rgw_common.h>
 
 namespace rgw {
 
@@ -102,6 +103,7 @@ public:
     CREATE_START,
     CREATE_RPC_SUCCEEDED,
     CREATE_RPC_FAILED,
+    CREATE_RPC_SOFT_FAILURE,
     UPDATE_START,
     UPDATE_RPC_SUCCEEDED,
     UPDATE_RPC_FAILED,
@@ -124,6 +126,8 @@ public:
       return "CREATE_RPC_SUCCEEDED";
     case CreateMachineState::CREATE_RPC_FAILED:
       return "CREATE_FAILED";
+    case CreateMachineState::CREATE_RPC_SOFT_FAILURE:
+      return "CREATE_RPC_SOFT_FAILURE";
     case CreateMachineState::UPDATE_START:
       return "UPDATE_START";
     case CreateMachineState::UPDATE_RPC_SUCCEEDED:
@@ -191,6 +195,11 @@ public:
    */
   ~UBNSCreateStateMachine()
   {
+    if (state_ == CreateMachineState::CREATE_RPC_SOFT_FAILURE) {
+      // In the idempotent-repeated-create case, just mark the machine as
+      // complete so there's no ambiguity in the logs.
+      (void)set_state(CreateMachineState::COMPLETE);
+    }
     if (state_ == CreateMachineState::CREATE_RPC_SUCCEEDED) {
       ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: Rolling back bucket creation for {}"), machine_id, bucket_log_id_) << dendl;
       // Start the rollback. Ignore the result.
@@ -273,6 +282,17 @@ public:
         state_ = CreateMachineState::CREATE_RPC_SUCCEEDED;
         ldpp_dout(dpp_, 5) << fmt::format(FMT_STRING("{}: add_bucket_entry() rpc for {} succeeded"), machine_id, bucket_log_id_) << dendl;
         return true;
+
+      } else if (result.code() == ERR_UBNS_BUCKET_ALREADY_OWNED_BY_YOU) {
+        // This is a special case. The bucket is already owned by the user, so
+        // we can just move on to the next state.
+        // Note: This won't match S3 - S3 apparently returns 409 here, whereas
+        // if we let RGW continue to create a bucket that already exists, it
+        // will return 200 OK.
+        state_ = CreateMachineState::CREATE_RPC_SOFT_FAILURE;
+        ldpp_dout(dpp_, 5) << fmt::format(FMT_STRING("{}: add_bucket_entry() rpc for {} returned {} '{}', setting state CREATE_RPC_SOFT_FAILURE"), machine_id, bucket_log_id_, result.code(), result.message()) << dendl;
+        return true;
+
       } else {
         ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: add_bucket_entry() rpc for {} failed: {}"), machine_id, bucket_log_id_, result.to_string()) << dendl;
         state_ = CreateMachineState::CREATE_RPC_FAILED;
@@ -287,7 +307,17 @@ public:
     case CreateMachineState::CREATE_RPC_FAILED:
       break;
 
+    case CreateMachineState::CREATE_RPC_SOFT_FAILURE:
+      break;
+
     case CreateMachineState::UPDATE_START:
+      if (state_ == CreateMachineState::CREATE_RPC_SOFT_FAILURE) {
+        // The Create RPC failed with the 'bucket already owned by user'
+        // error, so we don't need the update - the bucket is already here.
+        ldpp_dout(dpp_, 5) << fmt::format(FMT_STRING("{}: skipping update_bucket_entry() rpc for {} in CREATE_RPC_SOFT_FAILURE state"), machine_id, bucket_log_id_) << dendl;
+        state_ = CreateMachineState::COMPLETE;
+        return true;
+      }
       if (state_ != CreateMachineState::CREATE_RPC_SUCCEEDED && state_ != CreateMachineState::UPDATE_RPC_FAILED) {
         break;
       }
@@ -335,7 +365,7 @@ public:
       break;
 
     case CreateMachineState::COMPLETE:
-      if (state_ != CreateMachineState::UPDATE_RPC_SUCCEEDED) {
+      if (state_ != CreateMachineState::UPDATE_RPC_SUCCEEDED && state_ != CreateMachineState::CREATE_RPC_SOFT_FAILURE) {
         break;
       }
       state_ = CreateMachineState::COMPLETE;

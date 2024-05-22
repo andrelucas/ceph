@@ -56,23 +56,23 @@ UBNSClientResult UBNSgRPCClient::_add_bucket_xform_result(const ::grpc::Status& 
             status.error_message()));
 
   case ::grpc::StatusCode::INVALID_ARGUMENT:
-    return UBNSClientResult::error(EINVAL,
-        fmt::format(FMT_STRING("EINVAL: Invalid or missing parameter: gRPC code INVALID_ARGUMENT message: {}"),
+    return UBNSClientResult::error(ERR_UBNS_INVALID_OR_MISSING_PARAMETER,
+        fmt::format(FMT_STRING("ERR_UBNS_INVALID_OR_MISSING_PARAMETER: Invalid or missing parameter: gRPC code INVALID_ARGUMENT message: {}"),
             status.error_message()));
 
   case ::grpc::StatusCode::FAILED_PRECONDITION:
-    return UBNSClientResult::error(ERR_INTERNAL_ERROR,
-        fmt::format(FMT_STRING("ERR_INTERNAL_ERROR: Aborted due to being duplicated: gRPC code FAILED_PRECONDITION message: {}"),
+    return UBNSClientResult::error(ERR_SERVICE_UNAVAILABLE,
+        fmt::format(FMT_STRING("ERR_SERVICE_UNAVAILABLE: Aborted due to being duplicated: gRPC code FAILED_PRECONDITION message: {}"),
             status.error_message()));
 
   case ::grpc::StatusCode::ALREADY_EXISTS:
-    return UBNSClientResult::error(EEXIST,
-        fmt::format(FMT_STRING("EEXIST: User already owns bucket: gRPC code ALREADY_EXISTS message: {}"),
+    return UBNSClientResult::error(ERR_UBNS_BUCKET_ALREADY_OWNED_BY_YOU,
+        fmt::format(FMT_STRING("ERR_UBNS_BUCKET_ALREADY_OWNED_BY_YOU: User already owns bucket: gRPC code ALREADY_EXISTS message: {}"),
             status.error_message()));
 
   case ::grpc::StatusCode::ABORTED:
-    return UBNSClientResult::error(ERR_INTERNAL_ERROR,
-        fmt::format(FMT_STRING("ERR_INTERNAL_ERROR: Another user owns the bucket: gRPC code ABORTED message: {}"),
+    return UBNSClientResult::error(EEXIST,
+        fmt::format(FMT_STRING("EEXIST: Another user owns the bucket: gRPC code ABORTED message: {}"),
             status.error_message()));
 
   default:
@@ -93,6 +93,7 @@ UBNSClientResult UBNSgRPCClient::delete_bucket_request(const ubdb::v1::DeleteBuc
 UBNSClientResult UBNSgRPCClient::_delete_bucket_xform_result(const ::grpc::Status& status)
 {
   if (status.ok()) {
+    // XXX document says '204 NoContent'.
     return UBNSClientResult::success();
   }
   switch (status.error_code()) {
@@ -107,13 +108,13 @@ UBNSClientResult UBNSgRPCClient::_delete_bucket_xform_result(const ::grpc::Statu
             status.error_message()));
 
   case ::grpc::StatusCode::INVALID_ARGUMENT:
-    return UBNSClientResult::error(EINVAL,
-        fmt::format(FMT_STRING("EINVAL: Invalid or missing parameter: gRPC code INVALID_ARGUMENT message: {}"),
+    return UBNSClientResult::error(ERR_UBNS_BAD_REQUEST,
+        fmt::format(FMT_STRING("ERR_UBNS_BAD_REQUEST: Invalid or missing parameter: gRPC code INVALID_ARGUMENT message: {}"),
             status.error_message()));
 
   case ::grpc::StatusCode::FAILED_PRECONDITION:
-    return UBNSClientResult::error(ERR_INTERNAL_ERROR,
-        fmt::format(FMT_STRING("ERR_INTERNAL_ERROR: Bucket is hosted on another cluster: gRPC code FAILED_PRECONDITION message: {}"),
+    return UBNSClientResult::error(ERR_SERVICE_UNAVAILABLE,
+        fmt::format(FMT_STRING("ERR_SERVICE_UNAVAILABLE: Bucket is hosted on another cluster: gRPC code FAILED_PRECONDITION message: {}"),
             status.error_message()));
 
   default:
@@ -148,9 +149,16 @@ UBNSClientResult UBNSgRPCClient::_update_bucket_xform_result(const ::grpc::Statu
             status.error_message()));
 
   case ::grpc::StatusCode::INVALID_ARGUMENT:
-    return UBNSClientResult::error(EINVAL,
-        fmt::format(FMT_STRING("EINVAL: Invalid or missing parameter, or invalid state transition: gRPC code INVALID_ARGUMENT message: {}"),
-            status.error_message()));
+    // ubns/internal/ubdb/grpc/grpc.go lines 301, 358.
+    if (status.error_message().find("invalid state") != std::string::npos || status.error_message().find("failed to delete deployment from bucketentry") != std::string::npos) {
+      return UBNSClientResult::error(ERR_SERVICE_UNAVAILABLE,
+          fmt::format(FMT_STRING("ERR_SERVICE_UNAVAILABLE: Invalid state: gRPC code INVALID_ARGUMENT message: {}"),
+              status.error_message()));
+    } else {
+      return UBNSClientResult::error(ERR_UBNS_BAD_REQUEST,
+          fmt::format(FMT_STRING("ERR_UBNS_BAD_REQUEST: Invalid or missing parameter: gRPC code INVALID_ARGUMENT message: {}"),
+              status.error_message()));
+    }
 
   case ::grpc::StatusCode::NOT_FOUND:
     return UBNSClientResult::error(ERR_NO_SUCH_BUCKET,
@@ -158,9 +166,16 @@ UBNSClientResult UBNSgRPCClient::_update_bucket_xform_result(const ::grpc::Statu
             status.error_message()));
 
   case ::grpc::StatusCode::FAILED_PRECONDITION:
-    return UBNSClientResult::error(ERR_INTERNAL_ERROR,
-        fmt::format(FMT_STRING("ERR_INTERNAL_ERROR: Bucket is hosted on another cluster, or operation aborted due to being duplicated: gRPC code FAILED_PRECONDITION message: {}"),
-            status.error_message()));
+    // ubns/internal/ubdb/grpc/grpc.go line 348
+    if (status.error_message().find("failed to delete deployment from bucketentry") != std::string::npos) {
+      return UBNSClientResult::error(ERR_SERVICE_UNAVAILABLE,
+          fmt::format(FMT_STRING("ERR_SERVICE_UNAVAILABLE: Bucket is hosted on another cluster: gRPC code FAILED_PRECONDITION message: {}"),
+              status.error_message()));
+    } else {
+      return UBNSClientResult::error(ERR_SERVICE_UNAVAILABLE,
+          fmt::format(FMT_STRING("ERR_SERVICE_UNAVAILABLE: bucketentry exists in multiple Ceph clusters: gRPC code FAILED_PRECONDITION message: {}"),
+              status.error_message()));
+    }
 
   default:
     return UBNSClientResult::error(ERR_INTERNAL_ERROR,
