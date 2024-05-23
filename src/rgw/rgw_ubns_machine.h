@@ -199,8 +199,7 @@ public:
       // In the idempotent-repeated-create case, just mark the machine as
       // complete so there's no ambiguity in the logs.
       (void)set_state(CreateMachineState::COMPLETE);
-    }
-    if (state_ == CreateMachineState::CREATE_RPC_SUCCEEDED) {
+    } else if (state_ == CreateMachineState::CREATE_RPC_SUCCEEDED) {
       ldpp_dout(dpp_, 1) << fmt::format(FMT_STRING("{}: Rolling back bucket creation for {}"), machine_id, bucket_log_id_) << dendl;
       // Start the rollback. Ignore the result.
       (void)set_state(CreateMachineState::ROLLBACK_CREATE_START);
