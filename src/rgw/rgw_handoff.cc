@@ -28,16 +28,9 @@
 #include <cstring>
 #include <fmt/format.h>
 #include <iostream>
-#include <optional>
-#include <string>
 #include <string_view>
 
-#include <time.h>
-
-#include "include/ceph_assert.h"
-
 #include "common/dout.h"
-#include "rgw/rgw_http_client_curl.h"
 
 #define dout_subsys ceph_subsys_rgw
 
@@ -80,5 +73,22 @@ HandoffAuthResult HandoffHelper::auth(const DoutPrefixProvider* dpp,
 {
   return impl_->auth(dpp, session_token, access_key_id, string_to_sign, signature, s, y);
 };
+
+HandoffAuthResult HandoffHelper::anonymous_authorize(const DoutPrefixProvider* dpp,
+    const req_state* const s,
+    optional_yield y)
+{
+  return impl_->anonymous_authorize(dpp, s, y);
+};
+
+bool HandoffHelper::anonymous_authorization_enabled() const
+{
+  return impl_->anonymous_authorization_enabled();
+};
+
+bool HandoffHelper::local_authorization_bypass_allowed(
+    const req_state *s) const {
+  return impl_->local_authorization_bypass_allowed(s);
+}
 
 } /* namespace rgw */
