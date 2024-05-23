@@ -113,8 +113,8 @@ UBNSClientResult UBNSgRPCClient::_delete_bucket_xform_result(const ::grpc::Statu
             status.error_message()));
 
   case ::grpc::StatusCode::FAILED_PRECONDITION:
-    return UBNSClientResult::error(ERR_SERVICE_UNAVAILABLE,
-        fmt::format(FMT_STRING("ERR_SERVICE_UNAVAILABLE: Bucket is hosted on another cluster: gRPC code FAILED_PRECONDITION message: {}"),
+    return UBNSClientResult::error(ERR_NOT_FOUND,
+        fmt::format(FMT_STRING("ERR_NOT_FOUND: Bucket is hosted on another cluster: gRPC code FAILED_PRECONDITION message: {}"),
             status.error_message()));
 
   default:
