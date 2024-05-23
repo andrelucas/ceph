@@ -46,13 +46,33 @@ namespace rgw {
  * if the creation process fails, then the machine manages the sequencing of
  * the calls and any rollback.
  *
+ * (One slight wrinkle is the need to support 'idempotent recreate'. If the
+ * user attempts to recreate a bucket that they already own, that attempt
+ * should appear succeed without error. This doesn't mean we don't have to
+ * handle this as a special case though - we don't want to go through the
+ * two-stage commit for buckets in this instance, we just want RGW processing
+ * to continue as normal. RGW will detect that the bucket already exists and
+ * return an OK response. We, however, don't want to sent our Update message
+ * under any circumstances, as it will fail. To achieve this, we set a special
+ * 'soft failure' state that tells the machine to skip the Update RPC. This
+ * works whether we call set_state() manually as part of normal processing, or
+ * whether we call set_state() automatically in the destructor.
+ *
+ * It's necessary to have the state machine understand the idempotent create
+ * case because it's conceivable that an idempotent create request would
+ * actually end up creating the bucket on a particular RGW. Perhaps there was
+ * an error in a previous create, or we're doing some consolidation. In any
+ * case, we need the create to succeed, and for the user to get a useful
+ * return code.)
+ *
  * 'User accessible' states are marked with asterisks in the diagrams below.
  * Other states are not user accessible, and an attempt to set them will
  * assert.
  *
  * This is the happy path:
  * ```
- * INIT -> *CREATE_START* -> ( CREATE_RPC_SUCCEEDED | CREATE_RPC_FAILED )
+ * INIT -> *CREATE_START* ->
+     ( CREATE_RPC_SUCCEEDED | CREATE_RPC_FAILED | CREATE_RPC_SOFT_FAILURE)
  *
  * CREATE_RPC_SUCCEEDED -> *UPDATE_START* ->
  *   ( UPDATE_RPC_SUCCEEDED | UPDATE_RPC_FAILED )
@@ -62,9 +82,23 @@ namespace rgw {
  * (EXIT SUCCESS)
  * ```
  *
- * If the Create RPC fails, perhaps because the bucket already exists, we go
- * to CREATE_RPC_FAILED and return a failure to the caller. This would
- * typically exit RGWCreateBucket::execute() with an error opcode.
+ * For the 'idempotent recreate' case, if we get AlreadyExists from gRPC,
+ * meaning the same user already owns this bucket, then we go to
+ * CREATE_RPC_SOFT_FAILURE, and update processing is skipped - we go directly
+ * to COMPLETE.
+ *
+ * ```
+ * INIT -> *CREATE_START* -> CREATE_RPC_SOFT_FAILURE
+ *
+ * CREATE_RPC_SOFT_FAILURE -> *UPDATE_START* -> COMPLETE
+ *
+ * (EXIT SUCCESS)
+ * ```
+ *
+ * In the 'normal error' case (i.e. non-idempotent recreate), if the Create
+ * RPC fails, perhaps because the bucket already exists, we go to
+ * CREATE_RPC_FAILED and return a failure to the caller. This would typically
+ * exit RGWCreateBucket::execute() with an error opcode.
  *
  * ```
  * ... -> CREATE_RPC_FAILED
