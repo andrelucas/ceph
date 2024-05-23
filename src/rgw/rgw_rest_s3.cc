@@ -10,6 +10,7 @@
 #include "common/Formatter.h"
 #include "common/ceph_crypto.h"
 #include "common/ceph_json.h"
+#include "common/dout.h"
 #include "common/errno.h"
 #include "common/safe_io.h"
 #include "common/split.h"
@@ -6633,9 +6634,16 @@ rgw::auth::s3::S3AnonymousEngine::authenticate(const DoutPrefixProvider* dpp, co
   } else {
 
     if (s->handoff_helper && s->handoff_helper->anonymous_authorization_enabled()) {
-      auto result = s->handoff_helper->anonymous_authorize(dpp, s, y);
-      if (!result.is_ok()) {
-        return result_t::deny(result.code());
+      try {
+        auto result = s->handoff_helper->anonymous_authorize(dpp, s, y);
+        if (!result.is_ok()) {
+          return result_t::deny(-result.code());
+        }
+      } catch (std::exception &e) {
+        ldpp_dout(dpp, 0)
+            << "ERROR: Handoff anonymous authorization failed with exception: "
+            << e.what() << dendl;
+        return result_t::deny(-EPERM);
       }
     }
 
