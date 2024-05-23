@@ -56,8 +56,8 @@ UBNSClientResult UBNSgRPCClient::_add_bucket_xform_result(const ::grpc::Status& 
             status.error_message()));
 
   case ::grpc::StatusCode::INVALID_ARGUMENT:
-    return UBNSClientResult::error(ERR_UBNS_INVALID_OR_MISSING_PARAMETER,
-        fmt::format(FMT_STRING("ERR_UBNS_INVALID_OR_MISSING_PARAMETER: Invalid or missing parameter: gRPC code INVALID_ARGUMENT message: {}"),
+    return UBNSClientResult::error(ERR_UBNS_BAD_REQUEST,
+        fmt::format(FMT_STRING("ERR_UBNS_BAD_REQUEST: Invalid or missing parameter: gRPC code INVALID_ARGUMENT message: {}"),
             status.error_message()));
 
   case ::grpc::StatusCode::FAILED_PRECONDITION:
@@ -66,6 +66,13 @@ UBNSClientResult UBNSgRPCClient::_add_bucket_xform_result(const ::grpc::Status& 
             status.error_message()));
 
   case ::grpc::StatusCode::ALREADY_EXISTS:
+    // Note: The backend docs say this should return 200 (OK), but we can't do
+    // that here. RGW /will/ return the 200, but the UBNSCreateStateMachine
+    // needs to know the difference between an idempotent recreate and a
+    // first-time create. When it receives this error code, it knows to set
+    // the state 'SOFT_FAIL' which allows the RGW create process to continue,
+    // but prevents the state machine from sending Update messages.
+    //
     return UBNSClientResult::error(ERR_UBNS_BUCKET_ALREADY_OWNED_BY_YOU,
         fmt::format(FMT_STRING("ERR_UBNS_BUCKET_ALREADY_OWNED_BY_YOU: User already owns bucket: gRPC code ALREADY_EXISTS message: {}"),
             status.error_message()));
@@ -93,7 +100,9 @@ UBNSClientResult UBNSgRPCClient::delete_bucket_request(const ubdb::v1::DeleteBuc
 UBNSClientResult UBNSgRPCClient::_delete_bucket_xform_result(const ::grpc::Status& status)
 {
   if (status.ok()) {
-    // XXX document says '204 NoContent'.
+    // The document says '204 NoContent', but we're relying on RGW to supply
+    // the return code to a success result. The user will get what RGW decides
+    // to send.
     return UBNSClientResult::success();
   }
   switch (status.error_code()) {
@@ -161,15 +170,15 @@ UBNSClientResult UBNSgRPCClient::_update_bucket_xform_result(const ::grpc::Statu
     }
 
   case ::grpc::StatusCode::NOT_FOUND:
-    return UBNSClientResult::error(ERR_NO_SUCH_BUCKET,
-        fmt::format(FMT_STRING("ERR_NO_SUCH_BUCKET: BucketEntry not found: gRPC code NOT_FOUND message: {}"),
+    return UBNSClientResult::error(ERR_NOT_FOUND,
+        fmt::format(FMT_STRING("ERR_NOT_FOUND: BucketEntry not found: gRPC code NOT_FOUND message: {}"),
             status.error_message()));
 
   case ::grpc::StatusCode::FAILED_PRECONDITION:
     // ubns/internal/ubdb/grpc/grpc.go line 348
     if (status.error_message().find("failed to delete deployment from bucketentry") != std::string::npos) {
-      return UBNSClientResult::error(ERR_SERVICE_UNAVAILABLE,
-          fmt::format(FMT_STRING("ERR_SERVICE_UNAVAILABLE: Bucket is hosted on another cluster: gRPC code FAILED_PRECONDITION message: {}"),
+      return UBNSClientResult::error(ERR_NOT_FOUND,
+          fmt::format(FMT_STRING("ERR_NOT_FOUND: Bucket is hosted on another cluster: gRPC code FAILED_PRECONDITION message: {}"),
               status.error_message()));
     } else {
       return UBNSClientResult::error(ERR_SERVICE_UNAVAILABLE,
