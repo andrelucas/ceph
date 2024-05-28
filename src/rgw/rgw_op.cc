@@ -3198,7 +3198,12 @@ void RGWCreateBucket::execute(optional_yield y)
       }
       return;
     }
-    // creater state is CREATE_RPC_SUCCEEDED.
+    // creater state is CREATE_RPC_SUCCEEDED or CREATE_RPC_SOFT_FAILURE.
+    if (ubns_creater->state() == rgw::UBNSCreateMachine::CreateMachineState::CREATE_RPC_SOFT_FAILURE) {
+      ldpp_dout(this, 1) << "UBNS state CREATE_RPC_SOFT_FAILURE: stop RGWCreateBucket::execute() and return success code" << dendl;
+      op_ret = 0; // Success.
+      return;
+    }
   }
 
   if (!relaxed_region_enforcement &&
