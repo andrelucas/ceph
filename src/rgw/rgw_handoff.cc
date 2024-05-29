@@ -34,6 +34,9 @@
 
 #define dout_subsys ceph_subsys_rgw
 
+#pragma clang diagnostic error "-Wsign-conversion"
+#pragma GCC diagnostic error "-Wsign-conversion"
+
 namespace rgw {
 
 std::ostream& operator<<(std::ostream& os, const HandoffAuthResult& r)

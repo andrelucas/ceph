@@ -55,6 +55,9 @@
 // obj-endpoint.
 #include "authenticator/v1/authenticator.grpc.pb.h"
 
+#pragma clang diagnostic error "-Wsign-conversion"
+#pragma GCC diagnostic error "-Wsign-conversion"
+
 /*
  * Tools tests.
  */
@@ -241,7 +244,7 @@ static std::optional<std::vector<uint8_t>> _hash_by(const std::vector<uint8_t>& 
     std::cerr << "HMAC update failed" << std::endl;
     return std::nullopt;
   }
-  std::vector<uint8_t> hash(EVP_MD_size(md));
+  std::vector<uint8_t> hash(static_cast<size_t>(EVP_MD_size(md)));
   size_t hsiz = hash.size();
   if (!EVP_DigestSignFinal(ctx, hash.data(), &hsiz) || static_cast<int>(hsiz) != EVP_MD_size(md)) {
     std::cerr << "HMAC final failed" << std::endl;
@@ -750,7 +753,7 @@ TEST_F(HandoffHelperImplGRPCTest, FailIfMissingAuthorizationHeader)
   s.cio = &cio;
   auto string_to_sign = rgw::from_base64(t.ss_base64);
   auto res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
-  ASSERT_EQ(res.code(), -EACCES);
+  ASSERT_EQ(res.code(), EACCES);
   ASSERT_THAT(res.message(), testing::ContainsRegex("missing Authorization"));
 }
 
@@ -902,7 +905,7 @@ TEST_F(HandoffHelperImplGRPCTest, ChannelRecoversFromDeadAtStartup)
   auto string_to_sign = rgw::from_base64(t.ss_base64);
   auto res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
   ASSERT_FALSE(res.is_ok()) << "should fail";
-  ASSERT_EQ(res.code(), -EACCES) << "should return -EACCES";
+  ASSERT_EQ(res.code(), EACCES) << "should return EACCES";
   ASSERT_EQ(res.err_type(), HandoffAuthResult::error_type::TRANSPORT_ERROR) << "should return TRANSPORT_ERROR";
 
   server().start();
