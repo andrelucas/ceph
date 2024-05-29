@@ -6323,10 +6323,11 @@ rgw::auth::s3::HandoffEngine::authenticate(
       signature,
       s, y);
   if (auth_result.is_err()) {
-    // HandoffHelper::auth() returns positive error codes, which for gRPC have
-    // already been washed through
+    // HandoffHelper::auth() error codes have been washed through
     // AuthServiceClient::_translate_authenticator_error_code() to turn them
-    // into RGW-recognised error codes.
+    // into RGW-recognisable error codes.
+    // HandoffAuthResult.code() returns an unsigned int, but the calling API
+    // demands a negative return code.
     return result_t::deny(-auth_result.code());
   }
 
@@ -6637,6 +6638,8 @@ rgw::auth::s3::S3AnonymousEngine::authenticate(const DoutPrefixProvider* dpp, co
       try {
         auto result = s->handoff_helper->anonymous_authorize(dpp, s, y);
         if (!result.is_ok()) {
+          // HandoffAuthResult() returns an unsigned int. The calling API
+          // demands a negative result.
           return result_t::deny(-result.code());
         }
       } catch (std::exception &e) {

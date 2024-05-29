@@ -61,6 +61,9 @@
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rgw
 
+#pragma clang diagnostic error "-Wsign-conversion"
+#pragma GCC diagnostic error "-Wsign-conversion"
+
 namespace ba = boost::algorithm;
 
 namespace rgw {
@@ -247,11 +250,16 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req)
     // There are no error details, so there can't be an S3ErrorDetails
     // message, so we assume this is related to the RPC itself, not the
     // authentication. This gets a TRANSPORT_ERROR.
-    return HandoffAuthResult(-EACCES, status.error_message(), HandoffAuthResult::error_type::TRANSPORT_ERROR);
+    return HandoffAuthResult(EACCES, status.error_message(),
+                             HandoffAuthResult::error_type::TRANSPORT_ERROR);
   }
   ::google::rpc::Status s;
   if (!s.ParseFromString(error_details)) {
-    return HandoffAuthResult(-EACCES, "failed to deserialize gRPC error_details, error message follows: " + status.error_message(), HandoffAuthResult::error_type::INTERNAL_ERROR);
+    return HandoffAuthResult(
+        EACCES,
+        "failed to deserialize gRPC error_details, error message follows: " +
+            status.error_message(),
+        HandoffAuthResult::error_type::INTERNAL_ERROR);
   }
   // Loop through the detail field (repeated Any) and look for our
   // S3ErrorDetails message.
@@ -265,7 +273,10 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req)
   // the RPC itself, not the authentication, and that in some future version
   // of gRPC the transport errors use the Richer error model. (Stranger things
   // have happened.) This gets a TRANSPORT_ERROR, as above.
-  return HandoffAuthResult(-EACCES, "S3ErrorDetails not found, error message follows: " + status.error_message(), HandoffAuthResult::error_type::TRANSPORT_ERROR);
+  return HandoffAuthResult(EACCES,
+                           "S3ErrorDetails not found, error message follows: " +
+                               status.error_message(),
+                           HandoffAuthResult::error_type::TRANSPORT_ERROR);
 }
 
 AuthServiceClient::GetSigningKeyResult
@@ -286,22 +297,29 @@ AuthServiceClient::GetSigningKey(const GetSigningKeyRequest req)
 
 using err_type = ::authenticator::v1::S3ErrorDetails_Type;
 
-static std::map<err_type, int> auth_map = {
-  { err_type::S3ErrorDetails_Type_TYPE_ACCESS_DENIED, EACCES },
-  { err_type::S3ErrorDetails_Type_TYPE_AUTHORIZATION_HEADER_MALFORMED, ERR_INVALID_REQUEST },
-  { err_type::S3ErrorDetails_Type_TYPE_EXPIRED_TOKEN, EACCES },
-  { err_type::S3ErrorDetails_Type_TYPE_INTERNAL_ERROR, ERR_INTERNAL_ERROR },
-  { err_type::S3ErrorDetails_Type_TYPE_INVALID_ACCESS_KEY_ID, ERR_INVALID_ACCESS_KEY },
-  { err_type::S3ErrorDetails_Type_TYPE_INVALID_REQUEST, EINVAL },
-  { err_type::S3ErrorDetails_Type_TYPE_INVALID_SECURITY, EINVAL },
-  { err_type::S3ErrorDetails_Type_TYPE_INVALID_TOKEN, ERR_INVALID_IDENTITY_TOKEN },
-  { err_type::S3ErrorDetails_Type_TYPE_INVALID_URI, ERR_INVALID_REQUEST },
-  { err_type::S3ErrorDetails_Type_TYPE_METHOD_NOT_ALLOWED, ERR_METHOD_NOT_ALLOWED },
-  { err_type::S3ErrorDetails_Type_TYPE_MISSING_SECURITY_HEADER, ERR_INVALID_REQUEST },
-  { err_type::S3ErrorDetails_Type_TYPE_REQUEST_TIME_TOO_SKEWED, ERR_REQUEST_TIME_SKEWED },
-  { err_type::S3ErrorDetails_Type_TYPE_SIGNATURE_DOES_NOT_MATCH, ERR_SIGNATURE_NO_MATCH },
-  { err_type::S3ErrorDetails_Type_TYPE_TOKEN_REFRESH_REQUIRED, ERR_INVALID_REQUEST }
-};
+static std::map<err_type, unsigned int> auth_map = {
+    {err_type::S3ErrorDetails_Type_TYPE_ACCESS_DENIED, EACCES},
+    {err_type::S3ErrorDetails_Type_TYPE_AUTHORIZATION_HEADER_MALFORMED,
+     ERR_INVALID_REQUEST},
+    {err_type::S3ErrorDetails_Type_TYPE_EXPIRED_TOKEN, EACCES},
+    {err_type::S3ErrorDetails_Type_TYPE_INTERNAL_ERROR, ERR_INTERNAL_ERROR},
+    {err_type::S3ErrorDetails_Type_TYPE_INVALID_ACCESS_KEY_ID,
+     ERR_INVALID_ACCESS_KEY},
+    {err_type::S3ErrorDetails_Type_TYPE_INVALID_REQUEST, EINVAL},
+    {err_type::S3ErrorDetails_Type_TYPE_INVALID_SECURITY, EINVAL},
+    {err_type::S3ErrorDetails_Type_TYPE_INVALID_TOKEN,
+     ERR_INVALID_IDENTITY_TOKEN},
+    {err_type::S3ErrorDetails_Type_TYPE_INVALID_URI, ERR_INVALID_REQUEST},
+    {err_type::S3ErrorDetails_Type_TYPE_METHOD_NOT_ALLOWED,
+     ERR_METHOD_NOT_ALLOWED},
+    {err_type::S3ErrorDetails_Type_TYPE_MISSING_SECURITY_HEADER,
+     ERR_INVALID_REQUEST},
+    {err_type::S3ErrorDetails_Type_TYPE_REQUEST_TIME_TOO_SKEWED,
+     ERR_REQUEST_TIME_SKEWED},
+    {err_type::S3ErrorDetails_Type_TYPE_SIGNATURE_DOES_NOT_MATCH,
+     ERR_SIGNATURE_NO_MATCH},
+    {err_type::S3ErrorDetails_Type_TYPE_TOKEN_REFRESH_REQUIRED,
+     ERR_INVALID_REQUEST}};
 
 HandoffAuthResult AuthServiceClient::_translate_authenticator_error_code(
     ::authenticator::v1::S3ErrorDetails_Type auth_type,
@@ -770,7 +788,8 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
       ldpp_dout(dpp, 20) << "Synthesized Authorization=" << auth << dendl;
     } else {
       ldpp_dout(dpp, 0) << "Missing Authorization header and insufficient query parameters" << dendl;
-      return HandoffAuthResult(-EACCES, "Internal error (missing Authorization and insufficient query parameters)");
+      return HandoffAuthResult(EACCES, "Internal error (missing Authorization "
+                                       "and insufficient query parameters)");
     }
     if (presigned_expiry_check_) {
       // Belt-and-braces: Check the expiry time. Note that RGW won't (in
@@ -778,7 +797,7 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
       // expiry time early. Let's not assume things.
       if (!valid_presigned_time(dpp, s, time(nullptr))) {
         ldpp_dout(dpp, 0) << "Presigned URL expiry check failed" << dendl;
-        return HandoffAuthResult(-EACCES, "Presigned URL expiry check failed");
+        return HandoffAuthResult(EACCES, "Presigned URL expiry check failed");
       }
     }
     // This flag is needed by _grpc_auth() so we can properly set the
@@ -790,7 +809,8 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
   if (!enable_signature_v2_) {
     if (ba::starts_with(auth, "AWS ")) {
       ldpp_dout(dpp, 0) << "V2 signatures are disabled, returning failure" << dendl;
-      return HandoffAuthResult(-EACCES, "Access denied (V2 signatures disabled)");
+      return HandoffAuthResult(EACCES,
+                               "Access denied (V2 signatures disabled)");
     }
   }
 
@@ -832,7 +852,7 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
 
   if (is_chunked && !enable_chunked_upload_) {
     ldpp_dout(dpp, 5) << "chunked upload disabled - rejecting request" << dendl;
-    return HandoffAuthResult(-EACCES, "chunked upload is disabled");
+    return HandoffAuthResult(EACCES, "chunked upload is disabled");
   }
 
   // Perform the gRPC-specific parts of the auth* call.
@@ -852,7 +872,7 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
       ldpp_dout(dpp, 0) << "failed to fetch signing key for chunked upload"
                         << dendl;
       return HandoffAuthResult(
-          -EACCES, "failed to fetch signing key for chunked upload");
+          EACCES, "failed to fetch signing key for chunked upload");
     }
     result.set_signing_key(*sk);
     ldpp_dout(dpp, 10) << "chunked upload signing key saved" << dendl;
@@ -920,7 +940,7 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(
     // Quick confidence check of channel_.
     if (!channel_) {
       ldpp_dout(dpp, 0) << "Unset gRPC channel" << dendl;
-      return HandoffAuthResult(-EACCES, "Internal error (gRPC channel not set)");
+      return HandoffAuthResult(EACCES, "Internal error (gRPC channel not set)");
     }
     client.set_stub(channel_);
   }

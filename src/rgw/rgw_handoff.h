@@ -92,16 +92,15 @@ public:
    * @param err_type The error type enum, which will help give better error
    * log messages.
    */
-  HandoffAuthResult(int errorcode, const std::string& message, error_type err_type = error_type::AUTH_ERROR)
-      : errorcode_ { errorcode }
-      , message_ { message }
-      , is_err_ { true }
-      , err_type_ { err_type } {};
+  HandoffAuthResult(unsigned int errorcode, const std::string &message,
+                    error_type err_type = error_type::AUTH_ERROR)
+      : errorcode_{errorcode}, message_{message}, is_err_{true},
+        err_type_{err_type} {};
 
   bool is_err() const noexcept { return is_err_; }
   bool is_ok() const noexcept { return !is_err_; }
   error_type err_type() const noexcept { return err_type_; }
-  int code() const noexcept { return errorcode_; }
+  unsigned int code() const noexcept { return errorcode_; }
   std::string message() const noexcept { return message_; }
   /**
    * @brief Return the signing key, if any.
@@ -149,7 +148,7 @@ public:
 private:
   std::string userid_ = "";
   std::optional<std::vector<uint8_t>> signing_key_;
-  int errorcode_ = 0;
+  unsigned int errorcode_ = 0;
   std::string message_ = "";
   bool is_err_ = false;
   error_type err_type_ = error_type::NO_ERROR;
