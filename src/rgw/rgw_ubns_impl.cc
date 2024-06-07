@@ -203,6 +203,7 @@ bool UBNSClientImpl::init(CephContext* cct, const std::string& grpc_uri)
   config_obs_.init(cct);
 
   cluster_id_ = conf->rgw_ubns_cluster_id;
+  admin_api_enabled_ = conf->rgw_ubns_admin_api_enabled;
 
   // Empty grpc_uri (the default) means use the configuration value.
   auto uri = grpc_uri.empty() ? conf->rgw_ubns_grpc_uri : grpc_uri;
@@ -214,6 +215,7 @@ bool UBNSClientImpl::init(CephContext* cct, const std::string& grpc_uri)
     lderr(cct) << "UBNS: failed to create initial gRPC channel" << dendl;
     return false;
   }
+
   return true;
 }
 
@@ -310,6 +312,15 @@ grpc::ChannelArguments UBNSClientImpl::get_default_channel_args(CephContext* con
                  << dendl;
 
   return grpc::ChannelArguments();
+}
+
+// This is in the implementation rather than the header so that dout_subsys is
+// defined. Without that, ldout() won't compile. (Don't set dout_subsys in the
+// include file.)
+void UBNSClientImpl::set_admin_api_enabled(CephContext* const cct, bool enabled)
+{
+  admin_api_enabled_ = enabled;
+  ldout(cct, 1) << fmt::format(FMT_STRING("UBNS: admin API {}"), (enabled ? "enabled" : "disabled")) << dendl;
 }
 
 bool UBNSClientImpl::_set_insecure_channel(CephContext* const cct, const std::string& new_uri)

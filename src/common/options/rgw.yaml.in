@@ -3535,3 +3535,14 @@ options:
   services:
   - rgw
   with_legacy: true
+- name: rgw_ubns_admin_api_enabled
+  type: bool
+  level: advanced
+  desc: Enable UBNS support in the admin REST API. Currently this is limited
+    to the implementation of remove_bucket().
+  default: false
+  flags:
+  - runtime
+  services:
+  - rgw
+  with_legacy: true

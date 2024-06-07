@@ -270,6 +270,18 @@ public:
    * has not been called).
    */
   std::string cluster_id() const;
+
+  /**
+   * @brief Return whether or not the admin API should have UBNS applied.
+   *
+   * In order to preserve your sanity, test this value once per ::execute() method
+   * and cache the result. Don't evaluate it multiple times within
+   * ::execute(), as the value may change at any time.
+   *
+   * @return true the admin API should be augmented.
+   * @return false the admin API should not be augmented.
+   */
+  bool admin_api_enabled() const;
 };
 
 /**

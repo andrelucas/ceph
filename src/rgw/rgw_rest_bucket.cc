@@ -240,7 +240,10 @@ void RGWOp_Bucket_Remove::execute(optional_yield y)
   // later to decide whether or not UBNS is active.
   std::optional<rgw::UBNSDeleteMachine> ubns_deleter(std::nullopt);
 
-  if (s->ubns_client) {
+  // Check if the ubns_client is non-null, *and* if the admin API is enabled.
+  // If either is false, ubns_deleter will be std::nullopt and all other UBNS
+  // implementation will be disabled.
+  if (s->ubns_client && s->ubns_client->admin_api_enabled()) {
     // Fetch the user ID from the bucket. UBNS requires us to pass a matching
     // owner, and there's no guarantee that the user requesting bucket
     // deletion is the owner of the bucket.
@@ -272,6 +275,7 @@ void RGWOp_Bucket_Remove::execute(optional_yield y)
   }
 
   op_ret = bucket->remove_bucket(s, delete_children, true, &s->info, s->yield);
+
   // UBNS: Previously this function simply ended here. Now, we have to check
   // for op_ret < 0 (=> error) and return, so the UBNS cleanup can act
   // appropriately.

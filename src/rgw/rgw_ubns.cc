@@ -77,6 +77,11 @@ std::string UBNSClient::cluster_id() const
   return impl_->cluster_id();
 }
 
+bool UBNSClient::admin_api_enabled() const
+{
+  return impl_->admin_api_enabled();
+}
+
 std::string UBNSClientResult::to_string() const
 {
   if (ok()) {

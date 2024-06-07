@@ -163,6 +163,7 @@ public:
  * - get_default_channel_args(CephContext* cct) -> grpc::ChannelArguments
  * - set_channel_args(CephContext* cct, grpc::ChannelArguments args) -> void
  * - set_channel(CephContext* cct, const std::string& uri) -> void
+ * - set_admin_api_enabled(CephContext* cct, bool enabled) -> void
  *
  * @tparam T A class implementing the functionality of the above-listed
  * methods. Typically UBNSClientImpl.
@@ -211,6 +212,7 @@ public:
       "rgw_ubns_grpc_arg_max_reconnect_backoff_ms",
       "rgw_ubns_grpc_arg_min_reconnect_backoff_ms",
       "rgw_ubns_grpc_uri",
+      "rgw_ubns_admin_api_enabled",
       nullptr
     };
     return keys;
@@ -227,6 +229,9 @@ public:
     // The gRPC channel change needs to come after the arguments setting, if any.
     if (changed.count("rgw_ubns_grpc_uri")) {
       impl_.set_channel(cct_, conf->rgw_ubns_grpc_uri);
+    }
+    if (changed.count("rgw_ubns_admin_api_enabled")) {
+      impl_.set_admin_api_enabled(cct_, conf->rgw_ubns_admin_api_enabled);
     }
   }
 
@@ -263,6 +268,7 @@ private:
   std::optional<grpc::ChannelArguments> channel_args_;
   std::string channel_uri_;
   bool mtls_enabled_ = true; // Set only during init().
+  bool admin_api_enabled_ = true;
 
 public:
   using chan_lock_t = std::shared_mutex;
@@ -410,6 +416,25 @@ public:
   {
     std::unique_lock l { m_channel_ };
     channel_args_ = std::make_optional(args);
+  }
+
+  /**
+   * @brief Set whether or not the admin API should have UBNS applied.
+   *
+   * This is intended to be set by the configuration observer.
+   *
+   * @param enabled Set true to enable UBNS on the admin API, otherwise false.
+   */
+  void set_admin_api_enabled(CephContext* const cct, bool enabled);
+  /**
+   * @brief Return whether or not the admin API should have UBNS applied.
+   *
+   * @return true the admin API should be augmented.
+   * @return false the admin API should not be augmented.
+   */
+  bool admin_api_enabled() const
+  {
+    return admin_api_enabled_;
   }
 
 private:

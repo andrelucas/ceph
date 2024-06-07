@@ -450,12 +450,14 @@ public:
   }
   void set_channel_args(CephContext* const cct, const grpc::ChannelArguments& args) { channel_args_set_ = true; }
   void set_channel(CephContext* const cct, const std::string& uri) { channel_uri_ = uri; }
+  void set_admin_api_enabled(CephContext* const cct, bool enabled) { admin_api_enabled_ = enabled; }
 
 public:
   UBNSConfigObserver<MockHelperForConfigObserver> observer_;
   bool chunked_upload_;
   bool channel_args_set_ = false;
   std::string channel_uri_;
+  bool admin_api_enabled_ = false;
 };
 
 /**
@@ -527,6 +529,27 @@ TEST_F(UBNSConfigObserverTest, GRPCURI)
   conf->rgw_ubns_grpc_uri = "foo";
   uci_.observer_.handle_conf_change(conf, changed);
   ASSERT_EQ(uci_.channel_uri_, "foo");
+}
+
+TEST_F(UBNSConfigObserverTest, AdminApi)
+{
+  // Parameters we'll 'change'.
+  std::set<std::string> changed { "rgw_ubns_admin_api_enabled" };
+
+  auto cct = dpp_.get_cct();
+  auto conf = cct->_conf;
+
+  conf->rgw_ubns_admin_api_enabled = true;
+  uci_.observer_.handle_conf_change(conf, changed);
+  ASSERT_EQ(uci_.admin_api_enabled_, true);
+
+  conf->rgw_ubns_admin_api_enabled = false;
+  uci_.observer_.handle_conf_change(conf, changed);
+  ASSERT_EQ(uci_.admin_api_enabled_, false);
+
+  conf->rgw_ubns_admin_api_enabled = true;
+  uci_.observer_.handle_conf_change(conf, changed);
+  ASSERT_EQ(uci_.admin_api_enabled_, true);
 }
 
 /*******************************************************************************
