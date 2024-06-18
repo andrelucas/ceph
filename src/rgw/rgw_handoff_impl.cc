@@ -61,6 +61,9 @@
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rgw
 
+#pragma clang diagnostic error "-Wsign-conversion"
+#pragma GCC diagnostic error "-Wsign-conversion"
+
 namespace ba = boost::algorithm;
 
 namespace rgw {
@@ -237,7 +240,7 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req)
   using namespace authenticator::v1;
 
   if (status.ok()) {
-    return HandoffAuthResult(resp.user_id(), status.error_message());
+    return HandoffAuthResult(resp.canonical_user_id(), status.error_message());
   }
   // Error conditions are returned via the Richer error model
   // (https://grpc.io/docs/guides/error/). Create a google::rpc::Status
@@ -247,11 +250,16 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req)
     // There are no error details, so there can't be an S3ErrorDetails
     // message, so we assume this is related to the RPC itself, not the
     // authentication. This gets a TRANSPORT_ERROR.
-    return HandoffAuthResult(-EACCES, status.error_message(), HandoffAuthResult::error_type::TRANSPORT_ERROR);
+    return HandoffAuthResult(EACCES, status.error_message(),
+                             HandoffAuthResult::error_type::TRANSPORT_ERROR);
   }
   ::google::rpc::Status s;
   if (!s.ParseFromString(error_details)) {
-    return HandoffAuthResult(-EACCES, "failed to deserialize gRPC error_details, error message follows: " + status.error_message(), HandoffAuthResult::error_type::INTERNAL_ERROR);
+    return HandoffAuthResult(
+        EACCES,
+        "failed to deserialize gRPC error_details, error message follows: " +
+            status.error_message(),
+        HandoffAuthResult::error_type::INTERNAL_ERROR);
   }
   // Loop through the detail field (repeated Any) and look for our
   // S3ErrorDetails message.
@@ -265,7 +273,10 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req)
   // the RPC itself, not the authentication, and that in some future version
   // of gRPC the transport errors use the Richer error model. (Stranger things
   // have happened.) This gets a TRANSPORT_ERROR, as above.
-  return HandoffAuthResult(-EACCES, "S3ErrorDetails not found, error message follows: " + status.error_message(), HandoffAuthResult::error_type::TRANSPORT_ERROR);
+  return HandoffAuthResult(EACCES,
+                           "S3ErrorDetails not found, error message follows: " +
+                               status.error_message(),
+                           HandoffAuthResult::error_type::TRANSPORT_ERROR);
 }
 
 AuthServiceClient::GetSigningKeyResult
@@ -286,22 +297,29 @@ AuthServiceClient::GetSigningKey(const GetSigningKeyRequest req)
 
 using err_type = ::authenticator::v1::S3ErrorDetails_Type;
 
-static std::map<err_type, int> auth_map = {
-  { err_type::S3ErrorDetails_Type_TYPE_ACCESS_DENIED, EACCES },
-  { err_type::S3ErrorDetails_Type_TYPE_AUTHORIZATION_HEADER_MALFORMED, ERR_INVALID_REQUEST },
-  { err_type::S3ErrorDetails_Type_TYPE_EXPIRED_TOKEN, EACCES },
-  { err_type::S3ErrorDetails_Type_TYPE_INTERNAL_ERROR, ERR_INTERNAL_ERROR },
-  { err_type::S3ErrorDetails_Type_TYPE_INVALID_ACCESS_KEY_ID, ERR_INVALID_ACCESS_KEY },
-  { err_type::S3ErrorDetails_Type_TYPE_INVALID_REQUEST, EINVAL },
-  { err_type::S3ErrorDetails_Type_TYPE_INVALID_SECURITY, EINVAL },
-  { err_type::S3ErrorDetails_Type_TYPE_INVALID_TOKEN, ERR_INVALID_IDENTITY_TOKEN },
-  { err_type::S3ErrorDetails_Type_TYPE_INVALID_URI, ERR_INVALID_REQUEST },
-  { err_type::S3ErrorDetails_Type_TYPE_METHOD_NOT_ALLOWED, ERR_METHOD_NOT_ALLOWED },
-  { err_type::S3ErrorDetails_Type_TYPE_MISSING_SECURITY_HEADER, ERR_INVALID_REQUEST },
-  { err_type::S3ErrorDetails_Type_TYPE_REQUEST_TIME_TOO_SKEWED, ERR_REQUEST_TIME_SKEWED },
-  { err_type::S3ErrorDetails_Type_TYPE_SIGNATURE_DOES_NOT_MATCH, ERR_SIGNATURE_NO_MATCH },
-  { err_type::S3ErrorDetails_Type_TYPE_TOKEN_REFRESH_REQUIRED, ERR_INVALID_REQUEST }
-};
+static std::map<err_type, unsigned int> auth_map = {
+    {err_type::S3ErrorDetails_Type_TYPE_ACCESS_DENIED, EACCES},
+    {err_type::S3ErrorDetails_Type_TYPE_AUTHORIZATION_HEADER_MALFORMED,
+     ERR_INVALID_REQUEST},
+    {err_type::S3ErrorDetails_Type_TYPE_EXPIRED_TOKEN, EACCES},
+    {err_type::S3ErrorDetails_Type_TYPE_INTERNAL_ERROR, ERR_INTERNAL_ERROR},
+    {err_type::S3ErrorDetails_Type_TYPE_INVALID_ACCESS_KEY_ID,
+     ERR_INVALID_ACCESS_KEY},
+    {err_type::S3ErrorDetails_Type_TYPE_INVALID_REQUEST, EINVAL},
+    {err_type::S3ErrorDetails_Type_TYPE_INVALID_SECURITY, EINVAL},
+    {err_type::S3ErrorDetails_Type_TYPE_INVALID_TOKEN,
+     ERR_INVALID_IDENTITY_TOKEN},
+    {err_type::S3ErrorDetails_Type_TYPE_INVALID_URI, ERR_INVALID_REQUEST},
+    {err_type::S3ErrorDetails_Type_TYPE_METHOD_NOT_ALLOWED,
+     ERR_METHOD_NOT_ALLOWED},
+    {err_type::S3ErrorDetails_Type_TYPE_MISSING_SECURITY_HEADER,
+     ERR_INVALID_REQUEST},
+    {err_type::S3ErrorDetails_Type_TYPE_REQUEST_TIME_TOO_SKEWED,
+     ERR_REQUEST_TIME_SKEWED},
+    {err_type::S3ErrorDetails_Type_TYPE_SIGNATURE_DOES_NOT_MATCH,
+     ERR_SIGNATURE_NO_MATCH},
+    {err_type::S3ErrorDetails_Type_TYPE_TOKEN_REFRESH_REQUIRED,
+     ERR_INVALID_REQUEST}};
 
 HandoffAuthResult AuthServiceClient::_translate_authenticator_error_code(
     ::authenticator::v1::S3ErrorDetails_Type auth_type,
@@ -518,6 +536,38 @@ void HandoffHelperImpl::set_chunked_upload_mode(CephContext* const cct, bool ena
   enable_chunked_upload_ = enabled;
 }
 
+void HandoffHelperImpl::set_anonymous_authorization(CephContext* const cct, bool enabled)
+{
+  ldout(cct, 1) << fmt::format(FMT_STRING("HandoffHelperImpl::set_anonymous_authorization({})"), (enabled ? "true" : "false")) << dendl;
+  std::unique_lock<std::shared_mutex> g(m_config_);
+  enable_anonymous_authorization_ = enabled;
+}
+
+bool HandoffHelperImpl::anonymous_authorization_enabled() const
+{
+  std::shared_lock<std::shared_mutex> g(m_config_);
+  return enable_anonymous_authorization_;
+}
+
+bool HandoffHelperImpl::local_authorization_bypass_allowed(
+    const req_state *s) const {
+
+  // XXX this is a stub for now. We'll need this API shortly. Note that it
+  // will *never* be called unless Handoff is enabled.
+
+  /* XXX TODO:
+   * - Check if the request is anonymous. If so, return true iff anonymous
+   *   auth is enabled.
+   * - Otherwise check the request was authenticated by Handoff. This will
+   *   require work; at the moment there's no way to know which engine
+   *   supplied the grant.
+   */
+
+  // XXX just return the value of the configuration variable for now, no
+  // checking of the request. This is wrong!
+  return s->get_cct()->_conf->rgw_handoff_enable_local_authorization_bypass;
+}
+
 std::optional<std::string> HandoffHelperImpl::synthesize_auth_header(
     const DoutPrefixProvider* dpp,
     const req_state* s)
@@ -724,6 +774,7 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
   // Retrieve the Authorization header if present. Otherwise, attempt to
   // synthesize one from the provided query parameters.
   std::string auth;
+  bool is_presigned_request = false;
   auto srch = envmap.find("HTTP_AUTHORIZATION");
   if (srch != envmap.end()) {
     auth = srch->second;
@@ -737,7 +788,8 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
       ldpp_dout(dpp, 20) << "Synthesized Authorization=" << auth << dendl;
     } else {
       ldpp_dout(dpp, 0) << "Missing Authorization header and insufficient query parameters" << dendl;
-      return HandoffAuthResult(-EACCES, "Internal error (missing Authorization and insufficient query parameters)");
+      return HandoffAuthResult(EACCES, "Internal error (missing Authorization "
+                                       "and insufficient query parameters)");
     }
     if (presigned_expiry_check_) {
       // Belt-and-braces: Check the expiry time. Note that RGW won't (in
@@ -745,16 +797,20 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
       // expiry time early. Let's not assume things.
       if (!valid_presigned_time(dpp, s, time(nullptr))) {
         ldpp_dout(dpp, 0) << "Presigned URL expiry check failed" << dendl;
-        return HandoffAuthResult(-EACCES, "Presigned URL expiry check failed");
+        return HandoffAuthResult(EACCES, "Presigned URL expiry check failed");
       }
     }
+    // This flag is needed by _grpc_auth() so we can properly set the
+    // skip_timestamp_validation flag in the request.
+    is_presigned_request = true;
   }
 
   // We might have disabled V2 signatures.
   if (!enable_signature_v2_) {
     if (ba::starts_with(auth, "AWS ")) {
       ldpp_dout(dpp, 0) << "V2 signatures are disabled, returning failure" << dendl;
-      return HandoffAuthResult(-EACCES, "Access denied (V2 signatures disabled)");
+      return HandoffAuthResult(EACCES,
+                               "Access denied (V2 signatures disabled)");
     }
   }
 
@@ -796,11 +852,13 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
 
   if (is_chunked && !enable_chunked_upload_) {
     ldpp_dout(dpp, 5) << "chunked upload disabled - rejecting request" << dendl;
-    return HandoffAuthResult(-EACCES, "chunked upload is disabled");
+    return HandoffAuthResult(EACCES, "chunked upload is disabled");
   }
 
   // Perform the gRPC-specific parts of the auth* call.
-  auto result = _grpc_auth(dpp, auth, authorization_param, session_token, access_key_id, string_to_sign, signature, s, y);
+  auto result =
+      _grpc_auth(dpp, auth, authorization_param, session_token, access_key_id,
+                 string_to_sign, signature, s, y, is_presigned_request);
 
   if (result.is_err()) {
     return result;
@@ -814,7 +872,7 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
       ldpp_dout(dpp, 0) << "failed to fetch signing key for chunked upload"
                         << dendl;
       return HandoffAuthResult(
-          -EACCES, "failed to fetch signing key for chunked upload");
+          EACCES, "failed to fetch signing key for chunked upload");
     }
     result.set_signing_key(*sk);
     ldpp_dout(dpp, 10) << "chunked upload signing key saved" << dendl;
@@ -822,16 +880,14 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
   }
 };
 
-HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp_in,
-    const std::string& auth,
-    const std::optional<AuthorizationParameters>& authorization_param,
-    [[maybe_unused]] const std::string_view& session_token,
-    const std::string_view& access_key_id,
-    const std::string_view& string_to_sign,
-    const std::string_view& signature,
-    [[maybe_unused]] const req_state* const s,
-    [[maybe_unused]] optional_yield y)
-{
+HandoffAuthResult HandoffHelperImpl::_grpc_auth(
+    const DoutPrefixProvider *dpp_in, const std::string &auth,
+    const std::optional<AuthorizationParameters> &authorization_param,
+    [[maybe_unused]] const std::string_view &session_token,
+    const std::string_view &access_key_id,
+    const std::string_view &string_to_sign, const std::string_view &signature,
+    [[maybe_unused]] const req_state *const s,
+    [[maybe_unused]] optional_yield y, bool is_presigned_request) {
   HandoffDoutPrefixPipe hdpp(*dpp_in, "grpc_auth");
   auto dpp = &hdpp;
 
@@ -841,6 +897,13 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp_in
   req.set_transaction_id(s->trans_id);
   req.set_string_to_sign(std::string { string_to_sign });
   req.set_authorization_header(auth);
+  // If we synthesised the Authorization header, we need to set this flag so
+  // that the Authenticator doesn't re-check the times. This is a special
+  // request from the Authenticator team. Note that this isn't a security
+  // problem, as RGW will have already checked the expiry time!
+  if (is_presigned_request) {
+    req.set_skip_timestamp_validation(true);
+  }
 
   // If we got authorization parameters, fill them in.
   if (authorization_param) {
@@ -877,7 +940,7 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp_in
     // Quick confidence check of channel_.
     if (!channel_) {
       ldpp_dout(dpp, 0) << "Unset gRPC channel" << dendl;
-      return HandoffAuthResult(-EACCES, "Internal error (gRPC channel not set)");
+      return HandoffAuthResult(EACCES, "Internal error (gRPC channel not set)");
     }
     client.set_stub(channel_);
   }
@@ -901,6 +964,49 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(const DoutPrefixProvider* dpp_in
 
   return result;
 }
+
+HandoffAuthResult HandoffHelperImpl::anonymous_authorize(const DoutPrefixProvider* dpp_in,
+    const req_state* const s,
+    optional_yield y)
+{
+  // Construct a custom log prefix provider with some per-request state
+  // information. This should make it easier to correlate logs on busy
+  // servers.
+  HandoffDoutStateProvider hdpp(*dpp_in, s);
+  // All the APIs expect a *DoutPrefixProvider.
+  auto dpp = &hdpp;
+
+  ceph_assert(s->cio != nullptr); // Give a helpful message to unit tests.
+
+  ldpp_dout(dpp, 1) << fmt::format(FMT_STRING(
+                                       "anonymous_authorize(): decoded_uri='{}' domain={}"),
+      s->decoded_uri, s->info.domain)
+                    << dendl;
+
+  // Make sure runtime configuration is defined throughout this method.
+  std::shared_lock<std::shared_mutex> g(m_config_);
+
+  std::optional<AuthorizationParameters> authorization_param;
+
+  authorization_param = AuthorizationParameters(dpp, s);
+  // Log the result. It's safe to dereference the optional, as the constructor
+  // always returns an object (though it may be invalid w.r.t. its valid()
+  // method).
+  ldpp_dout(dpp, 20) << *authorization_param << dendl;
+
+  if (!(authorization_param->valid())) {
+    // This shouldn't happen with a valid request. If it does, log it and
+    // re-nullopt the authorization parameters.
+    ldpp_dout(dpp, 0) << "AuthorizationParameters not available" << dendl;
+    authorization_param = std::nullopt;
+  }
+
+  // Perform the gRPC-specific parts of the auth* call.
+  auto result =
+      _grpc_auth(dpp, "", authorization_param, "", "", "", "", s, y, false);
+
+  return result;
+};
 
 std::optional<std::vector<uint8_t>>
 HandoffHelperImpl::get_signing_key(const DoutPrefixProvider* dpp,

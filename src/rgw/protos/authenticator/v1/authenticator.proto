@@ -113,11 +113,18 @@ message AuthenticateRESTRequest {
 
 // Response message for REST authentications.
 message AuthenticateRESTResponse {
-  // The user ID of the signer. This will be set to an assumed user if STS was used.
-  string user_id = 1;
+  // The canonical user ID of the account of the user to authenticate as.
+  string canonical_user_id = 1;
   // The user ID of the signer. This will be set to the assuming user/service if STS was used. This will be omitted if
   // STS was not used.
-  optional string original_user_id = 2;
+  //  optional string original_user_id = 2;
+  reserved 2;
+  // The ARN of the user to authenticate as.
+  string user_arn = 3;
+  // When STS is used, this is the ARN of the assuming user. This field if omitted when STS is not used.
+  optional string assuming_user_arn = 4;
+  // The ARN of the account of the user to authenticate as.
+  string account_arn = 5;
 }
 
 // Request message for authenticating Presigned URL S3 requests.
@@ -148,11 +155,18 @@ message AuthenticatePresignedURLRequest {
 
 // Response message for Presigned URL authentications.
 message AuthenticatePresignedURLResponse {
-  // The user ID of the signer. This will be set to an assumed user if STS was used.
-  string user_id = 1;
+  // The canonical user ID of the account of the user to authenticate as.
+  string canonical_user_id = 1;
   // The user ID of the signer. This will be set to the assuming user/service if STS was used. This will be omitted if
   // STS was not used.
-  optional string original_user_id = 2;
+  //  optional string original_user_id = 2;
+  reserved 2;
+  // The ARN of the user to authenticate as.
+  string user_arn = 3;
+  // When STS is used, this is the ARN of the assuming user. This field if omitted when STS is not used.
+  optional string assuming_user_arn = 4;
+  // The ARN of the account of the user to authenticate as.
+  string account_arn = 5;
 }
 
 message GetSigningKeyRequest {

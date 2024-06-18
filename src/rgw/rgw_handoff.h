@@ -18,8 +18,7 @@
  * DO NOT INCLUDE "rgw_handoff_impl.h" from here!
  */
 
-#ifndef RGW_HANDOFF_H
-#define RGW_HANDOFF_H
+#pragma once
 
 #include <fmt/format.h>
 #include <iosfwd>
@@ -27,6 +26,7 @@
 
 #include "common/async/yield_context.h"
 #include "common/dout.h"
+#include "rgw/driver/rados/rgw_rados.h"
 #include "rgw/rgw_common.h"
 
 namespace rgw {
@@ -92,16 +92,15 @@ public:
    * @param err_type The error type enum, which will help give better error
    * log messages.
    */
-  HandoffAuthResult(int errorcode, const std::string& message, error_type err_type = error_type::AUTH_ERROR)
-      : errorcode_ { errorcode }
-      , message_ { message }
-      , is_err_ { true }
-      , err_type_ { err_type } {};
+  HandoffAuthResult(unsigned int errorcode, const std::string &message,
+                    error_type err_type = error_type::AUTH_ERROR)
+      : errorcode_{errorcode}, message_{message}, is_err_{true},
+        err_type_{err_type} {};
 
   bool is_err() const noexcept { return is_err_; }
   bool is_ok() const noexcept { return !is_err_; }
   error_type err_type() const noexcept { return err_type_; }
-  int code() const noexcept { return errorcode_; }
+  unsigned int code() const noexcept { return errorcode_; }
   std::string message() const noexcept { return message_; }
   /**
    * @brief Return the signing key, if any.
@@ -149,7 +148,7 @@ public:
 private:
   std::string userid_ = "";
   std::optional<std::vector<uint8_t>> signing_key_;
-  int errorcode_ = 0;
+  unsigned int errorcode_ = 0;
   std::string message_ = "";
   bool is_err_ = false;
   error_type err_type_ = error_type::NO_ERROR;
@@ -220,8 +219,31 @@ public:
       const std::string_view& signature,
       const req_state* const s,
       optional_yield y);
+
+  HandoffAuthResult anonymous_authorize(const DoutPrefixProvider* dpp,
+      const req_state* const s,
+      optional_yield y);
+
+  /**
+   * @brief Return true if anonymous authorization is enabled, false otherwise.
+   *
+   * @return true Anonymous authorization is enabled.
+   * @return false Anonymous authorization is disabled.
+   */
+  bool anonymous_authorization_enabled() const;
+
+  /**
+   * @brief Return true if local authorization may be bypassed because we've
+   * already authorized the request.
+   *
+   * Simply calls HandoffHelperImpl::local_authorization_bypass_allowed() and
+   * returns the result.
+   *
+   * @param s The request.
+   * @return true Local authorization may be bypassed.
+   * @return false Local authorization MUST NOT be bypassed.
+   */
+  bool local_authorization_bypass_allowed(const req_state *s) const;
 };
 
 } /* namespace rgw */
-
-#endif /* RGW_HANDOFF_H */

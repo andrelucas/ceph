@@ -34,6 +34,9 @@
 
 #define dout_subsys ceph_subsys_rgw
 
+#pragma clang diagnostic error "-Wsign-conversion"
+#pragma GCC diagnostic error "-Wsign-conversion"
+
 namespace rgw {
 
 std::ostream& operator<<(std::ostream& os, const HandoffAuthResult& r)
@@ -73,5 +76,22 @@ HandoffAuthResult HandoffHelper::auth(const DoutPrefixProvider* dpp,
 {
   return impl_->auth(dpp, session_token, access_key_id, string_to_sign, signature, s, y);
 };
+
+HandoffAuthResult HandoffHelper::anonymous_authorize(const DoutPrefixProvider* dpp,
+    const req_state* const s,
+    optional_yield y)
+{
+  return impl_->anonymous_authorize(dpp, s, y);
+};
+
+bool HandoffHelper::anonymous_authorization_enabled() const
+{
+  return impl_->anonymous_authorization_enabled();
+};
+
+bool HandoffHelper::local_authorization_bypass_allowed(
+    const req_state *s) const {
+  return impl_->local_authorization_bypass_allowed(s);
+}
 
 } /* namespace rgw */

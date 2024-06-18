@@ -10,6 +10,7 @@
 #include "common/Formatter.h"
 #include "common/ceph_crypto.h"
 #include "common/ceph_json.h"
+#include "common/dout.h"
 #include "common/errno.h"
 #include "common/safe_io.h"
 #include "common/split.h"
@@ -6240,10 +6241,12 @@ void rgw::auth::s3::LDAPEngine::shutdown() {
 
 // Begin Handoff Engine.
 
-std::shared_ptr<rgw::HandoffHelper> rgw::auth::s3::HandoffEngine::handoff_helper;
+std::shared_ptr<rgw::HandoffHelper> rgw::auth::s3::g_handoff_helper;
 
 void rgw::auth::s3::HandoffEngine::init(CephContext* const cct, rgw::sal::Driver* store)
 {
+  // init() can be called more than once. Only log our present-but-disabled
+  // state exactly once.
   static std::once_flag logged_presence;
   if (!cct->_conf->rgw_s3_auth_use_handoff) {
     std::call_once(logged_presence, [&]() {
@@ -6252,21 +6255,28 @@ void rgw::auth::s3::HandoffEngine::init(CephContext* const cct, rgw::sal::Driver
     return;
   }
 
+  // init() can be called more than once. Only init our HandoffHelper exactly
+  // once, and only set the g_handoff_helper shared_ptr once.
   static std::once_flag hhinit;
   std::call_once(hhinit, [&]() {
     ldout(cct, 1) << "Akamai Handoff Authentication present and enabled" << dendl;
-    handoff_helper = std::make_shared<rgw::HandoffHelper>();
-    handoff_helper->init(cct, store);
+    handoff_helper_ = std::make_shared<rgw::HandoffHelper>();
+    handoff_helper_->init(cct, store);
+    // Set a globally-accessible shared_ptr to the one true HandoffHelper.
+    g_handoff_helper = handoff_helper_;
   });
 }
 
 void rgw::auth::s3::HandoffEngine::shutdown()
 {
-  // Nothing yet.
+  // Clear the global shared_ptr. If everyone else has shed their pointers,
+  // we'll cleanly destruct when the ExternalAuthStrategy is destroyed.
+  // If we're not init()'ed, this is a no-op.
+  g_handoff_helper.reset();
 }
 
 bool rgw::auth::s3::HandoffEngine::valid() {
-  return (handoff_helper != nullptr);
+  return (handoff_helper_ != nullptr);
 }
 
 rgw::auth::RemoteApplier::acl_strategy_t
@@ -6322,17 +6332,18 @@ rgw::auth::s3::HandoffEngine::authenticate(
     }
   }*/
 
-  HandoffAuthResult auth_result = handoff_helper->auth(dpp,
+  HandoffAuthResult auth_result = handoff_helper_->auth(dpp,
       session_token,
       access_key_id,
       string_to_sign,
       signature,
       s, y);
   if (auth_result.is_err()) {
-    // HandoffHelper::auth() returns positive error codes, which for gRPC have
-    // already been washed through
+    // HandoffHelper::auth() error codes have been washed through
     // AuthServiceClient::_translate_authenticator_error_code() to turn them
-    // into RGW-recognised error codes.
+    // into RGW-recognisable error codes.
+    // HandoffAuthResult.code() returns an unsigned int, but the calling API
+    // demands a negative return code.
     return result_t::deny(-auth_result.code());
   }
 
@@ -6630,4 +6641,37 @@ bool rgw::auth::s3::S3AnonymousEngine::is_applicable(
   }
 
   return route == AwsRoute::QUERY_STRING && version == AwsVersion::UNKNOWN;
+}
+
+rgw::auth::Engine::result_t
+rgw::auth::s3::S3AnonymousEngine::authenticate(const DoutPrefixProvider* dpp, const req_state* const s, optional_yield y) const
+{
+  if (!is_applicable(s)) {
+    return result_t::deny(-EPERM);
+  } else {
+
+    if (s->handoff_helper && s->handoff_helper->anonymous_authorization_enabled()) {
+      try {
+        auto result = s->handoff_helper->anonymous_authorize(dpp, s, y);
+        if (!result.is_ok()) {
+          // HandoffAuthResult() returns an unsigned int. The calling API
+          // demands a negative result.
+          return result_t::deny(-result.code());
+        }
+      } catch (std::exception &e) {
+        ldpp_dout(dpp, 0)
+            << "ERROR: Handoff anonymous authorization failed with exception: "
+            << e.what() << dendl;
+        return result_t::deny(-EPERM);
+      }
+    }
+
+    RGWUserInfo user_info;
+    rgw_get_anon_user(user_info);
+
+    auto apl = apl_factory->create_apl_local(cct, s, user_info,
+        rgw::auth::LocalApplier::NO_SUBUSER,
+        std::nullopt, rgw::auth::LocalApplier::NO_ACCESS_KEY);
+    return result_t::grant(std::move(apl));
+  }
 }

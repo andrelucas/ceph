@@ -528,6 +528,7 @@ public:
     static const char* keys[] = {
       "rgw_handoff_authparam_always",
       "rgw_handoff_authparam_withtoken",
+      "rgw_handoff_enable_anonymous_authorization",
       "rgw_handoff_enable_chunked_upload",
       "rgw_handoff_enable_signature_v2",
       "rgw_handoff_grpc_arg_initial_reconnect_backoff_ms",
@@ -550,6 +551,9 @@ public:
     // The gRPC channel change needs to come after the arguments setting, if any.
     if (changed.count("rgw_handoff_grpc_uri")) {
       helper_.set_channel_uri(cct_, conf->rgw_handoff_grpc_uri);
+    }
+    if (changed.count("rgw_handoff_enable_anonymous_authorization")) {
+      helper_.set_anonymous_authorization(cct_, conf->rgw_handoff_enable_anonymous_authorization);
     }
     if (changed.count("rgw_handoff_enable_chunked_upload")) {
       helper_.set_chunked_upload_mode(cct_, conf->rgw_handoff_enable_chunked_upload);
@@ -591,16 +595,17 @@ private:
   rgw::sal::Driver* store_;
 
   // These are used in place of constantly querying the ConfigProxy.
-  std::shared_mutex m_config_;
+  mutable std::shared_mutex m_config_;
   bool grpc_mode_ = true; // Not runtime-alterable.
   bool presigned_expiry_check_ = false; // Not runtime-alterable.
+  bool enable_anonymous_authorization_ = true; // Runtime-alterable.
   bool enable_signature_v2_ = true; // Runtime-alterable.
   bool enable_chunked_upload_ = true; // Runtime-alterable.
   AuthParamMode authorization_mode_ = AuthParamMode::ALWAYS; // Runtime-alterable.
 
   // The gRPC channel pointer needs to be behind a mutex. Changing channel_,
   // channel_args_ or channel_uri_ must be under a unique lock of m_channel_.
-  std::shared_mutex m_channel_;
+  mutable std::shared_mutex m_channel_;
   std::shared_ptr<grpc::Channel> channel_;
   std::optional<grpc::ChannelArguments> channel_args_;
   std::string channel_uri_;
@@ -689,6 +694,37 @@ public:
   void set_chunked_upload_mode(CephContext* const cct, bool enabled);
 
   /**
+   * @brief Set the anonymous authorization mode.
+   *
+   * @param cct CephContext pointer.
+   * @param enabled Whether or not anonymous authorization should be performed.
+   */
+  void set_anonymous_authorization(CephContext* const cct, bool enabled);
+
+  /**
+   * @brief Return true if anonymous authorization is enabled, false
+   * otherwise.
+   *
+   * This needs exposed to the HandoffHelper, so regular (non-gRPC) code can
+   * decide whether or not anonymous authz is enabled. We don't want to query
+   * the config proxy every time.
+   *
+   * @return true Anonymous authorization is enabled.
+   * @return false Anonymous authorization is disabled.
+   */
+  bool anonymous_authorization_enabled() const;
+
+  /**
+   * @brief Return true if local authorization may be bypassed because we've
+   * already authorized the request.
+   *
+   * @param s The request.
+   * @return true Local authorization may be bypassed.
+   * @return false Local authorization MUST NOT be bypassed.
+   */
+  bool local_authorization_bypass_allowed(const req_state *s) const;
+
+  /**
    * @brief Authenticate the transaction using the Handoff engine.
    * @param dpp Debug prefix provider. Points to the Ceph context.
    * @param session_token Unused by Handoff.
@@ -737,16 +773,6 @@ public:
   /**
    * @brief Implement the gRPC arm of auth().
    *
-   * @param dpp DoutPrefixProvider.
-   * @param auth The authorization header, which may have been synthesized.
-   * @param authorization_param Authorization parameters, if required.
-   * @param session_token Unused by Handoff.
-   * @param access_key_id The S3 access key.
-   * @param string_to_sign The canonicalised S3 signature input.
-   * @param signature The transaction signature provided by the user.
-   * @param s Pointer to the req_state.
-   * @param y An optional yield token.
-   * @return HandoffAuthResult The authentication result.
    *
    * Implement a Handoff authentication request using gRPC.
    *
@@ -766,14 +792,43 @@ public:
    *
    * - Log the authentication request's success or failure, and return the
    *   result from AuthServiceClient::Auth().
+   *
+   * @param dpp DoutPrefixProvider.
+   * @param auth The authorization header, which may have been synthesized.
+   * @param authorization_param Authorization parameters, if required.
+   * @param session_token Unused by Handoff.
+   * @param access_key_id The S3 access key.
+   * @param string_to_sign The canonicalised S3 signature input.
+   * @param signature The transaction signature provided by the user.
+   * @param s Pointer to the req_state.
+   * @param y An optional yield token.
+   * @param is_presigned_request True if this authentication call has been
+   * synthesised from a presigned request.
+   * @return HandoffAuthResult The authentication result.
    */
-  HandoffAuthResult _grpc_auth(const DoutPrefixProvider* dpp,
-      const std::string& auth,
-      const std::optional<AuthorizationParameters>& authorization_param,
-      const std::string_view& session_token,
-      const std::string_view& access_key_id,
-      const std::string_view& string_to_sign,
-      const std::string_view& signature,
+  HandoffAuthResult
+  _grpc_auth(const DoutPrefixProvider *dpp, const std::string &auth,
+             const std::optional<AuthorizationParameters> &authorization_param,
+             const std::string_view &session_token,
+             const std::string_view &access_key_id,
+             const std::string_view &string_to_sign,
+             const std::string_view &signature, const req_state *const s,
+             optional_yield y, bool is_presigned_request);
+
+  /**
+   * @brief Authorize an anonymous request.
+   *
+   * Send an authorization request to the Authenticator. Obviously there's no
+   * authentication to do, but we can still create an AuthorizationParameters
+   * struct and ask the Authenticator's opinion on the request. Everything
+   * necessary to construct the AuthorizationParameters is found in \p s.
+   *
+   * @param dpp DoutPrefixProvider.
+   * @param s Pointer to req_state.
+   * @param y An optional yield token.
+   * @return HandoffAuthResult
+   */
+  HandoffAuthResult anonymous_authorize(const DoutPrefixProvider* dpp,
       const req_state* const s,
       optional_yield y);
 
