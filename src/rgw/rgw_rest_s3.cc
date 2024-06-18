@@ -6650,7 +6650,24 @@ rgw::auth::s3::S3AnonymousEngine::authenticate(const DoutPrefixProvider* dpp, co
     return result_t::deny(-EPERM);
   } else {
 
-    if (s->handoff_helper && s->handoff_helper->anonymous_authorization_enabled()) {
+    // A few conditions to prevent unnecessary anonymous auth work:
+    // - If handoff isn't present, skip.
+    // - If handoff is present but anon authz is disabled, skip.
+    // - If handoff+anon authz is enabled, but the request meets the criteria
+    //   for storequery, skip.
+    //
+    // Why the last item? HTTP StoreQuery requests *are* anonymous requests
+    // from RGW's perspective. However, authorization isn't appropriate; the
+    // whole point of StoreQuery is to bypass the auth* systems.
+    //
+    // XXX NOTE: When StoreQuery migrates to gRPC, the last check needs to be
+    // removed. Hopefully the API is_storequery_request() will be removed as
+    // well, so the compiler will make it obvious.
+
+    if (s->handoff_helper &&
+        s->handoff_helper->anonymous_authorization_enabled() &&
+        !RGWHandler_REST_StoreQuery_S3::is_storequery_request(s)) {
+
       try {
         auto result = s->handoff_helper->anonymous_authorize(dpp, s, y);
         if (!result.is_ok()) {
