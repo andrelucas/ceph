@@ -598,6 +598,8 @@ private:
   mutable std::shared_mutex m_config_;
   bool grpc_mode_ = true; // Not runtime-alterable.
   bool presigned_expiry_check_ = false; // Not runtime-alterable.
+  bool disable_local_authorization_ = false; // Not runtime-alterable.
+
   bool enable_anonymous_authorization_ = true; // Runtime-alterable.
   bool enable_signature_v2_ = true; // Runtime-alterable.
   bool enable_chunked_upload_ = true; // Runtime-alterable.
@@ -723,6 +725,20 @@ public:
    * @return false Local authorization MUST NOT be bypassed.
    */
   bool local_authorization_bypass_allowed(const req_state *s) const;
+
+  /**
+   * @brief Return true if Handoff is configured to disable *all* local
+   * authorization checks in favour of external authorization.
+   *
+   * This is intended for use in subordinate functions of process_request() -
+   * mostly rgw_process_authenticated() - to determine whether or not we
+   * should attempt local authorization.
+   *
+   * @param s The request.
+   * @return true Local authorization is disabled.
+   * @return false Local authorization is enabled and should not be bypassed.
+   */
+  bool disable_local_authorization(const req_state* s) const;
 
   /**
    * @brief Authenticate the transaction using the Handoff engine.

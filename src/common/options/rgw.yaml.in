@@ -979,6 +979,18 @@ options:
   flags:
   - runtime
   with_legacy: true
+- name: rgw_handoff_authz_disable_local
+  type: bool
+  level: advanced
+  desc: Disable all local authorization checks in favour of external
+    authorization
+  long_desc: Only effective if Handoff is enabled. Disable all authorization
+    checks using internal policies and acls, in favour of an authorization
+    handoff.
+  default: true
+  services:
+  - rgw
+  with_legacy: true
 - name: rgw_handoff_enable_anonymous_authorization
   type: bool
   level: advanced

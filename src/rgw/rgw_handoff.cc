@@ -94,4 +94,9 @@ bool HandoffHelper::local_authorization_bypass_allowed(
   return impl_->local_authorization_bypass_allowed(s);
 }
 
+bool HandoffHelper::disable_local_authorization(const req_state* s) const
+{
+  return impl_->disable_local_authorization(s);
+}
+
 } /* namespace rgw */

@@ -452,6 +452,14 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Driver* store, con
 
   ldout(cct, 1) << "HandoffHelperImpl::init()" << dendl;
   grpc_mode_ = true;
+  disable_local_authorization_ = cct->_conf->rgw_handoff_authz_disable_local;
+  ldout(cct, 1)
+      << fmt::format(
+             FMT_STRING(
+                 "HandoffHelperImpl::init(): NOTE: local authorization {}"),
+             (disable_local_authorization_ ? "DISABLED" : "ENABLED"))
+      << dendl;
+
   // Production calls to this function will have grpc_uri empty, so we'll
   // fetch configuration. Unit tests will pass a URI.
   auto uri = grpc_uri.empty() ? cct->_conf->rgw_handoff_grpc_uri : grpc_uri;
@@ -468,7 +476,12 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Driver* store, con
 
   // rgw_handoff_enable_presigned_expiry_check is not runtime-alterable.
   presigned_expiry_check_ = cct->_conf->rgw_handoff_enable_presigned_expiry_check;
-  ldout(cct, 5) << fmt::format(FMT_STRING("HandoffHelperImpl::init(): Presigned URL expiry check {}"), (presigned_expiry_check_ ? "enabled" : "disabled")) << dendl;
+  ldout(cct, 5)
+      << fmt::format(
+             FMT_STRING(
+                 "HandoffHelperImpl::init(): Presigned URL expiry check {}"),
+             (presigned_expiry_check_ ? "enabled" : "disabled"))
+      << dendl;
 
   // rgw_handoff_enable_signature_v2 is runtime-alterable.
   set_signature_v2(cct, cct->_conf->rgw_handoff_enable_signature_v2);
@@ -566,6 +579,12 @@ bool HandoffHelperImpl::local_authorization_bypass_allowed(
   // XXX just return the value of the configuration variable for now, no
   // checking of the request. This is wrong!
   return s->get_cct()->_conf->rgw_handoff_enable_local_authorization_bypass;
+}
+
+bool HandoffHelperImpl::disable_local_authorization(const req_state* s) const
+{
+  // This is a simple bool set at init() time, there's no need for locking etc.
+  return disable_local_authorization_;
 }
 
 std::optional<std::string> HandoffHelperImpl::synthesize_auth_header(
