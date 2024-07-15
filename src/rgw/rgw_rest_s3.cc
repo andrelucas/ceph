@@ -66,11 +66,12 @@
 #include "rgw_bucket_sync.h"
 
 #include "include/ceph_assert.h"
-#include "rgw_role.h"
-#include "rgw_rest_sts.h"
 #include "rgw_rest_iam.h"
-#include "rgw_sts.h"
+#include "rgw_rest_storequery.h"
+#include "rgw_rest_sts.h"
+#include "rgw_role.h"
 #include "rgw_sal_rados.h"
+#include "rgw_sts.h"
 
 #include "rgw_s3select.h"
 
@@ -5236,6 +5237,20 @@ RGWHandler_REST* RGWRESTMgr_S3::get_handler(rgw::sal::Driver* driver,
     return new RGWHandler_REST_Obj_S3Website(auth_registry);
   }
 
+  // Check for StoreQuery requests. If found, return a storequery handler
+  // already configured to the type of request.
+  if (enable_storequery && RGWHandler_REST_StoreQuery_S3::is_storequery_request(s)) {
+    RGWSQHandlerType htype;
+    if (s->init_state.url_bucket.empty()) {
+      htype = RGWSQHandlerType::Service;
+    } else if (!rgw::sal::Object::empty(s->object.get())) {
+      htype = RGWSQHandlerType::Obj;
+    } else {
+      htype = RGWSQHandlerType::Bucket;
+    }
+    return new RGWHandler_REST_StoreQuery_S3(auth_registry, htype);
+  }
+
   if (s->init_state.url_bucket.empty()) {
     // no bucket
     if (s->op == OP_POST) {
@@ -5260,17 +5275,18 @@ RGWHandler_REST* RGWRESTMgr_S3::get_handler(rgw::sal::Driver* driver,
       return nullptr;
     }
     // non-POST S3 service without a bucket
-    return new RGWHandler_REST_Service_S3(auth_registry);
+    return new RGWHandler_REST_Service_S3(auth_registry, enable_storequery);
   }
   if (!rgw::sal::Object::empty(s->object.get())) {
     // has object
-    return new RGWHandler_REST_Obj_S3(auth_registry);
+    return new RGWHandler_REST_Obj_S3(auth_registry, enable_storequery);
   }
   if (s->info.args.exist_obj_excl_sub_resource()) {
     return nullptr;
   }
   // has bucket
-  return new RGWHandler_REST_Bucket_S3(auth_registry, enable_pubsub);
+  return new RGWHandler_REST_Bucket_S3(auth_registry, enable_pubsub,
+                                       enable_storequery);
 }
 
 bool RGWHandler_REST_S3Website::web_dir() const {
@@ -6634,7 +6650,24 @@ rgw::auth::s3::S3AnonymousEngine::authenticate(const DoutPrefixProvider* dpp, co
     return result_t::deny(-EPERM);
   } else {
 
-    if (s->handoff_helper && s->handoff_helper->anonymous_authorization_enabled()) {
+    // A few conditions to prevent unnecessary anonymous auth work:
+    // - If handoff isn't present, skip.
+    // - If handoff is present but anon authz is disabled, skip.
+    // - If handoff+anon authz is enabled, but the request meets the criteria
+    //   for storequery, skip.
+    //
+    // Why the last item? HTTP StoreQuery requests *are* anonymous requests
+    // from RGW's perspective. However, authorization isn't appropriate; the
+    // whole point of StoreQuery is to bypass the auth* systems.
+    //
+    // XXX NOTE: When StoreQuery migrates to gRPC, the last check needs to be
+    // removed. Hopefully the API is_storequery_request() will be removed as
+    // well, so the compiler will make it obvious.
+
+    if (s->handoff_helper &&
+        s->handoff_helper->anonymous_authorization_enabled() &&
+        !RGWHandler_REST_StoreQuery_S3::is_storequery_request(s)) {
+
       try {
         auto result = s->handoff_helper->anonymous_authorize(dpp, s, y);
         if (!result.is_ok()) {
