@@ -89,14 +89,17 @@ bool HandoffHelper::anonymous_authorization_enabled() const
   return impl_->anonymous_authorization_enabled();
 };
 
-bool HandoffHelper::local_authorization_bypass_allowed(
-    const req_state *s) const {
-  return impl_->local_authorization_bypass_allowed(s);
+bool HandoffHelper::disable_local_authorization() const
+{
+  return impl_->disable_local_authorization();
 }
 
-bool HandoffHelper::disable_local_authorization(const req_state* s) const
+HandoffAuthzState::HandoffAuthzState(std::shared_ptr<HandoffHelper> helper)
 {
-  return impl_->disable_local_authorization(s);
+  // helper may be nullptr, you MUST check before dereferencing!
+  if (helper) {
+    enabled_ = helper->disable_local_authorization();
+  }
 }
 
 } /* namespace rgw */

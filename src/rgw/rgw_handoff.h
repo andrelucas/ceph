@@ -253,11 +253,46 @@ public:
    * mostly rgw_process_authenticated() - to determine whether or not we
    * should attempt local authorization.
    *
-   * @param s The request.
    * @return true Local authorization is disabled.
    * @return false Local authorization is enabled and should not be bypassed.
    */
-  bool disable_local_authorization(const req_state *s) const;
+  bool disable_local_authorization() const;
 };
+
+/**
+ * @brief Per-request state information for the Handoff authorization client.
+ *
+ * Try not to couple this too hard with the HandoffHelper. The moment you put
+ * a std::shared_ptr<HandoffHelper> in here, it makes things much harder to
+ * test. This should just be a carrier for authorization state.
+ *
+ * It has a constructior with a HandoffHelper pointer simply so it can call
+ * methods on the helper to initialise itself. Other constructors will server
+ * for unit tests.
+ */
+class HandoffAuthzState {
+  bool enabled_ = false;
+
+public:
+  HandoffAuthzState() = delete;
+  /// Construct explicitly (for tests).
+  explicit HandoffAuthzState(bool enabled)
+      : enabled_(enabled)
+  {
+  }
+
+  /**
+   * @brief Construct a new Handoff Authz State object using a HandoffHelper.
+   *
+   * Construct using an existing HandoffHelper. This keeps Handoff-specific
+   * initialisation code out of rgw_process.cc.
+   *
+   * @param helper a pointer to the shared HandoffHelper object. May be nullptr!
+   */
+  explicit HandoffAuthzState(std::shared_ptr<HandoffHelper> helper);
+
+  /// Return true if Handoff Authorization is enabled.
+  bool enabled() const noexcept { return enabled_; }
+}; // class HandoffAuthzState
 
 } /* namespace rgw */

@@ -299,6 +299,9 @@ int process_request(const RGWProcessEnv& penv,
   s->host_id = driver->get_host_id();
   s->yield = yield;
   s->handoff_helper = penv.handoff_helper; // May be empty.
+  // Initialise authz state, using a pointer to the (possibly empty)
+  // HandoffHelper object.
+  s->handoff_authz = std::make_unique<::rgw::HandoffAuthzState>(s->handoff_helper);
 
   ldpp_dout(s, 2) << "initializing for trans_id = " << s->trans_id << dendl;
 

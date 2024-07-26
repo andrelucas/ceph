@@ -717,16 +717,6 @@ public:
   bool anonymous_authorization_enabled() const;
 
   /**
-   * @brief Return true if local authorization may be bypassed because we've
-   * already authorized the request.
-   *
-   * @param s The request.
-   * @return true Local authorization may be bypassed.
-   * @return false Local authorization MUST NOT be bypassed.
-   */
-  bool local_authorization_bypass_allowed(const req_state *s) const;
-
-  /**
    * @brief Return true if Handoff is configured to disable *all* local
    * authorization checks in favour of external authorization.
    *
@@ -734,11 +724,10 @@ public:
    * mostly rgw_process_authenticated() - to determine whether or not we
    * should attempt local authorization.
    *
-   * @param s The request.
    * @return true Local authorization is disabled.
    * @return false Local authorization is enabled and should not be bypassed.
    */
-  bool disable_local_authorization(const req_state* s) const;
+  bool disable_local_authorization() const;
 
   /**
    * @brief Authenticate the transaction using the Handoff engine.

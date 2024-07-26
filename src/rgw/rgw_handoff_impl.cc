@@ -562,26 +562,7 @@ bool HandoffHelperImpl::anonymous_authorization_enabled() const
   return enable_anonymous_authorization_;
 }
 
-bool HandoffHelperImpl::local_authorization_bypass_allowed(
-    const req_state *s) const {
-
-  // XXX this is a stub for now. We'll need this API shortly. Note that it
-  // will *never* be called unless Handoff is enabled.
-
-  /* XXX TODO:
-   * - Check if the request is anonymous. If so, return true iff anonymous
-   *   auth is enabled.
-   * - Otherwise check the request was authenticated by Handoff. This will
-   *   require work; at the moment there's no way to know which engine
-   *   supplied the grant.
-   */
-
-  // XXX just return the value of the configuration variable for now, no
-  // checking of the request. This is wrong!
-  return s->get_cct()->_conf->rgw_handoff_enable_local_authorization_bypass;
-}
-
-bool HandoffHelperImpl::disable_local_authorization(const req_state* s) const
+bool HandoffHelperImpl::disable_local_authorization() const
 {
   // This is a simple bool set at init() time, there's no need for locking etc.
   return disable_local_authorization_;
