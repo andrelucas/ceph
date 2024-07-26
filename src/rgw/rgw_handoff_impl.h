@@ -41,6 +41,7 @@
 using namespace ::authenticator::v1;
 
 #include "rgw_handoff.h"
+#include "rgw_handoff_grpcutil.h"
 
 namespace rgw {
 
@@ -456,9 +457,9 @@ enum class AuthParamMode {
  *
  * As of 20231127, T must implement (with the same signature as
  * HandoffHelperImpl):
- *   - get_default_channel_args()
- *   - set_channel_args()
- *   - set_channel_uri()
+ *   - get_authn_channel()  (returned type needs to implement
+ *       HandoffGRPCChannel's interface, doesn't need to return exactly
+ *       HandoffGRPCChannel&))
  *   - set_signature_v2()
  *   - set_authorization_mode()
  *   - set_chunked_upload_mode()
@@ -545,12 +546,12 @@ public:
   {
     // You should bundle any gRPC arguments changes into this first block.
     if (changed.count("rgw_handoff_grpc_arg_initial_reconnect_backoff_ms") || changed.count("rgw_handoff_grpc_arg_max_reconnect_backoff_ms") || changed.count("rgw_handoff_grpc_arg_min_reconnect_backoff_ms")) {
-      auto args = helper_.get_default_channel_args(cct_);
-      helper_.set_channel_args(cct_, args);
+      auto args = helper_.get_authn_channel().get_default_channel_args(cct_);
+      helper_.get_authn_channel().set_channel_args(cct_, args);
     }
     // The gRPC channel change needs to come after the arguments setting, if any.
     if (changed.count("rgw_handoff_grpc_uri")) {
-      helper_.set_channel_uri(cct_, conf->rgw_handoff_grpc_uri);
+      helper_.get_authn_channel().set_channel_uri(cct_, conf->rgw_handoff_grpc_uri);
     }
     if (changed.count("rgw_handoff_enable_anonymous_authorization")) {
       helper_.set_anonymous_authorization(cct_, conf->rgw_handoff_enable_anonymous_authorization);
@@ -605,12 +606,10 @@ private:
   bool enable_chunked_upload_ = true; // Runtime-alterable.
   AuthParamMode authorization_mode_ = AuthParamMode::ALWAYS; // Runtime-alterable.
 
-  // The gRPC channel pointer needs to be behind a mutex. Changing channel_,
-  // channel_args_ or channel_uri_ must be under a unique lock of m_channel_.
-  mutable std::shared_mutex m_channel_;
-  std::shared_ptr<grpc::Channel> channel_;
-  std::optional<grpc::ChannelArguments> channel_args_;
-  std::string channel_uri_;
+  // The gRPC channel for authentication.
+  HandoffGRPCChannel authn_channel_;
+  // The gRPC channel for authorization.
+  HandoffGRPCChannel authz_channel_;
 
 public:
   /**
@@ -645,20 +644,27 @@ public:
   int init(CephContext* const cct, rgw::sal::Driver* store, const std::string& grpc_uri = "");
 
   /**
-   * @brief Set the gRPC channel URI.
+   * @brief Return a reference to the the authentication channel wrapper object.
    *
-   * This is used by init() and by the config observer. If no channel
-   * arguments have been set via set_channel_args(), this will set them to the
-   * default values (via get_default_channel_args).
+   * This object always exists. Note that the underlying gRPC channel may not
+   * be set (non-nullptr).
    *
-   * Do not call from auth() unless you _know_ you've not taken a lock on
-   * m_config_!
-   *
-   * @param grpc_uri
-   * @return true on success.
-   * @return false on failure.
+   * @return HandoffGRPCChannel& a reference to this HandoffHelperImpl's
+   * authentication channel wrapper.
    */
-  bool set_channel_uri(CephContext* const cct, const std::string& grpc_uri);
+  HandoffGRPCChannel& get_authn_channel() { return authn_channel_; }
+
+  /**
+   * @brief Return a reference to the the authorization channel wrapper
+   * object.
+   *
+   * This object always exists. Note that the underlying gRPC channel may not
+   * be set (non-nullptr).
+   *
+   * @return HandoffGRPCChannel& a reference to this HandoffHelperImpl's
+   * authorization channel wrapper.
+   */
+  HandoffGRPCChannel& get_authz_channel() { return authz_channel_; }
 
   /**
    * @brief Configure support for AWS signature v2.
@@ -860,40 +866,6 @@ public:
   std::optional<std::vector<uint8_t>>
   get_signing_key(const DoutPrefixProvider *dpp, const std::string auth,
                   const req_state *const s, optional_yield y);
-
-  /**
-   * @brief Get our default grpc::ChannelArguments value.
-   *
-   * When calling set_channel_args(), you should first call this function to
-   * get application defaults, and then modify the settings you need.
-   *
-   * Currently the backoff timers are set here, based on configuration
-   * variables. These are runtime-alterable, but have sensible defaults.
-   *
-   * @return grpc::ChannelArguments A default set of channel arguments.
-   */
-  grpc::ChannelArguments get_default_channel_args(CephContext* const cct);
-
-  /**
-   * @brief Set custom gRPC channel arguments. Intended for testing.
-   *
-   * You should modify the default channel arguments obtained with
-   * get_default_channel_args(). Don't start from scratch.
-   *
-   * Keep this simple. If you set vtable args you'll need to worry about the
-   * lifetime of those is longer than the HandoffHelperImpl object that will
-   * store a copy of the ChannelArguments object.
-   *
-   * Do not call from auth() unless you _know_ you've not taken a lock on
-   * m_config_!
-   *
-   * @param args A populated grpc::ChannelArguments object.
-   */
-  void set_channel_args(CephContext* const cct, grpc::ChannelArguments& args)
-  {
-    std::unique_lock l { m_channel_ };
-    channel_args_ = std::make_optional(args);
-  }
 
   /**
    * @brief Construct an Authorization header from the parsed query string

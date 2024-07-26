@@ -266,6 +266,18 @@ public:
  * a std::shared_ptr<HandoffHelper> in here, it makes things much harder to
  * test. This should just be a carrier for authorization state.
  *
+ * The most basic state it carries is whether or not Handoff Authorization is
+ * even enabled. As a method on an object that always exists, it makes the
+ * test for authz much easier to read:
+ *
+ * ```
+ *  if (s->handoff_authz().enabled()) {
+ *      ...
+ *   } else {
+ *     ...
+ *   }
+ * ```
+ *
  * It has a constructior with a HandoffHelper pointer simply so it can call
  * methods on the helper to initialise itself. Other constructors will server
  * for unit tests.
@@ -292,7 +304,30 @@ public:
   explicit HandoffAuthzState(std::shared_ptr<HandoffHelper> helper);
 
   /// Return true if Handoff Authorization is enabled.
+
+  /**
+   * @brief Return true if Handoff Authorization is enabled.
+   *
+   * Note that disabled() is present too, and is just the negation of this
+   * method. Having both means one can write the 'if' test that reads most
+   * clearly.
+   *
+   * @return true Handoff Authorization is enabled.
+   * @return false Handoff Authorization is disabled.
+   */
   bool enabled() const noexcept { return enabled_; }
+
+  /**
+   * @brief Return true if Handoff Authorization is disabled.
+   *
+   * Just the negation of enabled() - having both means one can write the 'if'
+   * test that reads most clearly.
+   *
+   * @return true Handoff Authorization is disabled.
+   * @return false Handoff Authorization is enabled.
+   */
+  bool disabled() const noexcept { return !enabled_; }
+
 }; // class HandoffAuthzState
 
 } /* namespace rgw */

@@ -885,7 +885,7 @@ TEST_F(HandoffHelperImplGRPCTest, ChannelRecoversFromDeadAtStartup)
   ceph_assert(g_ceph_context != nullptr);
   // Set everything to 1ms. As descrived for SMALLEST_RECONNECT_DELAY_MS,
   // we'll still have to wait 100ms + a few more millis for any reconnect.
-  auto args = hh_.get_default_channel_args(g_ceph_context);
+  auto args = hh_.get_authn_channel().get_default_channel_args(g_ceph_context);
   args.SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, 1);
   args.SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, 1);
   args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS, 1);
@@ -893,7 +893,7 @@ TEST_F(HandoffHelperImplGRPCTest, ChannelRecoversFromDeadAtStartup)
   // // bounded below at 100ms by the library.
   // args.SetInt("grpc.testing.fixed_fixed_reconnect_backoff_ms", 0);
   // Program the helper's channel.
-  hh_.set_channel_args(dpp_.get_cct(), args);
+  hh_.get_authn_channel().set_channel_args(dpp_.get_cct(), args);
 
   helper_init();
   TestClient cio;
@@ -1064,6 +1064,25 @@ TEST_F(HandoffHelperImplSubsysTest, PresignedSynthesizeHeader)
 /* #region HandoffConfigObserver */
 
 /**
+ * @brief Mock enough of HandoffGRPCChannel's interface to get
+ * HandoffConfigObserver<MockHelperForConfigObserver> to compile. At the time
+ * of writing this means get_default_channel_args(), set_channel_args() and
+ * set_channel_uri().
+ */
+class MockHandoffGRPCChannel {
+public:
+  bool channel_args_set_ = false;
+  std::string channel_uri_;
+
+  grpc::ChannelArguments get_default_channel_args(CephContext* const cct)
+  {
+    return grpc::ChannelArguments();
+  }
+  void set_channel_args(CephContext* const cct, const grpc::ChannelArguments& args) { channel_args_set_ = true; }
+  void set_channel_uri(CephContext* const cct, const std::string& uri) { channel_uri_ = uri; }
+}; // class MockHelperForConfigObserver::MockHandoffGRPCChannel
+
+/**
  * @brief Mock the chunks of HandoffHelperImpl we need to check that the
  * config observer is working properly.
  *
@@ -1083,12 +1102,9 @@ public:
   {
     return 0;
   }
-  grpc::ChannelArguments get_default_channel_args(CephContext* const cct)
-  {
-    return grpc::ChannelArguments();
-  }
-  void set_channel_args(CephContext* const cct, const grpc::ChannelArguments& args) { channel_args_set_ = true; }
-  void set_channel_uri(CephContext* const cct, const std::string& uri) { channel_uri_ = uri; }
+
+  MockHandoffGRPCChannel& get_authn_channel() { return authn_channel_; }
+
   void set_signature_v2(CephContext* const cct, bool enable) { signature_v2_ = enable; }
   void set_anonymous_authorization(CephContext* const cct, bool enable) { anonymous_authorization_ = enable; }
   void set_chunked_upload_mode(CephContext* const cct, bool enable) { chunked_upload_ = enable; }
@@ -1097,10 +1113,9 @@ public:
 public:
   HandoffConfigObserver<MockHelperForConfigObserver> observer_;
   AuthParamMode authparam_mode_;
+  MockHandoffGRPCChannel authn_channel_;
   bool signature_v2_;
   bool chunked_upload_;
-  bool channel_args_set_ = false;
-  std::string channel_uri_;
   bool anonymous_authorization_;
 };
 
@@ -1202,13 +1217,13 @@ TEST_F(TestHandoffConfigObserver, GRPCChannelArgs)
   auto conf = cct->_conf;
 
   for (const auto& p : param) {
-    hh_.channel_args_set_ = false;
+    hh_.authn_channel_.channel_args_set_ = false;
 
     conf.set_val_or_die(p, "1001");
     changed.clear();
     changed.emplace(p);
     hh_.observer_.handle_conf_change(conf, changed);
-    ASSERT_TRUE(hh_.channel_args_set_);
+    ASSERT_TRUE(hh_.authn_channel_.channel_args_set_);
   }
 }
 
@@ -1222,7 +1237,7 @@ TEST_F(TestHandoffConfigObserver, GRPCURI)
 
   conf->rgw_handoff_grpc_uri = "foo";
   hh_.observer_.handle_conf_change(conf, changed);
-  ASSERT_EQ(hh_.channel_uri_, "foo");
+  ASSERT_EQ(hh_.authn_channel_.channel_uri_, "foo");
 }
 
 TEST_F(TestHandoffConfigObserver, AuthParamMode)

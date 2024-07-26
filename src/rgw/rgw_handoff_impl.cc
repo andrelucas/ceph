@@ -467,7 +467,7 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Driver* store, con
   // Will use rgw_handoff_grpc_uri, which is runtime-alterable.
   // set_channel_uri() will fetch default channel args if none have been set
   // beforehand.
-  if (!set_channel_uri(cct, uri)) {
+  if (!get_authn_channel().set_channel_uri(cct, uri)) {
     // This is unlikely, but no gRPC channel in gRPC mode is a fatal error.
     // Note that this won't attempt to connect! That's done lazily on first
     // use. This will just attempt to create the channel object.
@@ -493,46 +493,6 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Driver* store, con
   set_authorization_mode(cct, config_obs_.get_authorization_mode(cct->_conf));
 
   return 0; // Return value is ignored.
-}
-
-grpc::ChannelArguments HandoffHelperImpl::get_default_channel_args(CephContext* const cct)
-{
-  grpc::ChannelArguments args;
-
-  // Set our default backoff parameters. These are runtime-alterable.
-  args.SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, cct->_conf->rgw_handoff_grpc_arg_initial_reconnect_backoff_ms);
-  args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS, cct->_conf->rgw_handoff_grpc_arg_max_reconnect_backoff_ms);
-  args.SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, cct->_conf->rgw_handoff_grpc_arg_min_reconnect_backoff_ms);
-  ldout(cct, 20) << fmt::format(FMT_STRING("HandoffHelperImpl::{}: reconnect_backoff(ms): initial/min/max={}/{}/{}"),
-      __func__,
-      cct->_conf->rgw_handoff_grpc_arg_initial_reconnect_backoff_ms,
-      cct->_conf->rgw_handoff_grpc_arg_min_reconnect_backoff_ms,
-      cct->_conf->rgw_handoff_grpc_arg_max_reconnect_backoff_ms)
-                 << dendl;
-
-  return grpc::ChannelArguments();
-}
-
-bool HandoffHelperImpl::set_channel_uri(CephContext* const cct, const std::string& new_uri)
-{
-  ldout(cct, 5) << fmt::format(FMT_STRING("HandoffHelperImpl::set_channel_uri({})"), new_uri) << dendl;
-  std::unique_lock<chan_lock_t> g(m_channel_);
-  if (!channel_args_) {
-    auto args = get_default_channel_args(cct);
-    // Don't use set_channel_args(), which takes lock m_channel_.
-    channel_args_ = std::make_optional(std::move(args));
-  }
-  // XXX grpc::InsecureChannelCredentials()...
-  auto new_channel = grpc::CreateCustomChannel(new_uri, grpc::InsecureChannelCredentials(), *channel_args_);
-  if (!new_channel) {
-    ldout(cct, 0) << fmt::format(FMT_STRING("HandoffHelperImpl::set_channel_uri(): ERROR: Failed to create new gRPC channel for URI {}"), new_uri) << dendl;
-    return false;
-  } else {
-    ldout(cct, 1) << fmt::format(FMT_STRING("HandoffHelperImpl::set_channel_uri({}) success"), new_uri) << dendl;
-    channel_ = std::move(new_channel);
-    channel_uri_ = new_uri;
-    return true;
-  }
 }
 
 void HandoffHelperImpl::set_signature_v2(CephContext* const cct, bool enabled)
@@ -936,13 +896,12 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(
   // short a time as possible.
   AuthServiceClient client {}; // Uninitialised variant - must call set_stub().
   {
-    std::shared_lock<std::shared_mutex> g(m_channel_);
-    // Quick confidence check of channel_.
-    if (!channel_) {
+    auto new_channel = get_authn_channel().get_channel();
+    if (!new_channel) {
       ldpp_dout(dpp, 0) << "Unset gRPC channel" << dendl;
       return HandoffAuthResult(EACCES, "Internal error (gRPC channel not set)");
     }
-    client.set_stub(channel_);
+    client.set_stub(new_channel);
   }
   ldpp_dout(dpp, 1) << "Sending gRPC auth request" << dendl;
   auto result = client.Auth(req);
@@ -1022,13 +981,12 @@ HandoffHelperImpl::get_signing_key(const DoutPrefixProvider* dpp,
   // short a time as possible.
   AuthServiceClient client {}; // Uninitialised variant - must call set_stub().
   {
-    std::shared_lock<std::shared_mutex> g(m_channel_);
-    // Quick confidence check of channel_.
-    if (!channel_) {
+    auto new_channel = get_authn_channel().get_channel();
+    if (!new_channel) {
       ldpp_dout(dpp, 0) << "Unset gRPC channel" << dendl;
       return std::nullopt;
     }
-    client.set_stub(channel_);
+    client.set_stub(new_channel);
   }
   ldpp_dout(dpp, 1) << "Sending gRPC signing key request" << dendl;
   auto result = client.GetSigningKey(req);
