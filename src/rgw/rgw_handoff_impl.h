@@ -549,6 +549,7 @@ public:
     if (changed.count("rgw_handoff_grpc_arg_initial_reconnect_backoff_ms") || changed.count("rgw_handoff_grpc_arg_max_reconnect_backoff_ms") || changed.count("rgw_handoff_grpc_arg_min_reconnect_backoff_ms")) {
       auto args = helper_.get_authn_channel().get_default_channel_args(cct_);
       helper_.get_authn_channel().set_channel_args(cct_, args);
+      helper_.get_authz_channel().set_channel_args(cct_, args);
     }
     // The gRPC channel change needs to come after the arguments setting, if any.
     if (changed.count("rgw_handoff_grpc_uri")) {
