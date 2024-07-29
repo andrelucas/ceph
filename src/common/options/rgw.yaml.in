@@ -991,6 +991,19 @@ options:
   services:
   - rgw
   with_legacy: true
+- name: rgw_handoff_authz_grpc_uri
+  type: str
+  level: advanced
+  desc: URI for the S3 authorization handoff service via gRPC.
+  long_desc: The gRPC server address to use. This value is passed unchanged to
+    grpc::CreateCustomChannel() so may be in any format supported by the C++
+    gRPC library.
+  default: dns:127.0.0.1:8003
+  flags:
+  - runtime
+  services:
+  - rgw
+  with_legacy: true
 - name: rgw_handoff_enable_anonymous_authorization
   type: bool
   level: advanced

@@ -440,7 +440,7 @@ static std::optional<std::string> synthesize_v4_header(const DoutPrefixProvider*
  *
  ****************************************************************************/
 
-int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Driver* store, const std::string& grpc_uri)
+int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Driver* store, const std::string& grpc_uri, const std::string& authz_grpc_uri)
 {
   store_ = store;
 
@@ -462,16 +462,30 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Driver* store, con
 
   // Production calls to this function will have grpc_uri empty, so we'll
   // fetch configuration. Unit tests will pass a URI.
-  auto uri = grpc_uri.empty() ? cct->_conf->rgw_handoff_grpc_uri : grpc_uri;
+  auto authn_uri = grpc_uri.empty() ? cct->_conf->rgw_handoff_grpc_uri : grpc_uri;
 
   // Will use rgw_handoff_grpc_uri, which is runtime-alterable.
   // set_channel_uri() will fetch default channel args if none have been set
   // beforehand.
-  if (!get_authn_channel().set_channel_uri(cct, uri)) {
+  if (!get_authn_channel().set_channel_uri(cct, authn_uri)) {
     // This is unlikely, but no gRPC channel in gRPC mode is a fatal error.
     // Note that this won't attempt to connect! That's done lazily on first
     // use. This will just attempt to create the channel object.
-    throw new std::runtime_error("Failed to create initial gRPC channel");
+    throw new std::runtime_error(fmt::format(FMT_STRING("Failed to create initial authentication gRPC channel for uri '{}'"), authn_uri));
+  }
+
+  // Likewise, production calls will have authz_grpc_uri empty, so we'll fetch
+  // configuration. Unit tests will pass a URI.
+  auto authz_uri = authz_grpc_uri.empty() ? cct->_conf->rgw_handoff_authz_grpc_uri : authz_grpc_uri;
+
+  // Will use rgw_handoff_authz_grpc_uri, which is runtime-alterable.
+  // set_channel_uri() will fetch default channel args if none have been set
+  // beforehand.
+  if (!get_authz_channel().set_channel_uri(cct, authz_uri)) {
+    // This is unlikely, but no gRPC channel in gRPC mode is a fatal error.
+    // Note that this won't attempt to connect! That's done lazily on first
+    // use. This will just attempt to create the channel object.
+    throw new std::runtime_error(fmt::format(FMT_STRING("Failed to create initial authorization gRPC channel for uri '{}'"), authz_uri));
   }
 
   // rgw_handoff_enable_presigned_expiry_check is not runtime-alterable.

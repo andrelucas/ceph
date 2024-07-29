@@ -38,7 +38,32 @@ class HandoffGRPCChannel {
   std::optional<grpc::ChannelArguments> channel_args_;
   std::string channel_uri_;
 
+  const std::string description_;
+
 public:
+  /**
+   * @brief Construct a new HandoffGRPCChannel object with the given test
+   * description.
+   *
+   * @param desc A human-readable description of the channel this object
+   * encapsulates. Used for logging.
+   */
+  HandoffGRPCChannel(const std::string& desc)
+      : description_(desc)
+  {
+  }
+
+  /**
+   * @brief Return a user-supplied description of this channel. Useful for
+   * logging.
+   *
+   * @return The description of the channel provided at object-creation time.
+   */
+  const std::string get_description() const
+  {
+    return description_;
+  }
+
   /**
    * @brief Get a pointer to the channel object.
    *

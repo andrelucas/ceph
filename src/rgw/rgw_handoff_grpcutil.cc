@@ -32,8 +32,8 @@ grpc::ChannelArguments HandoffGRPCChannel::get_default_channel_args(CephContext*
   args.SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, cct->_conf->rgw_handoff_grpc_arg_initial_reconnect_backoff_ms);
   args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS, cct->_conf->rgw_handoff_grpc_arg_max_reconnect_backoff_ms);
   args.SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, cct->_conf->rgw_handoff_grpc_arg_min_reconnect_backoff_ms);
-  ldout(cct, 20) << fmt::format(FMT_STRING("HandoffGRPCChannel::{}: reconnect_backoff(ms): initial/min/max={}/{}/{}"),
-      __func__,
+  ldout(cct, 20) << fmt::format(FMT_STRING("HandoffGRPCChannel::{}: {}: reconnect_backoff(ms): initial/min/max={}/{}/{}"),
+      __func__, description_,
       cct->_conf->rgw_handoff_grpc_arg_initial_reconnect_backoff_ms,
       cct->_conf->rgw_handoff_grpc_arg_min_reconnect_backoff_ms,
       cct->_conf->rgw_handoff_grpc_arg_max_reconnect_backoff_ms)
@@ -50,7 +50,7 @@ void HandoffGRPCChannel::set_channel_args(CephContext* const cct, grpc::ChannelA
 
 bool HandoffGRPCChannel::set_channel_uri(CephContext* const cct, const std::string& new_uri)
 {
-  ldout(cct, 5) << fmt::format(FMT_STRING("HandoffGRPCChannel::set_channel_uri({})"), new_uri) << dendl;
+  ldout(cct, 5) << fmt::format(FMT_STRING("HandoffGRPCChannel::set_channel_uri: {}: begin set uri '{}'"), description_, new_uri) << dendl;
   std::unique_lock<chan_lock_t> g(m_channel_);
   if (!channel_args_) {
     auto args = get_default_channel_args(cct);
@@ -60,10 +60,10 @@ bool HandoffGRPCChannel::set_channel_uri(CephContext* const cct, const std::stri
   // XXX grpc::InsecureChannelCredentials()...
   auto new_channel = grpc::CreateCustomChannel(new_uri, grpc::InsecureChannelCredentials(), *channel_args_);
   if (!new_channel) {
-    ldout(cct, 0) << fmt::format(FMT_STRING("HandoffGRPCChannel::set_channel_uri(): ERROR: Failed to create new gRPC channel for URI {}"), new_uri) << dendl;
+    ldout(cct, 0) << fmt::format(FMT_STRING("HandoffGRPCChannel::set_channel_uri: {}: ERROR: Failed to create new gRPC channel for URI {}"), description_, new_uri) << dendl;
     return false;
   } else {
-    ldout(cct, 1) << fmt::format(FMT_STRING("HandoffGRPCChannel::set_channel_uri({}) success"), new_uri) << dendl;
+    ldout(cct, 1) << fmt::format(FMT_STRING("HandoffGRPCChannel::set_channel_uri: {}: set uri '{}' success"), description_, new_uri) << dendl;
     channel_ = std::move(new_channel);
     channel_uri_ = new_uri;
     return true;

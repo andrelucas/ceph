@@ -529,6 +529,7 @@ public:
     static const char* keys[] = {
       "rgw_handoff_authparam_always",
       "rgw_handoff_authparam_withtoken",
+      "rgw_handoff_authz_grpc_uri",
       "rgw_handoff_enable_anonymous_authorization",
       "rgw_handoff_enable_chunked_upload",
       "rgw_handoff_enable_signature_v2",
@@ -552,6 +553,9 @@ public:
     // The gRPC channel change needs to come after the arguments setting, if any.
     if (changed.count("rgw_handoff_grpc_uri")) {
       helper_.get_authn_channel().set_channel_uri(cct_, conf->rgw_handoff_grpc_uri);
+    }
+    if (changed.count("rgw_handoff_authz_grpc_uri")) {
+      helper_.get_authz_channel().set_channel_uri(cct_, conf->rgw_handoff_authz_grpc_uri);
     }
     if (changed.count("rgw_handoff_enable_anonymous_authorization")) {
       helper_.set_anonymous_authorization(cct_, conf->rgw_handoff_enable_anonymous_authorization);
@@ -607,9 +611,9 @@ private:
   AuthParamMode authorization_mode_ = AuthParamMode::ALWAYS; // Runtime-alterable.
 
   // The gRPC channel for authentication.
-  HandoffGRPCChannel authn_channel_;
+  HandoffGRPCChannel authn_channel_ { "handoff-authn" };
   // The gRPC channel for authorization.
-  HandoffGRPCChannel authz_channel_;
+  HandoffGRPCChannel authz_channel_ { "handoff-authz" };
 
 public:
   /**
@@ -631,6 +635,8 @@ public:
    * @param store Pointer to the sal::Store object.
    * @param grpc_uri Optional URI for the gRPC server. If empty (the default),
    * config value rgw_handoff_grpc_uri is used.
+   * @param grpc_authz_uri Optional URI for the gRPC authorization server. If
+   * empty (the default), config value rgw_handoff_authz_grpc_uri is used.
    * @return 0 on success, otherwise failure.
    *
    * Store long-lived state.
@@ -641,7 +647,7 @@ public:
    * later use. This will manage the persistent connection(s) for all gRPC
    * communications.
    */
-  int init(CephContext* const cct, rgw::sal::Driver* store, const std::string& grpc_uri = "");
+  int init(CephContext* const cct, rgw::sal::Driver* store, const std::string& grpc_uri = "", const std::string& authz_grpc_uri = "");
 
   /**
    * @brief Return a reference to the the authentication channel wrapper object.
