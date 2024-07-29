@@ -526,6 +526,8 @@ public:
 
   const char** get_tracked_conf_keys() const
   {
+    // Note that these are keys that support runtime alteration. Keys that are
+    // set at startup time only do not need to appear here.
     static const char* keys[] = {
       "rgw_handoff_authparam_always",
       "rgw_handoff_authparam_withtoken",
