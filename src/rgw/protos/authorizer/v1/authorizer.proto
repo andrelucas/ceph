@@ -54,7 +54,7 @@ message PingResponse
 // Utility messages and enums.
 //
 
-enum AuthorizationResultType {
+enum AuthorizationResultCode {
   AUTHZ_RESULT_UNSPECIFIED = 0;
   // Proceed with the request, which is now authorized.
   AUTHZ_RESULT_ALLOW = 1;
@@ -81,7 +81,7 @@ message AuthorizationResult
   // An unambiguous error code that will be mapped to internal RGW error
   // types, as defined in src/rgw/rgw_common.cc as rgw_http_s3_errors and
   // possibly new Akamai-specific values.
-  AuthorizationResultType result = 3;
+  AuthorizationResultCode code = 3;
 }
 
 // Each S3 Opcode as seen by RGW.
@@ -199,6 +199,9 @@ message ExtraData
 message AuthorizeRequest
 {
   AuthorizationCommon common = 1;
+  // The canonical user ID is returned by the Authenticator and is reflected
+  // back to the Authorizer verbatim.
+  string canonical_user_id = 9;
   // user_arn is returned by the Authenticator and is reflected back
   // to the Authorizer verbatim.
   string user_arn = 2;
