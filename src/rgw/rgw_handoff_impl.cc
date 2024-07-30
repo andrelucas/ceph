@@ -47,9 +47,10 @@
 #include "absl/strings/numbers.h"
 #include "absl/time/time.h"
 #include "authenticator/v1/authenticator.pb.h"
-#include "include/ceph_assert.h"
+#include "authorizer/v1/authorizer.pb.h"
 
 #include "common/dout.h"
+#include "include/ceph_assert.h"
 #include "rgw/rgw_client_io.h"
 #include "rgw/rgw_common.h"
 
@@ -240,6 +241,8 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req)
   using namespace authenticator::v1;
 
   if (status.ok()) {
+    // XXX XXX this is going to need extended to support all the information authz
+    // needs from the Authenticator's result.
     return HandoffAuthResult(resp.canonical_user_id(), status.error_message());
   }
   // Error conditions are returned via the Richer error model
@@ -1011,5 +1014,46 @@ HandoffHelperImpl::get_signing_key(const DoutPrefixProvider* dpp,
   ldpp_dout(dpp, 5) << "fetched signing key" << dendl;
   return std::make_optional(result.signing_key());
 }
+
+/****************************************************************************/
+
+bool AuthorizerClient::Ping(const std::string& id)
+{
+  using namespace ::authorizer::v1;
+
+  ::grpc::ClientContext context;
+  PingRequest req;
+  auto common = req.mutable_common();
+  common->set_authorization_id(id);
+  PingResponse resp;
+
+  ::grpc::Status status = stub_->Ping(&context, req, &resp);
+  if (!status.ok()) {
+    return false;
+  }
+  if (resp.common().authorization_id() != id) {
+    return false;
+  }
+  return true;
+}
+
+AuthorizerClient::AuthorizeResult AuthorizerClient::Authorize(const AuthorizeRequest& req)
+{
+  using namespace ::authorizer::v1;
+
+  ::grpc::ClientContext context;
+  AuthorizeResponse resp;
+
+  ::grpc::Status status = stub_->Authorize(&context, req, &resp);
+  if (status.ok()) {
+    // The RPC succeeded. Construct a result object from the response. Note
+    // that the first field is only true if we got an ALLOW result.
+    return AuthorizeResult(resp.result().code() == AuthorizationResultCode::AUTHZ_RESULT_ALLOW, resp);
+  }
+  // XXX support richer error model return here, if necessary.
+  return AuthorizeResult(status); // Only support standard status response initially.
+}
+
+/****************************************************************************/
 
 } // namespace rgw

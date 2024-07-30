@@ -24,6 +24,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "google/rpc/status.pb.h"
 #include <fmt/format.h>
 #include <grpc/grpc.h>
 #include <grpcpp/channel.h>
@@ -39,6 +40,10 @@
 #include "authenticator/v1/authenticator.grpc.pb.h"
 #include "authenticator/v1/authenticator.pb.h"
 using namespace ::authenticator::v1;
+
+#include "authorizer/v1/authorizer.grpc.pb.h"
+#include "authorizer/v1/authorizer.pb.h"
+using namespace ::authorizer::v1;
 
 #include "rgw_handoff.h"
 #include "rgw_handoff_grpcutil.h"
@@ -108,7 +113,7 @@ public:
 /****************************************************************************/
 
 /**
- * @brief gRPC client wrapper for rgw/auth/v1/AuthService.
+ * @brief gRPC client wrapper for authenticator/v1/AuthenticatorService.
  *
  * Very thin wrapper around the gRPC client. Construct with a channel to
  * create a stub. Call services via the corresponding methods, with sanitised
@@ -943,6 +948,151 @@ public:
   bool valid_presigned_time(const DoutPrefixProvider* dpp, const req_state* s, time_t now);
 
 }; // class HandoffHelperImpl
+
+/****************************************************************************/
+
+class AuthorizerClient {
+private:
+  std::unique_ptr<AuthorizerService::Stub> stub_;
+
+public:
+  /**
+   * @brief Construct a new Authorizer Client object. You must use set_stub
+   * before using any gRPC calls, or the object's behaviour is undefined.
+   */
+  AuthorizerClient() { }
+
+  /**
+   * @brief Construct a new Authorizer Client object and initialise the gRPC
+   * stub.
+   *
+   * @param channel pointer to the grpc::Channel object to be used.
+   */
+  explicit AuthorizerClient(std::shared_ptr<::grpc::Channel> channel)
+      : stub_(AuthorizerService::NewStub(channel))
+  {
+  }
+
+  // Copy constructors can't work with the stub unique_ptr.
+  AuthorizerClient(const AuthorizerClient&) = delete;
+  AuthorizerClient& operator=(const AuthorizerClient&) = delete;
+
+  // Moves are fine.
+  AuthorizerClient(AuthorizerClient&&) = default;
+  AuthorizerClient& operator=(AuthorizerClient&&) = default;
+
+  /**
+   * @brief Set the gRPC stub for this object.
+   *
+   * @param channel the gRPC channel pointer.
+   */
+  void set_stub(std::shared_ptr<::grpc::Channel> channel)
+  {
+    stub_ = AuthorizerService::NewStub(channel);
+  }
+
+  /**
+   * @brief Call the Authorizer Ping() endpoint.
+   *
+   * @param id The authorization_id field to be echoed back.
+   * @return true The call succeeded and the ID was echoed back properly.
+   * @return false The call failed for some reason.
+   */
+  bool Ping(const std::string& id);
+
+  class AuthorizeResult {
+    bool success_;
+    std::optional<AuthorizeResponse> response_;
+    std::optional<::grpc::Status> status_;
+    std::optional<::google::rpc::Status> rpc_status_;
+
+  public:
+    /**
+     * @brief Construct an Authorize Result object, saving the success (ALLOW
+     * response or not) and the gRPC response message.
+     *
+     * @param response The AuthorizeResponse message.
+     */
+    AuthorizeResult(bool success, const AuthorizeResponse& response)
+        : success_(success)
+        , response_(response)
+    {
+    }
+    /**
+     * @brief Construct a failure-type Authorize Result object, saving the
+     * gRPC status code (which could not be resolved into a 'richer error'
+     * status).
+     *
+     * For richer error status, use the other constructor.
+     *
+     * @param status the ::grpc::Status response from the RPC call.
+     */
+    AuthorizeResult(const ::grpc::Status& status)
+        : success_(false)
+        , status_(status)
+    {
+    }
+    /**
+     * @brief Construct a failure-type Authorize Result object, saving the
+     * gRPC status code and the richer error status.
+     *
+     * @param status The ::grpc::Status response from the RPC call.
+     * @param rpc_status The ::google::rpc::Status response extracted from the
+     * richer error found in the ::grpc::Status response.
+     */
+    AuthorizeResult(const ::grpc::Status& status, const ::google::rpc::Status& rpc_status)
+        : success_(false)
+        , status_(status)
+        , rpc_status_(rpc_status)
+    {
+    }
+
+    // Standard constructors are all fine.
+    AuthorizeResult(const AuthorizeResult&) = default;
+    AuthorizeResult& operator=(const AuthorizeResult&) = default;
+    AuthorizeResult(AuthorizeResult&&) = default;
+    AuthorizeResult& operator=(AuthorizeResult&&) = default;
+
+    /**
+     * @brief Return true iff the call has been made and the call succeeded
+     * with a success (ALLOW) result.
+     *
+     * @return true The call has been made and the call returned ALLOW status.
+     * @return false The call has not been made, or the call failed, or the
+     * call did not return ALLOW status.
+     */
+    bool ok() const noexcept { return success_; }
+    /**
+     * @brief Return true if the call has not yet been made, or if the call
+     * did not succeed with a success (ALLOW) result.
+     *
+     * @return true The call has not been made, or the call failed, or the
+     * call did not return ALLOW status.
+     * @return false The call has been made and the call returned ALLOW status.
+     */
+    bool err() const noexcept { return !ok(); }
+
+    /// @brief Return the AuthorizeResponse message resulting from the RPC call,
+    /// if any.
+    std::optional<AuthorizeResponse> response() const { return response_; }
+    /// @brief Return the gRPC status object from the RPC call, if any.
+    std::optional<::grpc::Status> status() const { return status_; }
+    /// @brief Return the google::rpc::Status object from the RPC call, if any.
+    std::optional<::google::rpc::Status> rpc_status() const { return rpc_status_; }
+
+  }; // class AuthorizerClient::AuthorizeResult
+
+  /**
+   * @brief Call the Authorizer Authorize() endpoint.
+   *
+   * @param req The AuthorizeRequest message.
+   * @return AuthorizeResponse the AuthorizeResponse message from the server.
+   */
+  AuthorizerClient::AuthorizeResult Authorize(const AuthorizeRequest& req);
+
+}; // class AuthorizerClient
+
+/****************************************************************************/
 
 } /* namespace rgw */
 

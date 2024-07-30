@@ -21,8 +21,6 @@
 #include <gtest/gtest.h>
 #include <openssl/evp.h>
 
-#include "authenticator/v1/authenticator.pb.h"
-
 #include "common/async/yield_context.h"
 #include "common/ceph_argparse.h"
 #include "common/ceph_context.h"
@@ -54,6 +52,10 @@
 // This is the protobuf for the authenticator service, copied from
 // obj-endpoint.
 #include "authenticator/v1/authenticator.grpc.pb.h"
+#include "authenticator/v1/authenticator.pb.h"
+
+#include "authorizer/v1/authorizer.grpc.pb.h"
+#include "authorizer/v1/authorizer.pb.h"
 
 #pragma clang diagnostic error "-Wsign-conversion"
 #pragma GCC diagnostic error "-Wsign-conversion"
@@ -1080,7 +1082,7 @@ public:
   }
   void set_channel_args(CephContext* const cct, const grpc::ChannelArguments& args) { channel_args_set_ = true; }
   void set_channel_uri(CephContext* const cct, const std::string& uri) { channel_uri_ = uri; }
-}; // class MockHelperForConfigObserver::MockHandoffGRPCChannel
+}; // class MockHandoffGRPCChannel
 
 /**
  * @brief Mock the chunks of HandoffHelperImpl we need to check that the
@@ -1104,6 +1106,7 @@ public:
   }
 
   MockHandoffGRPCChannel& get_authn_channel() { return authn_channel_; }
+  MockHandoffGRPCChannel& get_authz_channel() { return authz_channel_; }
 
   void set_signature_v2(CephContext* const cct, bool enable) { signature_v2_ = enable; }
   void set_anonymous_authorization(CephContext* const cct, bool enable) { anonymous_authorization_ = enable; }
@@ -1114,6 +1117,7 @@ public:
   HandoffConfigObserver<MockHelperForConfigObserver> observer_;
   AuthParamMode authparam_mode_;
   MockHandoffGRPCChannel authn_channel_;
+  MockHandoffGRPCChannel authz_channel_;
   bool signature_v2_;
   bool chunked_upload_;
   bool anonymous_authorization_;
@@ -1453,6 +1457,138 @@ TEST_F(HandoffHelperImplSubsysTest, TestReturnCodeMapping)
   ASSERT_TRUE(res.is_err());
   EXPECT_EQ(res.code(), EACCES);
 }
+
+/* #region authz-grpc */
+
+class TestAuthzImpl final : public authorizer::v1::AuthorizerService::Service {
+
+  DoutPrefix dpp_ { g_ceph_context, ceph_subsys_rgw, "unittest gRPC authz server " };
+
+  grpc::Status Ping(grpc::ServerContext* context, const authorizer::v1::PingRequest* request, authorizer::v1::PingResponse* response) override
+  {
+    ldpp_dout(&dpp_, 20) << __func__ << ": enter" << dendl;
+    auto common = response->mutable_common();
+    // Only the authorization_id has to match. We don't really care about the
+    // timestamp.
+    common->set_authorization_id(request->common().authorization_id());
+    ldpp_dout(&dpp_, 20) << __func__ << ": exit OK" << dendl;
+    return grpc::Status::OK;
+  }
+
+  grpc::Status Authorize(grpc::ServerContext* context, const authorizer::v1::AuthorizeRequest* request, authorizer::v1::AuthorizeResponse* response) override
+  {
+    ldpp_dout(&dpp_, 20) << __func__ << ": enter" << dendl;
+    ldpp_dout(&dpp_, 20) << __func__ << ": exit OK" << dendl;
+    return grpc::Status::OK;
+  }
+};
+
+/**
+ * @brief Authorization gRPC servers test fixture.
+ *
+ * Note 'servers' - we're starting a mock authn server as well as the authz
+ * server. It's easy enough to do.
+ *
+ * Use GRPCTestServer to implement the gRPC servers on a random port, then
+ * configure the HandoffHelperImpl to use it. The tests then issue gRPC()
+ * calls against the helper.
+ *
+ * You *MUST* call helper_init() if you're going to use the HandoffHelperImpl
+ * at all! Otherwise the channel and store won't be set up. This isn't called
+ * automatically because sometimes we want to modify the channel configuration
+ * first.
+ *
+ * It also doesn't implicitly start the server, you have to call start_test().
+ * This is so we can easily test behaviour when the server isn't started.
+ *
+ * This actual-server approach has the virtue of being a somewhat faithful
+ * client-side test. The server side is rather simplistic, obviously; but
+ * that's probably ok.
+ *
+ * The fixture _will_ call server().stop() in TearDown, that feels relatively
+ * safe.
+ */
+class AuthzGRPCTest : public ::testing::Test {
+
+protected:
+  HandoffHelperImpl hh_;
+  optional_yield y_ = null_yield;
+  DoutPrefix dpp_ { g_ceph_context, ceph_subsys_rgw, "unittest " };
+
+  GRPCTestServer<TestAuthImpl> authn_server_;
+  GRPCTestServer<TestAuthzImpl> authz_server_;
+
+  // Don't start the server - some tests might want a chance to see what
+  // happens without a server.
+  void SetUp() override
+  {
+    // We're not really testing the authn_server here, so we can safely start
+    // and stop it in the fixtures to save on boilerplate in the tests.
+    authn_server().start();
+  }
+
+  void helper_init()
+  {
+    dpp_.get_cct()->_conf.set_val_or_die("rgw_handoff_enable_grpc", "true");
+    dpp_.get_cct()->_conf.apply_changes(nullptr);
+    ASSERT_EQ(dpp_.get_cct()->_conf->rgw_handoff_enable_grpc, true);
+    // Note init() can take the server address URIs, it's normally defaulted
+    // to empty which means 'use the Ceph configuration'.
+    ASSERT_EQ(hh_.init(g_ceph_context, nullptr, authn_server_.address(), authz_server_.address()), 0);
+  }
+
+  // Will stop the server. There's no situation where we want it left around.
+  void TearDown() override
+  {
+    authz_server().stop();
+    authn_server().stop();
+  }
+
+  GRPCTestServer<TestAuthImpl>& authn_server() { return authn_server_; }
+  GRPCTestServer<TestAuthzImpl>& authz_server() { return authz_server_; }
+};
+
+// This just tests we can instantiate the test classes.
+TEST_F(AuthzGRPCTest, Null)
+{
+}
+
+// Make sure server().start() is idempotent.
+TEST_F(AuthzGRPCTest, MetaStart)
+{
+  authz_server().start();
+  for (int n = 0; n < 1000; n++) {
+    authz_server().start();
+  }
+  authz_server().stop();
+}
+
+// Make sure server().stop() is idempotent.
+TEST_F(AuthzGRPCTest, MetaStop)
+{
+  authz_server().start();
+  for (int n = 0; n < 1000; n++) {
+    authz_server().stop();
+  }
+}
+
+TEST_F(AuthzGRPCTest, HelperInit)
+{
+  authz_server().start();
+  helper_init();
+}
+
+TEST_F(AuthzGRPCTest, Ping)
+{
+  authz_server().start();
+  helper_init();
+  auto client = AuthorizerClient(hh_.get_authz_channel().get_channel());
+  auto id = "foo";
+  auto status = client.Ping(id);
+  ASSERT_TRUE(status);
+}
+
+/* #endregion */
 
 } // namespace rgw
 
