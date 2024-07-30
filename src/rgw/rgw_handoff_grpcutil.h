@@ -22,7 +22,7 @@
 #include <optional>
 #include <shared_mutex>
 
-#include "rgw/rgw_common.h"
+#include "common/ceph_context.h"
 
 namespace rgw {
 

@@ -358,10 +358,13 @@ static int read_bucket_policy(const DoutPrefixProvider *dpp,
     return 0;
   }
 
-  int ret = rgw_op_get_bucket_policy_from_attr(dpp, s->cct, driver, bucket_info, bucket_attrs, policy, y);
+  int ret = 0;
+  // if (!s->handoff_authz->enabled()) {
+  ret = rgw_op_get_bucket_policy_from_attr(dpp, s->cct, driver, bucket_info, bucket_attrs, policy, y);
   if (ret == -ENOENT) {
-      ret = -ERR_NO_SUCH_BUCKET;
+    ret = -ERR_NO_SUCH_BUCKET;
   }
+  // }
 
   return ret;
 }
@@ -458,6 +461,7 @@ static int read_obj_policy(const DoutPrefixProvider *dpp,
  */
 int rgw_build_bucket_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* driver, req_state* s, optional_yield y)
 {
+  // HANDOFF: Visited.
   int ret = 0;
 
   string bi = s->info.args.get(RGW_SYS_PARAM_PREFIX "bucket-instance");
@@ -526,16 +530,22 @@ int rgw_build_bucket_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* d
     }
     
     s->bucket_mtime = s->bucket->get_modification_time();
+    // HANDOFF: Allow read of bucket attrs, these aren't just for authz.
     s->bucket_attrs = s->bucket->get_attrs();
-    ret = read_bucket_policy(dpp, driver, s, s->bucket->get_info(),
-			     s->bucket->get_attrs(),
-			     s->bucket_acl.get(), s->bucket->get_key(), y);
-    acct_acl_user = {
-      s->bucket->get_info().owner,
-      s->bucket_acl->get_owner().get_display_name(),
-    };
 
-    s->bucket_owner = s->bucket_acl->get_owner();
+    if (s->handoff_authz->enabled()) {
+      ldpp_dout(dpp, 20) << "handoff authz: rgw_build_bucket_policies(): Skip read_bucket_policy() and s->bucket_owner set" << dendl;
+    } else {
+      ret = read_bucket_policy(dpp, driver, s, s->bucket->get_info(),
+          s->bucket->get_attrs(),
+          s->bucket_acl.get(), s->bucket->get_key(), y);
+      acct_acl_user = {
+        s->bucket->get_info().owner,
+        s->bucket_acl->get_owner().get_display_name(),
+      };
+
+      s->bucket_owner = s->bucket_acl->get_owner();
+    }
 
     std::unique_ptr<rgw::sal::ZoneGroup> zonegroup;
     int r = driver->get_zonegroup(s->bucket->get_info().zonegroup, &zonegroup);
@@ -574,65 +584,84 @@ int rgw_build_bucket_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* d
       return -EINVAL;
     }
 
-    s->bucket_access_conf = get_public_access_conf_from_attr(s->bucket->get_attrs());
-  }
-
-  /* handle user ACL only for those APIs which support it */
-  if (s->user_acl) {
-    std::unique_ptr<rgw::sal::User> acl_user = driver->get_user(acct_acl_user.uid);
-
-    ret = acl_user->read_attrs(dpp, y);
-    if (!ret) {
-      ret = get_user_policy_from_attr(dpp, s->cct, acl_user->get_attrs(), *s->user_acl);
-    }
-    if (-ENOENT == ret) {
-      /* In already existing clusters users won't have ACL. In such case
-       * assuming that only account owner has the rights seems to be
-       * reasonable. That allows to have only one verification logic.
-       * NOTE: there is small compatibility kludge for global, empty tenant:
-       *  1. if we try to reach an existing bucket, its owner is considered
-       *     as account owner.
-       *  2. otherwise account owner is identity stored in s->user->user_id.  */
-      s->user_acl->create_default(acct_acl_user.uid,
-                                  acct_acl_user.display_name);
-      ret = 0;
-    } else if (ret < 0) {
-      ldpp_dout(dpp, 0) << "NOTICE: couldn't get user attrs for handling ACL "
-          "(user_id=" << s->user->get_id() << ", ret=" << ret << ")" << dendl;
-      return ret;
+    if (s->handoff_authz->enabled()) {
+      ldpp_dout(dpp, 20) << "handoff authz: rgw_build_bucket_policies(): Skip get_public_access_conf_from_attr()" << dendl;
+    } else {
+      s->bucket_access_conf = get_public_access_conf_from_attr(s->bucket->get_attrs());
     }
   }
+
+  if (s->handoff_authz->enabled()) {
+    ldpp_dout(dpp, 20) << "handoff authz: rgw_build_bucket_policies(): Skip get_user_policy_from_attr() for user ACL" << dendl;
+  } else {
+    /* handle user ACL only for those APIs which support it */
+    if (s->user_acl) {
+      std::unique_ptr<rgw::sal::User> acl_user = driver->get_user(acct_acl_user.uid);
+
+      ret = acl_user->read_attrs(dpp, y);
+      if (!ret) {
+        ret = get_user_policy_from_attr(dpp, s->cct, acl_user->get_attrs(), *s->user_acl);
+      }
+      if (-ENOENT == ret) {
+        /* In already existing clusters users won't have ACL. In such case
+         * assuming that only account owner has the rights seems to be
+         * reasonable. That allows to have only one verification logic.
+         * NOTE: there is small compatibility kludge for global, empty tenant:
+         *  1. if we try to reach an existing bucket, its owner is considered
+         *     as account owner.
+         *  2. otherwise account owner is identity stored in s->user->user_id.  */
+        s->user_acl->create_default(acct_acl_user.uid,
+            acct_acl_user.display_name);
+        ret = 0;
+      } else if (ret < 0) {
+        ldpp_dout(dpp, 0) << "NOTICE: couldn't get user attrs for handling ACL "
+                             "(user_id="
+                          << s->user->get_id() << ", ret=" << ret << ")" << dendl;
+        return ret;
+      }
+    }
+  }
+
   // We don't need user policies in case of STS token returned by AssumeRole,
   // hence the check for user type
-  if (! s->user->get_id().empty() && s->auth.identity->get_identity_type() != TYPE_ROLE) {
-    try {
-      ret = s->user->read_attrs(dpp, y);
-      if (ret == 0) {
-	auto user_policies = get_iam_user_policy_from_attr(s->cct,
-							   s->user->get_attrs(),
-							   s->user->get_tenant());
+  if (!s->user->get_id().empty() && s->auth.identity->get_identity_type() != TYPE_ROLE) {
+    if (s->handoff_authz->enabled()) {
+      ldpp_dout(dpp, 20) << "handoff authz: rgw_build_bucket_policies(): Skip get_iam_user_policy_from_attr() for STS Role" << dendl;
+    } else {
+      try {
+        ret = s->user->read_attrs(dpp, y);
+        if (ret == 0) {
+          auto user_policies = get_iam_user_policy_from_attr(s->cct,
+              s->user->get_attrs(),
+              s->user->get_tenant());
           s->iam_user_policies.insert(s->iam_user_policies.end(),
-                                      std::make_move_iterator(user_policies.begin()),
-                                      std::make_move_iterator(user_policies.end()));
-      } else {
-        if (ret == -ENOENT)
-          ret = 0;
-        else ret = -EACCES;
+              std::make_move_iterator(user_policies.begin()),
+              std::make_move_iterator(user_policies.end()));
+        } else {
+          if (ret == -ENOENT)
+            ret = 0;
+          else
+            ret = -EACCES;
+        }
+      } catch (const std::exception& e) {
+        ldpp_dout(dpp, -1) << "Error reading IAM User Policy: " << e.what() << dendl;
+        ret = -EACCES;
       }
-    } catch (const std::exception& e) {
-      ldpp_dout(dpp, -1) << "Error reading IAM User Policy: " << e.what() << dendl;
-      ret = -EACCES;
     }
   }
 
-  try {
-    s->iam_policy = get_iam_policy_from_attr(s->cct, s->bucket_attrs, s->bucket_tenant);
-  } catch (const std::exception& e) {
-    // Really this is a can't happen condition. We parse the policy
-    // when it's given to us, so perhaps we should abort or otherwise
-    // raise bloody murder.
-    ldpp_dout(dpp, 0) << "Error reading IAM Policy: " << e.what() << dendl;
-    ret = -EACCES;
+  if (s->handoff_authz->enabled()) {
+    ldpp_dout(dpp, 20) << "handoff authz: rgw_build_bucket_policies(): Skip get_iam_policy_from_attr() for IAM policy" << dendl;
+  } else {
+    try {
+      s->iam_policy = get_iam_policy_from_attr(s->cct, s->bucket_attrs, s->bucket_tenant);
+    } catch (const std::exception& e) {
+      // Really this is a can't happen condition. We parse the policy
+      // when it's given to us, so perhaps we should abort or otherwise
+      // raise bloody murder.
+      ldpp_dout(dpp, 0) << "Error reading IAM Policy: " << e.what() << dendl;
+      ret = -EACCES;
+    }
   }
 
   bool success = driver->get_zone()->get_redirect_endpoint(&s->redirect_zone_endpoint);
@@ -652,6 +681,7 @@ int rgw_build_bucket_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* d
 int rgw_build_object_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* driver,
 			      req_state *s, bool prefetch_data, optional_yield y)
 {
+  // HANDOFF: Visited.
   int ret = 0;
 
   if (!rgw::sal::Object::empty(s->object.get())) {
@@ -664,9 +694,13 @@ int rgw_build_object_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* d
     if (prefetch_data) {
       s->object->set_prefetch_data();
     }
-    ret = read_obj_policy(dpp, driver, s, s->bucket->get_info(), s->bucket_attrs,
-			  s->object_acl.get(), nullptr, s->iam_policy, s->bucket.get(),
-                          s->object.get(), y);
+    if (s->handoff_authz->enabled()) {
+      ldpp_dout(dpp, 20) << "handoff authz: rgw_build_object_policies(): Skip read_obj_policy()" << dendl;
+    } else {
+      ret = read_obj_policy(dpp, driver, s, s->bucket->get_info(), s->bucket_attrs,
+          s->object_acl.get(), nullptr, s->iam_policy, s->bucket.get(),
+          s->object.get(), y);
+    }
   }
 
   return ret;
@@ -872,6 +906,7 @@ static void rgw_add_grant_to_iam_environment(rgw::IAM::Environment& e, req_state
 void rgw_build_iam_environment(rgw::sal::Driver* driver,
 	                              req_state* s)
 {
+  // HANDOFF: Visited.
   const auto& m = s->info.env->get_map();
   auto t = ceph::real_clock::now();
   s->env.emplace("aws:CurrentTime", std::to_string(ceph::real_clock::to_time_t(t)));
@@ -8119,6 +8154,7 @@ int RGWHandler::init(rgw::sal::Driver* _driver,
 
 int RGWHandler::do_init_permissions(const DoutPrefixProvider *dpp, optional_yield y)
 {
+  // HANDOFF: Visited.
   int ret = rgw_build_bucket_policies(dpp, driver, s, y);
   if (ret < 0) {
     ldpp_dout(dpp, 10) << "init_permissions on " << s->bucket
@@ -8132,6 +8168,7 @@ int RGWHandler::do_init_permissions(const DoutPrefixProvider *dpp, optional_yiel
 
 int RGWHandler::do_read_permissions(RGWOp *op, bool only_bucket, optional_yield y)
 {
+  // HANDOFF: Start.
   if (only_bucket) {
     /* already read bucket info */
     return 0;
