@@ -901,6 +901,26 @@ public:
       const req_state* s);
 
   /**
+   * @brief Authorize the operation via the external Authorizer.
+   *
+   * Call out to the external Authorizer to verify the operation, using a
+   * combination of the req_state, our saved authorization state (if any), and
+   * the operation code (e.g. rgw::IAM::GetObject).
+   *
+   * @param op The RGWOp-subclass object pointer.
+   * @param state The HandoffAuthzState object.
+   * @param operation The operation code.
+   * @param y optional yield (will likely be ignored).
+   * @return int return code. 0 for success, <0 for error, typically -EACCES.
+   */
+  int verify_permission(const RGWOp* op, HandoffAuthzState* state,
+      uint64_t operation, optional_yield y)
+  {
+    // XXX !!! !!!
+    return 0;
+  }
+
+  /**
    * @brief Assuming an already-parsed (via synthesize_auth_header) presigned
    * header URL, check that the given expiry time has not expired. Note that
    * in v17.2.6, this won't get called - RGW checks the expiry time before

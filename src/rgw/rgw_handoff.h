@@ -225,6 +225,22 @@ public:
       optional_yield y);
 
   /**
+   * @brief Authorize the operation via the external Authorizer.
+   *
+   * Call out to the external Authorizer to verify the operation, using a
+   * combination of the req_state, our saved authorization state (if any), and
+   * the operation code (e.g. rgw::IAM::GetObject).
+   *
+   * @param op The RGWOp-subclass object pointer.
+   * @param state The HandoffAuthzState object.
+   * @param operation The operation code.
+   * @param y optional yield (will likely be ignored).
+   * @return int return code. 0 for success, <0 for error, typically -EACCES.
+   */
+  int verify_permission(const RGWOp* op, HandoffAuthzState* state,
+      uint64_t operation, optional_yield y);
+
+  /**
    * @brief Return true if anonymous authorization is enabled, false otherwise.
    *
    * @return true Anonymous authorization is enabled.
