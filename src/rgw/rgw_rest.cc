@@ -1899,6 +1899,7 @@ int RGWHandler_REST::init_permissions(RGWOp* op, optional_yield y)
 
 int RGWHandler_REST::read_permissions(RGWOp* op_obj, optional_yield y)
 {
+  // HANDOFF: Visited.
   bool only_bucket = false;
 
   switch (s->op) {

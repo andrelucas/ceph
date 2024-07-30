@@ -3008,6 +3008,7 @@ void RGWStatBucket::execute(optional_yield y)
 
 int RGWListBucket::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
   op_ret = get_params(y);
   if (op_ret < 0) {
     return op_ret;
@@ -3020,19 +3021,22 @@ int RGWListBucket::verify_permission(optional_yield y)
 
   s->env.emplace("s3:max-keys", std::to_string(max));
 
-  auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
-  if (has_s3_resource_tag)
-    rgw_iam_add_buckettags(this, s);
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s->handoff_authz.get(), rgw::IAM::s3ListBucket, y);
 
-  if (!verify_bucket_permission(this,
-                                s,
-				list_versions ?
-				rgw::IAM::s3ListBucketVersions :
-				rgw::IAM::s3ListBucket)) {
-    return -EACCES;
+  } else {
+    auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
+    if (has_s3_resource_tag)
+      rgw_iam_add_buckettags(this, s);
+
+    if (!verify_bucket_permission(this,
+            s,
+            list_versions ? rgw::IAM::s3ListBucketVersions : rgw::IAM::s3ListBucket)) {
+      return -EACCES;
+    }
+
+    return 0;
   }
-
-  return 0;
 }
 
 int RGWListBucket::parse_max_keys()
@@ -3100,11 +3104,17 @@ int RGWGetBucketLogging::verify_permission(optional_yield y)
 
 int RGWGetBucketLocation::verify_permission(optional_yield y)
 {
-  auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
-  if (has_s3_resource_tag)
-    rgw_iam_add_buckettags(this, s);
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s->handoff_authz.get(), rgw::IAM::s3GetBucketLocation, y);
 
-  return verify_bucket_owner_or_policy(s, rgw::IAM::s3GetBucketLocation);
+  } else {
+    auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
+    if (has_s3_resource_tag)
+      rgw_iam_add_buckettags(this, s);
+
+    return verify_bucket_owner_or_policy(s, rgw::IAM::s3GetBucketLocation);
+  }
 }
 
 int RGWCreateBucket::verify_permission(optional_yield y)
@@ -8168,7 +8178,7 @@ int RGWHandler::do_init_permissions(const DoutPrefixProvider *dpp, optional_yiel
 
 int RGWHandler::do_read_permissions(RGWOp *op, bool only_bucket, optional_yield y)
 {
-  // HANDOFF: Start.
+  // HANDOFF: Visited.
   if (only_bucket) {
     /* already read bucket info */
     return 0;
