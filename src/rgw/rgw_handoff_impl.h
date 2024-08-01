@@ -909,10 +909,11 @@ public:
    * @brief Authorize the operation via the external Authorizer.
    *
    * Call out to the external Authorizer to verify the operation, using a
-   * combination of the req_state, our saved authorization state (if any), and
-   * the operation code (e.g. rgw::IAM::GetObject).
+   * combination of the req_state (in the \p s field of the \p op parameter),
+   * our saved authorization state (if any), and the operation code (e.g.
+   * rgw::IAM::GetObject).
    *
-   * @param op The RGWOp-subclass object pointer.
+   * @param op The RGWOp-subclass object pointer. The req_state
    * @param state The HandoffAuthzState object.
    * @param operation The operation code.
    * @param y optional yield (will likely be ignored).
@@ -951,6 +952,12 @@ public:
 
 /****************************************************************************/
 
+/**
+ * @brief Wrapper for gRPC calls to the Authorizer service.
+ *
+ * Attempt to make calls to the Authorizer service easier to test, by
+ * encapsulating the actual calls and error handling.
+ */
 class AuthorizerClient {
 private:
   std::unique_ptr<AuthorizerService::Stub> stub_;
@@ -1000,6 +1007,17 @@ public:
    */
   bool Ping(const std::string& id);
 
+  /**
+   * @brief Collection of results from the Authorizer Authorize() RPC endpoint.
+   *
+   * There are a a lot of potential results from an Authorize() call. In the
+   * successful RPC case we want to inspect the response protobuf message. In
+   * failure cases, we want at least the grpc::Status and possibly the
+   * google::rpc::Status message for richer error responses.
+   *
+   * Rather than use a tuple response, bit the bullet and encapsulate the lot.
+   * That way we can standardise display code and error handling.
+   */
   class AuthorizeResult {
     bool success_;
     std::optional<AuthorizeResponse> response_;
@@ -1080,17 +1098,61 @@ public:
     /// @brief Return the google::rpc::Status object from the RPC call, if any.
     std::optional<::google::rpc::Status> rpc_status() const { return rpc_status_; }
 
+    friend std::ostream& operator<<(std::ostream& os, const AuthorizerClient::AuthorizeResult& ep);
   }; // class AuthorizerClient::AuthorizeResult
 
   /**
    * @brief Call the Authorizer Authorize() endpoint.
    *
+   * If the common.timestamp is set to 0, the client will fill in the current
+   * time as this is almost always the correct thing to do.
+   *
    * @param req The AuthorizeRequest message.
    * @return AuthorizeResponse the AuthorizeResponse message from the server.
    */
-  AuthorizerClient::AuthorizeResult Authorize(const AuthorizeRequest& req);
+  AuthorizerClient::AuthorizeResult Authorize(AuthorizeRequest& req);
 
 }; // class AuthorizerClient
+
+/**
+ * @brief Set the Authorization Common Timestamp object to 'now'.
+ *
+ * @param common a mutable AuthorizationCommon object.
+ */
+void SetAuthorizationCommonTimestamp(::authorizer::v1::AuthorizationCommon* common);
+
+/**
+ * @brief Given q req_state, a HandoffAuthzState and an operation code, create
+ * and populate an ::authorizer::v1::AuthorizeRequest protobuf message.
+ *
+ * On failure, return std::nullopt.
+ *
+ * All the state required to fill the operation should be contained in the
+ * request and in the HandoffAuthzState, except for the actual operation code
+ * which is provided. The operation code is an enum value, e.g.
+ * rgw::IAM::GetObject, which will be mapped onto the equivalent
+ * ::authorizer::v1::S3Opcode value.
+ *
+ * Note that the extra data fields of the request will only be filled in if
+ * the corresponding toggles (HandoffAuthzState::set_bucket_tags_required(),
+ * HandoffAuthzState::set_object_tags_required()) are set to true. This is so
+ * we get exactly the behaviour
+ *
+ * @param dpp A DoutPrefixProvider for logging.
+ * @param s The req_state.
+ * @param state Authz-specific state.
+ * @param operation The opcode. Use the values defined in
+ * <rgw/rgw_iam_policy.h> with prefix 's3'.
+ * @return std::optional<::authorizer::v1::AuthorizeRequest> A populated
+ * AuthorizeRequest message on success, std::nullopt on failure.
+ */
+std::optional<::authorizer::v1::AuthorizeRequest> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
+    const req_state* s, const HandoffAuthzState* state, uint64_t operation);
+
+// Output stream operator for ::authorizer::v1:AuthorizeRequest.
+extern std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeRequest& res);
+// Output stream operator for ::authorizer::v1::AuthorizeResponse.
+extern std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeResponse& res);
 
 /****************************************************************************/
 

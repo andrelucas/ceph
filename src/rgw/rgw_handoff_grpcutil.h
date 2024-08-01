@@ -22,6 +22,7 @@
 #include <optional>
 #include <shared_mutex>
 
+#include "authorizer/v1/authorizer.pb.h"
 #include "common/ceph_context.h"
 
 namespace rgw {
@@ -118,5 +119,26 @@ public:
   void set_channel_args(CephContext* const cct, grpc::ChannelArguments& args);
 
 }; // class HandoffGRPCChannel
+
+/**
+ * @brief Map from an RGW IAM S3 opcode (e.g. ::rgw::IAM::S3GetObject) to a
+ * gRPC opcode (e.g. ::authorizer::v1::S3Opcode::S3_GET_OBJECT).
+ *
+ * @param iam_s3 The RGW S3 IAM opcode.
+ * @return std::optional<::authorizer::v1::S3Opcode> A gRPC S3 opcode if a
+ * mapping exists, otherwise std::nullopt.
+ */
+std::optional<::authorizer::v1::S3Opcode> iam_s3_to_grpc_opcode(uint64_t iam_s3);
+
+/**
+ * @brief Map from a gRPC Authorizer S3 opcode (e.g.
+ * ::authorizer::v1::S3_GET_OBJECT) to an RGW IAM S3 opcode (e.g.
+ * ::rgw::IAM::S3GetObject).
+ *
+ * @param grpc_opcode The gRPC S3 opcode.
+ * @return std::optional<uint64_t> An RGW S3 IAM opcode if a mapping exists,
+ * otherwise std::nullopt.
+ */
+std::optional<uint64_t> grpc_opcode_to_iam_s3(::authorizer::v1::S3Opcode grpc_opcode);
 
 } // namespace rgw

@@ -32,9 +32,13 @@
 #include "rgw_handoff_impl.h"
 
 #include <boost/algorithm/string.hpp>
+#include <boost/container/flat_map.hpp>
 #include <cerrno>
 #include <cstring>
 #include <fmt/format.h>
+#include <fmt/printf.h>
+#include <google/protobuf/timestamp.pb.h>
+#include <google/protobuf/util/json_util.h>
 #include <iostream>
 #include <mutex>
 #include <optional>
@@ -58,6 +62,7 @@
 // (https://grpc.io/docs/guides/error/).
 #include "google/rpc/error_details.pb.h"
 #include "google/rpc/status.pb.h"
+#include "rgw_handoff_grpcutil.h"
 
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rgw
@@ -1037,12 +1042,130 @@ bool AuthorizerClient::Ping(const std::string& id)
   return true;
 }
 
-AuthorizerClient::AuthorizeResult AuthorizerClient::Authorize(const AuthorizeRequest& req)
+void SetAuthorizationCommonTimestamp(::authorizer::v1::AuthorizationCommon* common)
+{
+  auto ts = common->mutable_timestamp();
+  auto now = std::chrono::system_clock::now();
+  auto now_ts = std::chrono::time_point_cast<std::chrono::seconds>(now);
+  auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now - now_ts);
+  ts->set_seconds(std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count());
+  ts->set_nanos(ns.count());
+}
+
+std::optional<::authorizer::v1::AuthorizeRequest> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
+    const req_state* s, const HandoffAuthzState* state, uint64_t operation)
+{
+  using namespace ::authorizer::v1;
+
+  // First check for mandatory fields.
+
+  // We'll use RGW's trans_id as the authorization_id value.
+  if (s->trans_id.empty()) {
+    ldpp_dout(dpp, 0) << "{}: ERROR: req_state->trans_id cannot be empty" << dendl;
+    return std::nullopt;
+  }
+  // Check the opcode. This is a uint64_t in RGW, but an enum in the protobuf.
+  auto opcode = iam_s3_to_grpc_opcode(operation);
+  if (!opcode.has_value()) {
+    ldpp_dout(dpp, 0)
+        << fmt::format(FMT_STRING("{}: ERROR: Unable to map unknown opcode value {} to gRPC enum ::authorize::v1::S3Opcode"), __func__, operation)
+        << dendl;
+    return std::nullopt;
+  }
+
+  // We should have everything we need. Construct and populate the request.
+
+  AuthorizeRequest req;
+  // The AuthorizationCommon submessage.
+  auto common = req.mutable_common();
+
+  req.mutable_common()->set_authorization_id(s->trans_id);
+
+  common->set_authorization_id(s->trans_id);
+  SetAuthorizationCommonTimestamp(common);
+
+  req.set_opcode(*opcode);
+
+  // State fields from the HandoffAuthzState object.
+  req.set_canonical_user_id(state->canonical_user_id());
+  req.set_user_arn(state->user_arn());
+  if (state->assuming_user_arn()) {
+    req.set_assuming_user_arn(state->assuming_user_arn().value());
+  }
+  req.set_account_arn(state->account_arn());
+  req.set_bucket_name(state->bucket_name());
+  req.set_object_key_name(state->object_key_name());
+
+  // s->env is an rgw::IAM::Environment -> std::multimap<std::string,
+  // std::string>. We need to translate that into a protobuf-compatible type,
+  // as protobuf has no native multimap. It appears the standard is to have a
+  // map of repeated fields, which is what we'll do here.
+  //
+  // std::multimap has a weird API, and whilst we could work with it directly,
+  // the following feels clearer to me.
+  //
+  // First convert the multimap into an flat_map<string, vector<string>>,
+  // which looks exactly like the protobuf type. These are small maps, so
+  // flat_map makes perfect sense here.
+  boost::container::flat_map<std::string, std::vector<std::string>> env_map;
+  for (const auto& kv : s->env) {
+    auto key = kv.first;
+    auto value = kv.second;
+    env_map[key].emplace_back(value);
+  }
+  // Then load std::unordered_map<std::string, std::vector<std::string>> into
+  // the protobuf in a very natural way.
+  auto env = req.mutable_environment();
+  for (const auto& kv : env_map) {
+    AuthorizeRequest::IAMMapEntry entry;
+    for (const auto& v : kv.second) {
+      entry.add_key(v);
+    }
+    env->emplace(kv.first, entry);
+  }
+
+  // Extra data. If configured, populate the extra_data_provided field with
+  // bools for each provided type, and provide the extra data in the
+  // extra_data field.
+  if (state->extra_data_required()) {
+    auto edp = req.mutable_extra_data_provided();
+    auto ed = req.mutable_extra_data();
+
+    if (state->bucket_tags_required()) {
+      edp->set_bucket_tags(true);
+      for (const auto& kv : state->bucket_tags()) {
+        (*ed->mutable_bucket_tags())[kv.first] = kv.second;
+      }
+    }
+    if (state->object_tags_required()) {
+      edp->set_object_key_tags(true);
+      for (const auto& kv : state->object_tags()) {
+        (*ed->mutable_object_key_tags())[kv.first] = kv.second;
+      }
+    }
+  }
+
+  // Additional fields from the request. Be careful! Fields here can be
+  // uninitialised, you must check for null pointers.
+  // None yet.
+
+  ldpp_dout(dpp, 20) << __func__ << ": " << req << dendl;
+  return req;
+}
+
+AuthorizerClient::AuthorizeResult AuthorizerClient::Authorize(AuthorizeRequest& req)
 {
   using namespace ::authorizer::v1;
 
   ::grpc::ClientContext context;
   AuthorizeResponse resp;
+
+  // If the timestamp is zero, set it to 'now'. This is tedious code to write,
+  // let's do it once.
+  auto ts = req.common().timestamp();
+  if (ts.seconds() == 0 && ts.nanos() == 0) {
+    SetAuthorizationCommonTimestamp(req.mutable_common());
+  }
 
   ::grpc::Status status = stub_->Authorize(&context, req, &resp);
   if (status.ok()) {
@@ -1052,6 +1175,64 @@ AuthorizerClient::AuthorizeResult AuthorizerClient::Authorize(const AuthorizeReq
   }
   // XXX support richer error model return here, if necessary.
   return AuthorizeResult(status); // Only support standard status response initially.
+}
+
+/****************************************************************************/
+
+// ostream operators for authz protobuf messages.
+
+std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeRequest& res)
+{
+  using namespace google::protobuf::util;
+  JsonPrintOptions options;
+  options.always_print_primitive_fields = true;
+  std::string out;
+  std::ignore = google::protobuf::util::MessageToJsonString(res, &out, options);
+  os << out;
+
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeResponse& res)
+{
+  using namespace google::protobuf::util;
+  JsonPrintOptions options;
+  options.always_print_primitive_fields = true;
+  std::string out;
+  std::ignore = google::protobuf::util::MessageToJsonString(res, &out, options);
+  os << out;
+
+  return os;
+}
+
+/****************************************************************************/
+
+// ostream operator for AuthorizerClient::AuthorizeResult.
+
+std::ostream& operator<<(std::ostream& os, const AuthorizerClient::AuthorizeResult& res)
+{
+  os << "AuthorizeResult(success=" << res.ok() << ", response=";
+  if (res.response()) {
+    os << (*res.response());
+  } else {
+    os << "nullopt";
+  }
+  os << ", grpc::status=";
+  if (res.status()) {
+    os << (*res.status());
+  } else {
+    os << "nullopt";
+  }
+  // XXX don't know if we need to support richer error status yet.
+  // os << ", rpc_status=";
+  // if (res.rpc_status()) {
+  //   os << (*res.rpc_status());
+  // } else {
+  //   os << "nullopt";
+  // }
+  os << ")";
+
+  return os;
 }
 
 /****************************************************************************/

@@ -24,6 +24,8 @@
 #include <iosfwd>
 #include <string>
 
+#include <boost/container/flat_map.hpp>
+
 #include "common/async/yield_context.h"
 #include "common/dout.h"
 #include "rgw/driver/rados/rgw_rados.h"
@@ -300,6 +302,19 @@ public:
  */
 class HandoffAuthzState {
   bool enabled_ = false;
+  std::string bucket_name_;
+  std::string object_key_name_;
+
+  std::string canonical_user_id_;
+  std::string user_arn_;
+  std::optional<std::string> assuming_user_arn_;
+  std::string account_arn_;
+
+  bool bucket_tags_required_ = false;
+  bool object_tags_required_ = false;
+
+  boost::container::flat_map<std::string, std::string> bucket_tags_;
+  boost::container::flat_map<std::string, std::string> object_tags_;
 
 public:
   HandoffAuthzState() = delete;
@@ -343,6 +358,229 @@ public:
    * @return false Handoff Authorization is enabled.
    */
   bool disabled() const noexcept { return !enabled_; }
+
+  /**
+   * @brief Return the bucket name.
+   *
+   * @return std::string The bucket name.
+   */
+  std::string bucket_name() const noexcept { return bucket_name_; }
+
+  /**
+   * @brief Set the bucket name.
+   *
+   * This lives in the HandoffAuthzState object in order to make the
+   * authorization code easier to test. Without a 'safe' place for the bucket
+   * name to be stored, we'd have to pass a req_state around with enough
+   * support to fetch the object key name. That either means parsing URL
+   * fields (which assumes that's even safe to do), or actually loading the
+   * bucket which is completely impractical - the bucket is an
+   * rgw::sal::Bucket instance, with a million pure virtual methods.
+   *
+   * So we just copy the string into the state object. Easy to do, easy to
+   * test.
+   *
+   * @param name The bucket name.
+   */
+  void set_bucket_name(const std::string& name) noexcept { bucket_name_ = name; }
+
+  /**
+   * @brief Return the object key name.
+   *
+   * This lives in the HandoffAuthzState object in order to make the
+   * authorization code easier to test. Without a 'safe' place for the object
+   * key name to be stored, we'd have to pass a req_state around with enough
+   * support to fetch the object key name. That either means parsing URL
+   * fields (which assumes that's even safe to do), or actually loading the
+   * object which is completely impractical - the object key is an
+   * rgw::sal::Object instance, with a million pure virtual methods.
+   *
+   * So we just copy the string into the state object. Easy to do, easy to
+   * test.
+   *
+   * @return std::string The object key name.
+   */
+  std::string object_key_name() const noexcept { return object_key_name_; }
+
+  /**
+   * @brief Set the object key name.
+   *
+   * @param name The object key name.
+   */
+  void set_object_key_name(const std::string& name) noexcept { object_key_name_ = name; }
+
+  /**
+   * @brief Preserve ID-related fields returned by the Authenticator.
+   *
+   * These are the fields in the authenticator.v1.AuthenticateResponse
+   * message, which we'll replay to the Authorizer.
+   *
+   * @param canonical_user_id Corresponding field in AuthenticateResponse.
+   * @param user_arn Corresponding field in AuthenticateResponse.
+   * @param assuming_user_arn Corresponding field in AuthenticateResponse.
+   * @param account_arn Corresponding field in AuthenticateResponse.
+   */
+  void set_authenticator_id_fields(const std::string& canonical_user_id,
+      const std::string& user_arn,
+      const std::optional<std::string>& assuming_user_arn,
+      const std::string& account_arn) noexcept
+  {
+    canonical_user_id_ = canonical_user_id;
+    user_arn_ = user_arn;
+    assuming_user_arn_ = assuming_user_arn;
+    account_arn_ = account_arn;
+  }
+
+  /**
+   * @brief Return the canonical user ID.
+   *
+   * This is an Authenticator AuthenticateRESTResponse field that we reflect
+   * back to the Authorizer.
+   *
+   * @return std::string The canonical user ID.
+   */
+  std::string canonical_user_id() const noexcept { return canonical_user_id_; }
+
+  /**
+   * @brief Return the user ARN.
+   *
+   * This is an Authenticator AuthenticateRESTResponse field that we reflect
+   * back to the Authorizer.
+   *
+   * @return std::string The user ARN.
+   */
+  std::string user_arn() const noexcept { return user_arn_; }
+
+  /**
+   * @brief Return the assuming user ARN.
+   *
+   * This is an Authenticator AuthenticateRESTResponse field that we reflect
+   * back to the Authorizer.
+   *
+   * @return std::optional<std::string> The assuming user ARN.
+   */
+  std::optional<std::string> assuming_user_arn() const noexcept { return assuming_user_arn_; }
+
+  /**
+   * @brief Return the account ARN.
+   *
+   * This is an Authenticator AuthenticateRESTResponse field that we reflect
+   * back to the Authorizer.
+   *
+   * @return std::string The account ARN.
+   */
+  std::string account_arn() const noexcept { return account_arn_; }
+
+  /**
+   * @brief Return true if *any* extra data field must be provided.
+   *
+   * This must be updated if more extra data fields are added in the future.
+   * It's how PopulateAuthorizeRequest() knows whether or not to include the
+   * extra_data_provided and extra_data fields.
+   *
+   * @return true One or more piece of extra data is required.
+   * @return false No extra data are required.
+   */
+  bool extra_data_required() const noexcept
+  {
+    return bucket_tags_required_ || object_tags_required_;
+  }
+
+  /**
+   * @brief Return true if bucket tags are required.
+   *
+   * @return true Bucket tags are required.
+   * @return false Bucket tags are not required.
+   */
+  bool bucket_tags_required() const noexcept { return bucket_tags_required_; }
+
+  /**
+   * @brief Set whether or not bucket tags are required.
+   *
+   * @param required true if bucket tags are required, false otherwise.
+   */
+  void set_bucket_tags_required(bool required) noexcept { bucket_tags_required_ = required; }
+
+  /**
+   * @brief Return true if object tags are required.
+   *
+   * @return true Object tags are required.
+   * @return false Object tags are not required.
+   */
+  bool object_tags_required() const noexcept { return object_tags_required_; }
+
+  /**
+   * @brief Set whether or not object tags are required.
+   *
+   * @param required true if object tags are required, false otherwise.
+   */
+  void set_object_tags_required(bool required) noexcept { object_tags_required_ = required; }
+
+  /**
+   * @brief Set an individual entry in the bucket tags map.
+   *
+   * This is a regular map, so writing to a key that already exists will
+   * replace it.
+   *
+   * @param key The bucket tag key.
+   * @param value The bucket tag entry.
+   */
+  void set_bucket_tag_entry(const std::string& key, const std::string& value) noexcept
+  {
+    bucket_tags_[key] = value;
+  }
+
+  /**
+   * @brief Get an individual bucket tag entry, if present.
+   *
+   * @param key The bucket tag key.
+   * @return std::optional<std::string> The bucket tag entry value for \p key,
+   * or std::nullopt if the key is not present.
+   */
+  std::optional<std::string> get_bucket_tag_entry(const std::string& key) const noexcept;
+
+  /**
+   * @brief Get the object tag entry object
+   *
+   * @param key The object tag key.
+   * @return std::optional<std::string> The object tag entry value for \p key,
+   * or std::nullopt if the key is not present.
+   */
+  std::optional<std::string> get_object_tag_entry(const std::string& key) const noexcept;
+
+  /**
+   * @brief Set an individual entry in the object tags map.
+   *
+   * This is a regular map, so writing to a key that already exists will
+   * replace it.
+   *
+   * @param key The object tag key.
+   * @param value The object tag entry.
+   */
+  void set_object_tag_entry(const std::string& key, const std::string& value) noexcept
+  {
+    object_tags_[key] = value;
+  }
+
+  /**
+   * @brief Return a copy of the bucket tags map.
+   *
+   * @return const boost::container::flat_map<std::string, std::string>& The bucket tags map.
+   */
+  const boost::container::flat_map<std::string, std::string> bucket_tags() const noexcept
+  {
+    return bucket_tags_;
+  }
+
+  /**
+   * @brief Return a copy of the object tags map.
+   *
+   * @return const boost::container::flat_map<std::string, std::string>& The object tags map.
+   */
+  const boost::container::flat_map<std::string, std::string> object_tags() const noexcept
+  {
+    return object_tags_;
+  }
 
 }; // class HandoffAuthzState
 
