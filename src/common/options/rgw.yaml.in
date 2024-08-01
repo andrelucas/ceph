@@ -436,6 +436,28 @@ options:
   services:
   - rgw
   with_legacy: true
+- name: rgw_lc_multi_shard_list
+  type: bool
+  level: dev
+  desc: The lc processing to do listing from different shards for the bucket.
+  long_desc: Enabling this for RGW LifeCycle, will cause the lc process to do round robin
+    listing from each shard of the bucket. This along with increasing rgw_lc_max_wp_worker
+    will increase the lc throughput per bucket.
+  default: false
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_lc_multi_shard_list_cnt
+  type: uint
+  level: dev
+  desc: The count of number of objects in per listing of lc processing from each shards for the bucket.
+  long_desc: This is used when rgw_lc_multi_shard_list is true. In each listing request for a shard
+    of the bucket, the count number of objects will be requested.
+    This along with increasing rgw_lc_max_wp_worker will increase the lc throughput per bucket.
+  default: 50
+  services:
+  - rgw
+  with_legacy: true
 - name: rgw_mp_lock_max_time
   type: int
   level: advanced
