@@ -172,10 +172,15 @@ enum S3Opcode {
 // properly authorize the request. We don't unconditionally fetch everything
 // for performance reasons.
 
-// AuthorizeRequest may return a list of ExtraDataRequirements. It's down to
-// the authz client to provide these items, or terminate the authorization
-// attempt.
-message ExtraDataRequirement
+// AuthorizeResponse may contain an ExtraDataSpecification, to list the extra
+// data fields required. It's down to the authz client to provide these items,
+// or terminate the authorization attempt.
+//
+// Likewise, the AuthorizeRequest may contain an ExtraDataSpecification to
+// indicate which extra data fields are being provided. This makes it easy for
+// Authorizer to distringuish between a piece of extra data that was not sent,
+// and a field that was checked and found to be empty.
+message ExtraDataSpecification
 {
   bool bucket_tags = 1;
   bool object_key_tags = 2;
@@ -217,9 +222,20 @@ message AuthorizeRequest
   string bucket_name = 6;
   // The S3 object key name. May be empty.
   string object_key_name = 7;
-  // The authorization 'environment', a list of key-value pairs with
-  // authorization parameters. E.g. 's3:prefix' => '/path'.
-  map<string, string> environment = 10;
+
+  message IAMMapEntry
+  {
+    repeated string key = 1;
+  }
+  // The authorization 'environment', a multimap of key-value pairs with
+  // authorization parameters. E.g. 's3:prefix' => '/path'. Protobuf has no
+  // multimap type, we have to simulate one.
+  map<string, IAMMapEntry> environment = 10;
+
+  // Mask for which extra data we're sending. This allows the Authorizer to
+  // distinguish between the case where the client hasn't _sent_ a piece of
+  // data, and where the client has sent an _empty_ piece of data.
+  optional ExtraDataSpecification extra_data_provided = 11;
   // Extra data that the Authorizer may require in order to make a decision.
   // This can either be added unilaterally by the client, or specifically
   // requested by the Authorizer in the AuthorizeResponse.
@@ -229,6 +245,11 @@ message AuthorizeRequest
 message AuthorizeResponse
 {
   AuthorizationCommon common = 1;
+  // An AuthorizationResult containing detailed information about the
+  // Authorizer's response, or any RPC error that occurred.
   AuthorizationResult result = 2;
-  optional ExtraDataRequirement extra_data_required = 3;
+  // If result.code is AUTHZ_RESULT_EXTRA_DATA_REQUIRED, this field must be
+  // present and must list the extra data fields required by the Authorizer in
+  // order to properly authorize the request.
+  optional ExtraDataSpecification extra_data_required = 3;
 }
