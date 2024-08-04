@@ -63,6 +63,7 @@
 #include "google/rpc/error_details.pb.h"
 #include "google/rpc/status.pb.h"
 #include "rgw_handoff_grpcutil.h"
+#include "rgw_op.h"
 
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rgw
@@ -1046,6 +1047,54 @@ HandoffHelperImpl::get_signing_key(const DoutPrefixProvider* dpp,
   return std::make_optional(result.signing_key());
 }
 
+int HandoffHelperImpl::verify_permission(const RGWOp* op, const req_state* s,
+    uint64_t operation, optional_yield y)
+{
+  // Construct a custom log prefix provider with some per-request state
+  // information. This should make it easier to correlate logs on busy
+  // servers.
+  HandoffDoutStateProvider hdpp(*op, s);
+  auto dpp = &hdpp;
+
+  ceph_assert(s->cio != nullptr);
+
+  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: XXX BEGIN"), __func__) << dendl;
+
+  auto opt_req = PopulateAuthorizeRequest(dpp, s, s->handoff_authz.get(), operation);
+  if (!opt_req) {
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to populate AuthorizeV2Request"), __func__) << dendl;
+    return -EACCES;
+  }
+
+  auto channel = get_authz_channel().get_channel();
+  if (!channel) {
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to fetch gRPC channel"), __func__) << dendl;
+    return -EACCES;
+  }
+  auto client = AuthorizerClient(channel);
+  auto result = client.AuthorizeV2(*opt_req);
+
+  if (result.ok()) {
+    return 0;
+  } else {
+    auto status = result.status();
+    // XXX check for richer error message
+    if (status) {
+      ldpp_dout(dpp, 0)
+          << fmt::format(FMT_STRING("{}: ERROR: Failed to authorize request: code {}: {}: {}"),
+                 __func__, status->error_code(), status->error_message(), status->error_details())
+          << dendl;
+    } else {
+      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to authorize request (unknown error reason)"), __func__) << dendl;
+    }
+    return -EACCES;
+  }
+
+  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: XXX END"), __func__) << dendl;
+
+  return 0; // XXX !!!
+}
+
 /****************************************************************************/
 
 bool AuthorizerClient::Ping(const std::string& id)
@@ -1179,7 +1228,7 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
   return req;
 }
 
-AuthorizerClient::AuthorizeResult AuthorizerClient::Authorize(AuthorizeV2Request& req)
+AuthorizerClient::AuthorizeResult AuthorizerClient::AuthorizeV2(AuthorizeV2Request& req)
 {
   using namespace ::authorizer::v1;
 

@@ -922,18 +922,14 @@ public:
    * our saved authorization state (if any), and the operation code (e.g.
    * rgw::IAM::GetObject).
    *
-   * @param op The RGWOp-subclass object pointer. The req_state
-   * @param state The HandoffAuthzState object.
+   * @param op The RGWOp-subclass object pointer.
+   * @param s The req_state object.
    * @param operation The operation code.
    * @param y optional yield (will likely be ignored).
    * @return int return code. 0 for success, <0 for error, typically -EACCES.
    */
-  int verify_permission(const RGWOp* op, HandoffAuthzState* state,
-      uint64_t operation, optional_yield y)
-  {
-    // XXX !!! !!!
-    return 0;
-  }
+  int verify_permission(const RGWOp* op, const req_state* s,
+      uint64_t operation, optional_yield y);
 
   /**
    * @brief Assuming an already-parsed (via synthesize_auth_header) presigned
@@ -1119,7 +1115,7 @@ public:
    * @param req The AuthorizeRequest message.
    * @return AuthorizeResponse the AuthorizeResponse message from the server.
    */
-  AuthorizerClient::AuthorizeResult Authorize(AuthorizeV2Request& req);
+  AuthorizerClient::AuthorizeResult AuthorizeV2(AuthorizeV2Request& req);
 
 }; // class AuthorizerClient
 

@@ -3022,7 +3022,7 @@ int RGWListBucket::verify_permission(optional_yield y)
   s->env.emplace("s3:max-keys", std::to_string(max));
 
   if (s->handoff_authz->enabled()) {
-    return s->handoff_helper->verify_permission(this, s->handoff_authz.get(), rgw::IAM::s3ListBucket, y);
+    return s->handoff_helper->verify_permission(this, this->s, rgw::IAM::s3ListBucket, y);
 
   } else {
     auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
@@ -3106,7 +3106,7 @@ int RGWGetBucketLocation::verify_permission(optional_yield y)
 {
   // HANDOFF: Visited.
   if (s->handoff_authz->enabled()) {
-    return s->handoff_helper->verify_permission(this, s->handoff_authz.get(), rgw::IAM::s3GetBucketLocation, y);
+    return s->handoff_helper->verify_permission(this, this->s, rgw::IAM::s3GetBucketLocation, y);
 
   } else {
     auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);

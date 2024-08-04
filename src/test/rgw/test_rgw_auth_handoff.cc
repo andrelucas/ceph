@@ -1615,7 +1615,7 @@ TEST_F(AuthzGRPCTest, AuthorizeBasics)
   auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, &state, rgw::IAM::s3GetObject);
   ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
 
-  auto res = client.Authorize(*opt_req);
+  auto res = client.AuthorizeV2(*opt_req);
   ASSERT_TRUE(res.ok()) << "expected ok(), got " << res;
 }
 

@@ -84,10 +84,9 @@ HandoffAuthResult HandoffHelper::anonymous_authorize(const DoutPrefixProvider* d
   return impl_->anonymous_authorize(dpp, s, y);
 };
 
-int HandoffHelper::verify_permission(const RGWOp* op, HandoffAuthzState* state,
-    uint64_t operation, optional_yield y)
+int HandoffHelper::verify_permission(const RGWOp* op, const req_state* s, uint64_t operation, optional_yield y)
 {
-  return impl_->verify_permission(op, state, operation, y);
+  return impl_->verify_permission(op, s, operation, y);
 };
 
 bool HandoffHelper::anonymous_authorization_enabled() const
