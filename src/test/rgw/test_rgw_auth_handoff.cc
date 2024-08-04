@@ -860,6 +860,7 @@ TEST_F(HandoffHelperImplGRPCTest, HeaderHappyPath)
     ASSERT_EQ(s.handoff_authz->canonical_user_id(), userid_base);
     ASSERT_EQ(s.handoff_authz->user_arn(), userid_base + "_user_arn");
     ASSERT_EQ(s.handoff_authz->assuming_user_arn(), userid_base + "_assuming_user_arn");
+    ASSERT_EQ(s.handoff_authz->account_arn(), userid_base + "_account_arn");
   }
 }
 

@@ -942,7 +942,22 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(
   // The client returns a fully-populated HandoffAuthResult, but we want to
   // issue some helpful log messages before returning it.
   if (result.is_ok()) {
-    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("success (access_key_id='{}', uid='{}')"), access_key_id, result.userid()) << dendl;
+    std::string authz_info;
+    if (s->handoff_authz.get()) {
+      std::string aua;
+      if (s->handoff_authz->assuming_user_arn()) {
+        aua = s->handoff_authz->assuming_user_arn().value();
+      } else {
+        aua = "None";
+      }
+      authz_info = fmt::format(FMT_STRING(" authz (canonical_user_id={}, user_arn={}, "
+                                          "assuming_user_arn={}, account_arn={})"),
+          s->handoff_authz->canonical_user_id(), s->handoff_authz->user_arn(),
+          aua, s->handoff_authz->account_arn());
+    }
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("success (access_key_id='{}', uid='{}'){}"),
+        access_key_id, result.userid(), authz_info)
+                      << dendl;
   } else {
     if (result.err_type() == HandoffAuthResult::error_type::TRANSPORT_ERROR) {
       ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("authentication attempt failed: {}"), result.message()) << dendl;
