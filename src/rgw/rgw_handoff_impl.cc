@@ -1252,31 +1252,61 @@ AuthorizerClient::AuthorizeResult AuthorizerClient::AuthorizeV2(AuthorizeV2Reque
   return AuthorizeResult(status); // Only support standard status response initially.
 }
 
+bool AuthorizerClient::AuthorizeResult::extra_data_required() const
+{
+  if (err() && response() && response()->result().code() == AuthorizationResultCode::AUTHZ_RESULT_EXTRA_DATA_REQUIRED && response()->has_extra_data_required()) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
 /****************************************************************************/
 
 // ostream operators for authz protobuf messages.
 
-std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeV2Request& res)
+std::string fmt_AuthorizeV2Request(const ::authorizer::v1::AuthorizeV2Request& res)
 {
   using namespace google::protobuf::util;
   JsonPrintOptions options;
   options.always_print_primitive_fields = true;
   std::string out;
-  std::ignore = google::protobuf::util::MessageToJsonString(res, &out, options);
-  os << out;
+  auto status = google::protobuf::util::MessageToJsonString(res, &out, options);
+  if (status.ok()) {
+    return out;
+  } else {
+    return fmt::format(FMT_STRING("Error formatting protobuf as JSON: {}"), status.ToString());
+  }
+}
 
+// Some explicit instantiations for the proto_to_JSON template.
+template std::string proto_to_JSON<authorizer::v1::AuthorizeV2Request>(const authorizer::v1::AuthorizeV2Request& res);
+template std::string proto_to_JSON<authorizer::v1::AuthorizeV2Response>(const authorizer::v1::AuthorizeV2Response& res);
+template std::string proto_to_JSON<authorizer::v1::ExtraData>(const authorizer::v1::ExtraData& res);
+template std::string proto_to_JSON<authorizer::v1::ExtraDataSpecification>(const authorizer::v1::ExtraDataSpecification& res);
+
+std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeV2Request& res)
+{
+  // os << fmt_AuthorizeV2Request(res);
+  os << proto_to_JSON<::authorizer::v1::AuthorizeV2Request>(res);
   return os;
 }
 
 std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeV2Response& res)
 {
-  using namespace google::protobuf::util;
-  JsonPrintOptions options;
-  options.always_print_primitive_fields = true;
-  std::string out;
-  std::ignore = google::protobuf::util::MessageToJsonString(res, &out, options);
-  os << out;
+  os << proto_to_JSON<::authorizer::v1::AuthorizeV2Response>(res);
+  return os;
+}
 
+std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::ExtraData& res)
+{
+  os << proto_to_JSON<::authorizer::v1::ExtraData>(res);
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::ExtraDataSpecification& res)
+{
+  os << proto_to_JSON<::authorizer::v1::ExtraDataSpecification>(res);
   return os;
 }
 

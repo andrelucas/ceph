@@ -1154,10 +1154,44 @@ void SetAuthorizationCommonTimestamp(::authorizer::v1::AuthorizationCommon* comm
 std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
     const req_state* s, const HandoffAuthzState* state, uint64_t operation);
 
-// Output stream operator for ::authorizer::v1:AuthorizeRequest.
+/**
+ * @brief Format a protobuf as a JSON string, or an error message on failure.
+ *
+ * Use:
+ * ```
+ *   ldpp_dout(dpp, 20) << "Request: " << proto_to_JSON(req) << dendl;
+ * ```
+ *
+ * The compiler should be able to infer the appropriate type for the template.
+ *
+ * @tparam T The protobuf message type
+ * @param proto The protobuf message.
+ * @return std::string The output string, or an error message if the
+ * formatting failed.
+ */
+template <typename T>
+std::string proto_to_JSON(const T& proto)
+{
+  using namespace google::protobuf::util;
+  JsonPrintOptions options;
+  options.always_print_primitive_fields = true;
+  std::string out;
+  auto status = google::protobuf::util::MessageToJsonString(proto, &out, options);
+  if (status.ok()) {
+    return out;
+  } else {
+    return fmt::format(FMT_STRING("Error formatting protobuf as JSON: {}"), status.ToString());
+  }
+}
+
+/// Output stream operator for ::authorizer::v1:AuthorizeRequest.
 extern std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeV2Request& res);
-// Output stream operator for ::authorizer::v1::AuthorizeResponse.
+/// Output stream operator for ::authorizer::v1::AuthorizeResponse.
 extern std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeV2Response& res);
+/// Output stream operator for ::authorizer::v1::ExtraData.
+extern std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::ExtraData& res);
+/// Output stream operator for ::authorizer::v1::ExtraDataSpecification.
+extern std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::ExtraDataSpecification& res);
 
 /****************************************************************************/
 
