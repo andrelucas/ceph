@@ -280,7 +280,7 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req, co
   // Loop through the detail field (repeated Any) and look for our
   // S3ErrorDetails message.
   for (auto& detail : s.details()) {
-    S3ErrorDetails s3_details;
+    authenticator::v1::S3ErrorDetails s3_details;
     if (detail.UnpackTo(&s3_details)) {
       return _translate_authenticator_error_code(s3_details.type(), s3_details.http_status_code(), status.error_message());
     }

@@ -1433,7 +1433,7 @@ TEST_F(HandoffHelperImplSubsysTest, TestReturnCodeMapping)
   // the cases where there's no mapping to make sure we're properly
   // defaulting.
 
-  using err_type = S3ErrorDetails::Type;
+  using err_type = authenticator::v1::S3ErrorDetails::Type;
   HandoffAuthResult res { "testid", "bar" };
 
   // Test a sample of standard responses.

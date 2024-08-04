@@ -12,6 +12,9 @@ import "google/protobuf/timestamp.proto";
 option go_package = "bits.linode.com/LinodeApi/obj-endpoint/gen/proto/authorizer/v1";
 
 service AuthorizerService {
+  // Authorize authorizes an S3 request.
+  rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
+
   // Ping allows us to (a) check and test the connection to the authorizer,
   // and (b) easily avoid the lazy initialization behaviour of the gRPC
   // channel, so we can give helpful error messages at startup.
@@ -28,7 +31,69 @@ service AuthorizerService {
   rpc AuthorizeV2(AuthorizeV2Request) returns (AuthorizeV2Response);
 }
 
-// Common fields for all messages.
+// Errors mapping to S3 errors.
+// See:
+// https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html#RESTErrorResponses
+message S3ErrorDetails {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    // Access Denied.
+    // 403 Forbidden.
+    TYPE_ACCESS_DENIED = 1;
+    // An internal error occurred. Try again.
+    // 500 Internal Server Error.
+    TYPE_INTERNAL_ERROR = 2;
+    // The action/principal/resource cannot be determined from the request.
+    // 400 Bad Request.
+    TYPE_INVALID_REQUEST = 36;
+    // The specified URI couldn't be parsed.
+    // 400 Bad Request.
+    TYPE_INVALID_URI = 4;
+    // The specified method is not allowed against this resource.
+    // 405 Method Not Allowed.
+    TYPE_METHOD_NOT_ALLOWED = 5;
+  }
+
+  Type type = 1;
+}
+
+message AuthorizeRequest {
+  enum HTTPMethod {
+    HTTP_METHOD_UNSPECIFIED = 0;
+    HTTP_METHOD_GET = 1;
+    HTTP_METHOD_HEAD = 2;
+    HTTP_METHOD_POST = 3;
+    HTTP_METHOD_PUT = 4;
+    HTTP_METHOD_DELETE = 5;
+  }
+
+  // The arn of the user that is being authorized
+  string user_arn = 1;
+  // The id of the role that is being authorized
+  optional string role_arn = 2;
+  // The HTTP method from the user's S3 REST request used for the S3 request.
+  HTTPMethod http_method = 3;
+  // The name of the bucket the operation was performed on from the user's S3
+  // REST request. For actions such as ListBuckets, this field will be empty
+  optional string bucket_name = 4;
+  // The object key the operation was performed on from the user's S3 REST
+  // request. For actions performed against a bucket, this field will be empty.
+  optional string object_key = 5;
+  // A map of all query string parameters from the user's S3 REST request.
+  map<string, string> query_parameters = 6;
+  // A map of all relevant x-amz-* headers from the user's S3 REST request.
+  map<string, string> x_amz_headers = 7;
+  // A generic resource key, used when neither object_key or bucket_name make
+  // sense.
+  optional string resource = 8;
+  // Account arn is used to check if the account is suspended or not.
+  string account_arn = 9;
+}
+
+// A lack of error indicates the request is succesfully authorized
+message AuthorizeResponse {}
+
+// Common fields for Ping() and AuthorizeV2().
 message AuthorizationCommon {
   // This may be used for debugging and performance analysis.
   google.protobuf.Timestamp timestamp = 1;
