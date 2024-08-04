@@ -236,7 +236,7 @@ std::ostream& operator<<(std::ostream& os, const AuthorizationParameters& ep)
  *
  ****************************************************************************/
 
-HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req)
+HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req, const HandoffAuthzState* authz_state)
 {
   ::grpc::ClientContext context;
   AuthenticateRESTResponse resp;
@@ -246,8 +246,16 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req)
   using namespace authenticator::v1;
 
   if (status.ok()) {
-    // XXX XXX this is going to need extended to support all the information authz
-    // needs from the Authenticator's result.
+    if (authz_state) {
+      // HandoffAuthzState.set_authenticator_id_fields() is contrived to allow
+      // us to punch non-const through the const pointer passed. This is
+      // necessary because the authentication APIs pass a const req_state*,
+      // and the HandoffAuthzState we care about is a member field.
+      //
+      authz_state->set_authenticator_id_fields(
+          resp.canonical_user_id(), resp.user_arn(),
+          resp.assuming_user_arn(), resp.account_arn());
+    }
     return HandoffAuthResult(resp.canonical_user_id(), status.error_message());
   }
   // Error conditions are returned via the Richer error model
@@ -926,7 +934,10 @@ HandoffAuthResult HandoffHelperImpl::_grpc_auth(
     client.set_stub(new_channel);
   }
   ldpp_dout(dpp, 1) << "Sending gRPC auth request" << dendl;
-  auto result = client.Auth(req);
+
+  // Note that we're passing s->handoff_authz as a naked pointer. Auth()
+  // checks for nullptr so this is safe.
+  auto result = client.Auth(req, s->handoff_authz.get());
 
   // The client returns a fully-populated HandoffAuthResult, but we want to
   // issue some helpful log messages before returning it.

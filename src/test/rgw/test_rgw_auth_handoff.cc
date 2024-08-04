@@ -617,6 +617,12 @@ class TestAuthImpl final : public authenticator::v1::AuthenticatorService::Servi
       return grpc_error(grpc::StatusCode::UNAUTHENTICATED, s3err_type::S3ErrorDetails_Type_TYPE_SIGNATURE_DOES_NOT_MATCH, 403, "signature mismatch");
     }
     response->set_canonical_user_id(info->userid);
+    // Set the other Authenticator response fields so we can check for them
+    // later. They're needed by the Authorizer.
+    response->set_user_arn(info->userid + "_user_arn");
+    response->set_assuming_user_arn(info->userid + "_assuming_user_arn");
+    response->set_account_arn(info->userid + "_account_arn");
+
     ldpp_dout(&dpp_, 20) << __func__ << ": exit OK" << dendl;
     return grpc::Status::OK;
   }
@@ -655,15 +661,6 @@ class TestAuthImpl final : public authenticator::v1::AuthenticatorService::Servi
 
 /**
  * @brief gRPC mode HandoffHelperImpl end-to-end test fixture.
- *
- * Not using a parameterised test for HTTP and gRPC because I anticipate
- * removing the HTTP mode at some point, and it will be a pain to unpick
- * later. Also, the harness classes are very different and it will become
- * spaghettified if I try to combine them.
- *
- * However: As long as both HTTP and gRPC are in the codebase there is some
- * duplication here in the tests themselves. At least they can reuse the test
- * vectors.
  *
  * Use GRPCTestServer to implement the gRPC server on a random port, then
  * configure the HandoffHelperImpl to use it. The tests then issue gRPC()
@@ -850,9 +847,19 @@ TEST_F(HandoffHelperImplGRPCTest, HeaderHappyPath)
 
     DEFINE_REQ_STATE;
     s.cio = &cio;
+    s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
     auto string_to_sign = rgw::from_base64(t.ss_base64);
     auto res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
     EXPECT_TRUE(res.is_ok()) << "should pass test '" << t.name << "'";
+
+    // Check we captured the fields that the Authorizer will require later.
+    auto userid_base = res.userid();
+    auto info = info_for_credential(t.access_key);
+    ASSERT_THAT(info, testing::Ne(std::nullopt));
+    ASSERT_EQ(userid_base, info->userid);
+    ASSERT_EQ(s.handoff_authz->canonical_user_id(), userid_base);
+    ASSERT_EQ(s.handoff_authz->user_arn(), userid_base + "_user_arn");
+    ASSERT_EQ(s.handoff_authz->assuming_user_arn(), userid_base + "_assuming_user_arn");
   }
 }
 

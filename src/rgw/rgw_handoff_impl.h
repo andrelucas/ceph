@@ -232,6 +232,13 @@ public:
    * original_user_id field of the response message, as we have no current use
    * for it.
    *
+   * If authz_state is non-null, a successful authentication will populate
+   * authorization-related fields using
+   * authz_state->set_authenticator_id_fields(). This method can punch through
+   * the fact that authz_state is a const pointer. This is not ideal, but is
+   * necessary because the internal API calls authenticate() with a const
+   * req_state*, and that's where our authz_state is stored.
+   *
    * On error, parse the result for an S3ErrorDetails message embedded in the
    * details field. (Richer error model.) If we find one, return the error
    * message and embed the contained HTTP status code. It's up to the caller
@@ -252,9 +259,11 @@ public:
    *
    * @param req the filled-in authentication request protobuf
    * (rgw::auth::v1::AuthRequest).
+   * @param authz_state The authorization state, if available. On success,
+   * this _will_ be modified, even though it's a const pointer (see method docs).
    * @return HandoffAuthResult A completed auth result.
    */
-  HandoffAuthResult Auth(const AuthenticateRESTRequest& req);
+  HandoffAuthResult Auth(const AuthenticateRESTRequest& req, const HandoffAuthzState* authz_state = nullptr);
 
   /**
    * @brief Map an Authenticator gRPC error code onto an error code that RGW

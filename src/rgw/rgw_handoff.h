@@ -305,10 +305,14 @@ class HandoffAuthzState {
   std::string bucket_name_;
   std::string object_key_name_;
 
-  std::string canonical_user_id_;
-  std::string user_arn_;
-  std::optional<std::string> assuming_user_arn_;
-  std::string account_arn_;
+  struct AuthenticatorParameters {
+    std::string canonical_user_id_;
+    std::string user_arn_;
+    std::optional<std::string> assuming_user_arn_;
+    std::string account_arn_;
+  }; // struct AuthenticatorParameters
+
+  mutable AuthenticatorParameters authenticator_params_;
 
   bool bucket_tags_required_ = false;
   bool object_tags_required_ = false;
@@ -415,6 +419,12 @@ public:
    * These are the fields in the authenticator.v1.AuthenticateResponse
    * message, which we'll replay to the Authorizer.
    *
+   * We are doing some gymnastics here to deal with the fact that we'll
+   * normally be dealing with a pointer to a member field (HandoffAuthzState)
+   * of a const pointer to req_state, but we need to be able to modify the
+   * authorization state. So we're using mutable fields to allow this, and
+   * this method is marked const to allow it to be called. It sucks.
+   *
    * @param canonical_user_id Corresponding field in AuthenticateResponse.
    * @param user_arn Corresponding field in AuthenticateResponse.
    * @param assuming_user_arn Corresponding field in AuthenticateResponse.
@@ -423,12 +433,12 @@ public:
   void set_authenticator_id_fields(const std::string& canonical_user_id,
       const std::string& user_arn,
       const std::optional<std::string>& assuming_user_arn,
-      const std::string& account_arn) noexcept
+      const std::string& account_arn) const noexcept
   {
-    canonical_user_id_ = canonical_user_id;
-    user_arn_ = user_arn;
-    assuming_user_arn_ = assuming_user_arn;
-    account_arn_ = account_arn;
+    authenticator_params_.canonical_user_id_ = canonical_user_id;
+    authenticator_params_.user_arn_ = user_arn;
+    authenticator_params_.assuming_user_arn_ = assuming_user_arn;
+    authenticator_params_.account_arn_ = account_arn;
   }
 
   /**
@@ -439,7 +449,7 @@ public:
    *
    * @return std::string The canonical user ID.
    */
-  std::string canonical_user_id() const noexcept { return canonical_user_id_; }
+  std::string canonical_user_id() const noexcept { return authenticator_params_.canonical_user_id_; }
 
   /**
    * @brief Return the user ARN.
@@ -449,7 +459,7 @@ public:
    *
    * @return std::string The user ARN.
    */
-  std::string user_arn() const noexcept { return user_arn_; }
+  std::string user_arn() const noexcept { return authenticator_params_.user_arn_; }
 
   /**
    * @brief Return the assuming user ARN.
@@ -459,7 +469,7 @@ public:
    *
    * @return std::optional<std::string> The assuming user ARN.
    */
-  std::optional<std::string> assuming_user_arn() const noexcept { return assuming_user_arn_; }
+  std::optional<std::string> assuming_user_arn() const noexcept { return authenticator_params_.assuming_user_arn_; }
 
   /**
    * @brief Return the account ARN.
@@ -469,7 +479,7 @@ public:
    *
    * @return std::string The account ARN.
    */
-  std::string account_arn() const noexcept { return account_arn_; }
+  std::string account_arn() const noexcept { return authenticator_params_.account_arn_; }
 
   /**
    * @brief Return true if *any* extra data field must be provided.
