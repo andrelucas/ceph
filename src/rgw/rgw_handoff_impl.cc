@@ -1065,6 +1065,7 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, const req_state* s,
     ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to populate AuthorizeV2Request"), __func__) << dendl;
     return -EACCES;
   }
+  auto req = *opt_req;
 
   auto channel = get_authz_channel().get_channel();
   if (!channel) {
@@ -1072,7 +1073,37 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, const req_state* s,
     return -EACCES;
   }
   auto client = AuthorizerClient(channel);
-  auto result = client.AuthorizeV2(*opt_req);
+
+  /* AuthorizeV2 request. We can submit at most two of these requests. The
+   * first request will (in the first iteration of this client) never have the
+   * extra_data_required field set. If the server responds with
+   * AUTHZ_RESULT_EXTRA_DATA_REQUIRED, we then fetch what data it asks for and
+   * resubmit.
+   *
+   * We submit at most two requests. We don't allow loops.
+   */
+  auto result = client.AuthorizeV2(req);
+
+  if (result.extra_data_required()) {
+    auto edr = result.response()->extra_data_required();
+    ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("{}: Authorizer requires extra data: {}"),
+        __func__, proto_to_JSON(edr))
+                      << dendl;
+    auto edp = req.mutable_extra_data_provided();
+    // auto ed = req.mutable_extra_data();
+    if (edr.bucket_tags()) {
+      // XXX fetch
+      edp->set_bucket_tags(true);
+    }
+    if (edr.object_key_tags()) {
+      // XXX fetch
+      edp->set_object_key_tags(true);
+    }
+    // Resubmit the request with the extra data.
+    ldpp_dout(dpp, 5)
+        << fmt::format(FMT_STRING("{}: Resubmitting request with extra data: {}"), __func__, proto_to_JSON(req)) << dendl;
+    result = client.AuthorizeV2(req);
+  }
 
   if (result.ok()) {
     return 0;

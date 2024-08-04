@@ -1095,6 +1095,16 @@ public:
      */
     bool err() const noexcept { return !ok(); }
 
+    /**
+     * @brief Utility function to determine if the call failed due to an extra
+     * data requirement.
+     *
+     * @return true The request returned with a status of EXTRA_DATA_REQUIRED
+     * and a list of requirements.
+     * @return false Otherwise.
+     */
+    bool extra_data_required() const;
+
     /// @brief Return the AuthorizeResponse message resulting from the RPC call,
     /// if any.
     std::optional<AuthorizeV2Response> response() const { return response_; }
