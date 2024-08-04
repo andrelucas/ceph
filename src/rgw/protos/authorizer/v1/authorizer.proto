@@ -11,8 +11,7 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "bits.linode.com/LinodeApi/obj-endpoint/gen/proto/authorizer/v1";
 
-service AuthorizerService
-{
+service AuthorizerService {
   // Ping allows us to (a) check and test the connection to the authorizer,
   // and (b) easily avoid the lazy initialization behaviour of the gRPC
   // channel, so we can give helpful error messages at startup.
@@ -26,12 +25,11 @@ service AuthorizerService
   // data required' code means the client should either fail authorization
   // or submit another Authorize() request with the required data.
   //
-  rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
+  rpc AuthorizeV2(AuthorizeV2Request) returns (AuthorizeV2Response);
 }
 
 // Common fields for all messages.
-message AuthorizationCommon
-{
+message AuthorizationCommon {
   // This may be used for debugging and performance analysis.
   google.protobuf.Timestamp timestamp = 1;
   // The unique identifier for this request. This must be present in all
@@ -40,15 +38,9 @@ message AuthorizationCommon
   string authorization_id = 2;
 }
 
-message PingRequest
-{
-  AuthorizationCommon common = 1;
-}
+message PingRequest { AuthorizationCommon common = 1; }
 
-message PingResponse
-{
-  AuthorizationCommon common = 1;
-}
+message PingResponse { AuthorizationCommon common = 1; }
 
 //
 // Utility messages and enums.
@@ -71,8 +63,7 @@ enum AuthorizationResultCode {
   // XXX this will almost certainly need extended.
 }
 
-message AuthorizationResult
-{
+message AuthorizationResult {
   // A human-readable error message that will appear in the logs.
   string error_message = 1;
   // A more detailed error message that will appear in the logs, possibly
@@ -180,14 +171,12 @@ enum S3Opcode {
 // indicate which extra data fields are being provided. This makes it easy for
 // Authorizer to distringuish between a piece of extra data that was not sent,
 // and a field that was checked and found to be empty.
-message ExtraDataSpecification
-{
+message ExtraDataSpecification {
   bool bucket_tags = 1;
   bool object_key_tags = 2;
 }
 
-message ExtraData
-{
+message ExtraData {
   // The tags that were present on the bucket at the time of the request.
   map<string, string> bucket_tags = 1;
   // The tags that were present on the object key at the time of the
@@ -201,8 +190,7 @@ message ExtraData
 // for extra data, which the client then provides in another Authorize() call.
 //
 
-message AuthorizeRequest
-{
+message AuthorizeV2Request {
   AuthorizationCommon common = 1;
   // The canonical user ID is returned by the Authenticator and is reflected
   // back to the Authorizer verbatim.
@@ -223,10 +211,7 @@ message AuthorizeRequest
   // The S3 object key name. May be empty.
   string object_key_name = 7;
 
-  message IAMMapEntry
-  {
-    repeated string key = 1;
-  }
+  message IAMMapEntry { repeated string key = 1; }
   // The authorization 'environment', a multimap of key-value pairs with
   // authorization parameters. E.g. 's3:prefix' => '/path'. Protobuf has no
   // multimap type, we have to simulate one.
@@ -242,8 +227,7 @@ message AuthorizeRequest
   optional ExtraData extra_data = 8;
 }
 
-message AuthorizeResponse
-{
+message AuthorizeV2Response {
   AuthorizationCommon common = 1;
   // An AuthorizationResult containing detailed information about the
   // Authorizer's response, or any RPC error that occurred.

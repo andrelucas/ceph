@@ -1078,7 +1078,7 @@ void SetAuthorizationCommonTimestamp(::authorizer::v1::AuthorizationCommon* comm
   ts->set_nanos(ns.count());
 }
 
-std::optional<::authorizer::v1::AuthorizeRequest> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
+std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
     const req_state* s, const HandoffAuthzState* state, uint64_t operation)
 {
   using namespace ::authorizer::v1;
@@ -1101,7 +1101,7 @@ std::optional<::authorizer::v1::AuthorizeRequest> PopulateAuthorizeRequest(const
 
   // We should have everything we need. Construct and populate the request.
 
-  AuthorizeRequest req;
+  AuthorizeV2Request req;
   // The AuthorizationCommon submessage.
   auto common = req.mutable_common();
 
@@ -1143,7 +1143,7 @@ std::optional<::authorizer::v1::AuthorizeRequest> PopulateAuthorizeRequest(const
   // the protobuf in a very natural way.
   auto env = req.mutable_environment();
   for (const auto& kv : env_map) {
-    AuthorizeRequest::IAMMapEntry entry;
+    AuthorizeV2Request::IAMMapEntry entry;
     for (const auto& v : kv.second) {
       entry.add_key(v);
     }
@@ -1179,12 +1179,12 @@ std::optional<::authorizer::v1::AuthorizeRequest> PopulateAuthorizeRequest(const
   return req;
 }
 
-AuthorizerClient::AuthorizeResult AuthorizerClient::Authorize(AuthorizeRequest& req)
+AuthorizerClient::AuthorizeResult AuthorizerClient::Authorize(AuthorizeV2Request& req)
 {
   using namespace ::authorizer::v1;
 
   ::grpc::ClientContext context;
-  AuthorizeResponse resp;
+  AuthorizeV2Response resp;
 
   // If the timestamp is zero, set it to 'now'. This is tedious code to write,
   // let's do it once.
@@ -1193,7 +1193,7 @@ AuthorizerClient::AuthorizeResult AuthorizerClient::Authorize(AuthorizeRequest& 
     SetAuthorizationCommonTimestamp(req.mutable_common());
   }
 
-  ::grpc::Status status = stub_->Authorize(&context, req, &resp);
+  ::grpc::Status status = stub_->AuthorizeV2(&context, req, &resp);
   if (status.ok()) {
     // The RPC succeeded. Construct a result object from the response. Note
     // that the first field is only true if we got an ALLOW result.
@@ -1207,7 +1207,7 @@ AuthorizerClient::AuthorizeResult AuthorizerClient::Authorize(AuthorizeRequest& 
 
 // ostream operators for authz protobuf messages.
 
-std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeRequest& res)
+std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeV2Request& res)
 {
   using namespace google::protobuf::util;
   JsonPrintOptions options;
@@ -1219,7 +1219,7 @@ std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeRequ
   return os;
 }
 
-std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeResponse& res)
+std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeV2Response& res)
 {
   using namespace google::protobuf::util;
   JsonPrintOptions options;

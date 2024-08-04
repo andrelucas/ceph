@@ -1029,7 +1029,7 @@ public:
    */
   class AuthorizeResult {
     bool success_;
-    std::optional<AuthorizeResponse> response_;
+    std::optional<AuthorizeV2Response> response_;
     std::optional<::grpc::Status> status_;
     std::optional<::google::rpc::Status> rpc_status_;
 
@@ -1040,7 +1040,7 @@ public:
      *
      * @param response The AuthorizeResponse message.
      */
-    AuthorizeResult(bool success, const AuthorizeResponse& response)
+    AuthorizeResult(bool success, const AuthorizeV2Response& response)
         : success_(success)
         , response_(response)
     {
@@ -1101,7 +1101,7 @@ public:
 
     /// @brief Return the AuthorizeResponse message resulting from the RPC call,
     /// if any.
-    std::optional<AuthorizeResponse> response() const { return response_; }
+    std::optional<AuthorizeV2Response> response() const { return response_; }
     /// @brief Return the gRPC status object from the RPC call, if any.
     std::optional<::grpc::Status> status() const { return status_; }
     /// @brief Return the google::rpc::Status object from the RPC call, if any.
@@ -1119,7 +1119,7 @@ public:
    * @param req The AuthorizeRequest message.
    * @return AuthorizeResponse the AuthorizeResponse message from the server.
    */
-  AuthorizerClient::AuthorizeResult Authorize(AuthorizeRequest& req);
+  AuthorizerClient::AuthorizeResult Authorize(AuthorizeV2Request& req);
 
 }; // class AuthorizerClient
 
@@ -1155,13 +1155,13 @@ void SetAuthorizationCommonTimestamp(::authorizer::v1::AuthorizationCommon* comm
  * @return std::optional<::authorizer::v1::AuthorizeRequest> A populated
  * AuthorizeRequest message on success, std::nullopt on failure.
  */
-std::optional<::authorizer::v1::AuthorizeRequest> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
+std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
     const req_state* s, const HandoffAuthzState* state, uint64_t operation);
 
 // Output stream operator for ::authorizer::v1:AuthorizeRequest.
-extern std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeRequest& res);
+extern std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeV2Request& res);
 // Output stream operator for ::authorizer::v1::AuthorizeResponse.
-extern std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeResponse& res);
+extern std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::AuthorizeV2Response& res);
 
 /****************************************************************************/
 

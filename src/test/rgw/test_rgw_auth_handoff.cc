@@ -1484,7 +1484,7 @@ class TestAuthzImpl final : public authorizer::v1::AuthorizerService::Service {
     return grpc::Status::OK;
   }
 
-  grpc::Status Authorize(grpc::ServerContext* context, const authorizer::v1::AuthorizeRequest* request, authorizer::v1::AuthorizeResponse* response) override
+  grpc::Status AuthorizeV2(grpc::ServerContext* context, const authorizer::v1::AuthorizeV2Request* request, authorizer::v1::AuthorizeV2Response* response) override
   {
     ldpp_dout(&dpp_, 20) << __func__ << ": enter" << dendl;
     ldpp_dout(&dpp_, 20) << "Request: " << *request << dendl;
