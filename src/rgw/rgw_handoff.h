@@ -236,13 +236,17 @@ public:
    * Frustratingly, \p s is contained in \op, but it's a protected member so
    * we provide it explicitly.
    *
+   * \p s is non-const because we might have to modify it, e.g. by loading
+   * bucket or object tags that live in the environment, or by setting
+   * additional authz state.
+   *
    * @param op The RGWOp-subclass object pointer.
    * @param s The req_state object.
    * @param operation The operation code.
    * @param y optional yield (will likely be ignored).
    * @return int return code. 0 for success, <0 for error, typically -EACCES.
    */
-  int verify_permission(const RGWOp* op, const req_state* s,
+  int verify_permission(const RGWOp* op, req_state* s,
       uint64_t operation, optional_yield y);
 
   /**

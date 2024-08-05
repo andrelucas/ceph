@@ -1047,18 +1047,54 @@ HandoffHelperImpl::get_signing_key(const DoutPrefixProvider* dpp,
   return std::make_optional(result.signing_key());
 }
 
-int HandoffHelperImpl::verify_permission(const RGWOp* op, const req_state* s,
+int HandoffHelperImpl::_load_extra_data(const DoutPrefixProvider* dpp,
+    const AuthorizerClient::AuthorizeResult& result, authorizer::v1::AuthorizeV2Request& req,
+    const RGWOp* op, req_state* s, uint64_t operation, optional_yield y)
+{
+  auto edr = result.response()->extra_data_required();
+  ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("{}: Authorizer requires extra data: {}"),
+      __func__, proto_to_JSON(edr))
+                    << dendl;
+  auto edp = req.mutable_extra_data_provided();
+
+  /* The tags are loaded into the IAM environment by Ceph's own code, and
+   * I'm not sure that's not exactly what we want! We leave open the
+   * possibility of loading it it into a separate structure, but I'm not
+   * convinced that's necessary tbh.
+   */
+  // auto ed = req.mutable_extra_data();
+
+  if (edr.bucket_tags()) {
+    int ret = rgw_iam_add_buckettags(dpp, s);
+    if (ret < 0) {
+      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to add bucket tags"), __func__) << dendl;
+      return ret;
+    }
+    edp->set_bucket_tags(true);
+  }
+  if (edr.object_key_tags()) {
+    int ret = rgw_iam_add_objtags(dpp, s, true, true);
+    if (ret < 0) {
+      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to add object key tags"), __func__) << dendl;
+      return ret;
+    }
+    edp->set_object_key_tags(true);
+  }
+  return 0;
+}
+
+int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
     uint64_t operation, optional_yield y)
 {
   // Construct a custom log prefix provider with some per-request state
   // information. This should make it easier to correlate logs on busy
   // servers.
-  HandoffDoutStateProvider hdpp(*op, s);
+  HandoffDoutStateProvider hdpp(*op, "HandoffAuthz", s);
   auto dpp = &hdpp;
 
   ceph_assert(s->cio != nullptr);
 
-  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: XXX BEGIN"), __func__) << dendl;
+  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}"), __func__) << dendl;
 
   auto opt_req = PopulateAuthorizeRequest(dpp, s, s->handoff_authz.get(), operation);
   if (!opt_req) {
@@ -1085,20 +1121,21 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, const req_state* s,
   auto result = client.AuthorizeV2(req);
 
   if (result.extra_data_required()) {
-    auto edr = result.response()->extra_data_required();
-    ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("{}: Authorizer requires extra data: {}"),
-        __func__, proto_to_JSON(edr))
+    ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("{}: Authorizer requires extra data: {}"),
+        __func__, proto_to_JSON(result.response()->extra_data_required()))
                       << dendl;
-    auto edp = req.mutable_extra_data_provided();
-    // auto ed = req.mutable_extra_data();
-    if (edr.bucket_tags()) {
-      // XXX fetch
-      edp->set_bucket_tags(true);
+
+    auto ret = _load_extra_data(dpp, result, req, op, s, operation, y);
+    if (ret < 0) {
+      return ret;
     }
-    if (edr.object_key_tags()) {
-      // XXX fetch
-      edp->set_object_key_tags(true);
-    }
+
+    // Bucket tags and object key tags make changes to the IAM environment.
+    // Reload that environment in the request, otherwise the tag loads will
+    // have no effect.
+    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Reloading IAM environment"), __func__) << dendl;
+    PopulateAuthorizeRequestIAMEnvironment(dpp, s, req);
+
     // Resubmit the request with the extra data.
     ldpp_dout(dpp, 5)
         << fmt::format(FMT_STRING("{}: Resubmitting request with extra data: {}"), __func__, proto_to_JSON(req)) << dendl;
@@ -1107,6 +1144,11 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, const req_state* s,
 
   if (result.ok()) {
     return 0;
+  } else if (result.extra_data_required()) {
+    // We're looping. Disallow this explicitly and as an internal error.
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Disallowing multiple extra data requests"), __func__) << dendl;
+    return -ERR_INTERNAL_ERROR;
+
   } else {
     auto status = result.status();
     // XXX check for richer error message
@@ -1121,9 +1163,8 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, const req_state* s,
     return -EACCES;
   }
 
-  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: XXX END"), __func__) << dendl;
-
-  return 0; // XXX !!!
+  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Success"), __func__) << dendl;
+  return 0;
 }
 
 /****************************************************************************/
@@ -1156,6 +1197,43 @@ void SetAuthorizationCommonTimestamp(::authorizer::v1::AuthorizationCommon* comm
   auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now - now_ts);
   ts->set_seconds(std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count());
   ts->set_nanos(ns.count());
+}
+
+void PopulateAuthorizeRequestIAMEnvironment(const DoutPrefixProvider* dpp,
+    const req_state* s, ::authorizer::v1::AuthorizeV2Request& req)
+{
+  // s->env is an rgw::IAM::Environment -> std::multimap<std::string,
+  // std::string>. We need to translate that into a protobuf-compatible type,
+  // as protobuf has no native multimap. It appears the standard is to have a
+  // map of repeated fields, which is what we'll do here.
+  //
+  // std::multimap has a weird API, and whilst we could work with it directly,
+  // the following feels clearer to me.
+  //
+  // First convert the multimap into an flat_map<string, vector<string>>,
+  // which looks exactly like the protobuf type. These are small maps, so
+  // flat_map makes perfect sense here.
+  boost::container::flat_map<std::string, std::vector<std::string>> env_map;
+  for (const auto& kv : s->env) {
+    auto key = kv.first;
+    auto value = kv.second;
+    env_map[key].emplace_back(value);
+  }
+  // Then load std::unordered_map<std::string, std::vector<std::string>> into
+  // the protobuf in a very natural way.
+  auto env = req.mutable_environment();
+  // Start from scratch. This makes more sense if you consider the case where
+  // we're resubmitting a request with extra data. This is a multimap, so
+  // loading new values will just duplicate everything that isn't new.
+  env->clear();
+
+  for (const auto& kv : env_map) {
+    AuthorizeV2Request::IAMMapEntry entry;
+    for (const auto& v : kv.second) {
+      entry.add_key(v);
+    }
+    env->emplace(kv.first, entry);
+  }
 }
 
 std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
@@ -1202,33 +1280,7 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
   req.set_bucket_name(state->bucket_name());
   req.set_object_key_name(state->object_key_name());
 
-  // s->env is an rgw::IAM::Environment -> std::multimap<std::string,
-  // std::string>. We need to translate that into a protobuf-compatible type,
-  // as protobuf has no native multimap. It appears the standard is to have a
-  // map of repeated fields, which is what we'll do here.
-  //
-  // std::multimap has a weird API, and whilst we could work with it directly,
-  // the following feels clearer to me.
-  //
-  // First convert the multimap into an flat_map<string, vector<string>>,
-  // which looks exactly like the protobuf type. These are small maps, so
-  // flat_map makes perfect sense here.
-  boost::container::flat_map<std::string, std::vector<std::string>> env_map;
-  for (const auto& kv : s->env) {
-    auto key = kv.first;
-    auto value = kv.second;
-    env_map[key].emplace_back(value);
-  }
-  // Then load std::unordered_map<std::string, std::vector<std::string>> into
-  // the protobuf in a very natural way.
-  auto env = req.mutable_environment();
-  for (const auto& kv : env_map) {
-    AuthorizeV2Request::IAMMapEntry entry;
-    for (const auto& v : kv.second) {
-      entry.add_key(v);
-    }
-    env->emplace(kv.first, entry);
-  }
+  PopulateAuthorizeRequestIAMEnvironment(dpp, s, req);
 
   // Extra data. If configured, populate the extra_data_provided field with
   // bools for each provided type, and provide the extra data in the
