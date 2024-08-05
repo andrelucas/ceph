@@ -795,7 +795,7 @@ static int rgw_iam_add_objtags(const DoutPrefixProvider *dpp, req_state* s, rgw:
   return 0;
 }
 
-static int rgw_iam_add_objtags(const DoutPrefixProvider *dpp, req_state* s, bool has_existing_obj_tag, bool has_resource_tag) {
+int rgw_iam_add_objtags(const DoutPrefixProvider* dpp, req_state* s, bool has_existing_obj_tag, bool has_resource_tag) {
   if (!rgw::sal::Object::empty(s->object.get())) {
     return rgw_iam_add_objtags(dpp, s, s->object.get(), has_existing_obj_tag, has_resource_tag);
   }
@@ -811,7 +811,7 @@ static int rgw_iam_add_buckettags(const DoutPrefixProvider *dpp, req_state* s, r
   return 0;
 }
 
-static int rgw_iam_add_buckettags(const DoutPrefixProvider *dpp, req_state* s) {
+int rgw_iam_add_buckettags(const DoutPrefixProvider* dpp, req_state* s) {
   return rgw_iam_add_buckettags(dpp, s, s->bucket.get());
 }
 

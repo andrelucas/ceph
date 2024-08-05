@@ -67,6 +67,9 @@ class RGWOp;
 class RGWRados;
 class RGWMultiCompleteUpload;
 
+// Akamai: Un-static a few utility functions.
+int rgw_iam_add_objtags(const DoutPrefixProvider* dpp, req_state* s, bool has_existing_obj_tag, bool has_resource_tag);
+int rgw_iam_add_buckettags(const DoutPrefixProvider* dpp, req_state* s);
 
 namespace rgw {
 namespace auth {
