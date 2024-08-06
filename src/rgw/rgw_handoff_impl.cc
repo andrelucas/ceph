@@ -1047,38 +1047,31 @@ HandoffHelperImpl::get_signing_key(const DoutPrefixProvider* dpp,
   return std::make_optional(result.signing_key());
 }
 
-int HandoffHelperImpl::_load_extra_data(const DoutPrefixProvider* dpp,
-    const AuthorizerClient::AuthorizeResult& result, authorizer::v1::AuthorizeV2Request& req,
-    const RGWOp* op, req_state* s, uint64_t operation, optional_yield y)
+int HandoffHelperImpl::verify_permission_update_extra_data(const DoutPrefixProvider* dpp,
+    const ExtraDataSpecification& extra_spec,
+    const RGWOp* op, req_state* s, optional_yield y)
 {
-  auto edr = result.response()->extra_data_required();
-  ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("{}: Authorizer requires extra data: {}"),
-      __func__, proto_to_JSON(edr))
+  ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("{}: Authorizer requires extra data: {}"),
+      __func__, proto_to_JSON(extra_spec))
                     << dendl;
-  auto edp = req.mutable_extra_data_provided();
 
-  /* The tags are loaded into the IAM environment by Ceph's own code, and
-   * I'm not sure that's not exactly what we want! We leave open the
-   * possibility of loading it it into a separate structure, but I'm not
-   * convinced that's necessary tbh.
-   */
-  // auto ed = req.mutable_extra_data();
-
-  if (edr.bucket_tags()) {
-    int ret = rgw_iam_add_buckettags(dpp, s);
-    if (ret < 0) {
-      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to add bucket tags"), __func__) << dendl;
-      return ret;
-    }
-    edp->set_bucket_tags(true);
+  if (extra_spec.bucket_tags()) {
+    s->handoff_authz->set_bucket_tags_required(true);
+    // int ret = rgw_iam_add_buckettags(dpp, s);
+    // if (ret < 0) {
+    //   ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to add bucket tags"), __func__) << dendl;
+    //   return ret;
+    // }
+    // edp->set_bucket_tags(true);
   }
-  if (edr.object_key_tags()) {
-    int ret = rgw_iam_add_objtags(dpp, s, true, true);
-    if (ret < 0) {
-      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to add object key tags"), __func__) << dendl;
-      return ret;
-    }
-    edp->set_object_key_tags(true);
+  if (extra_spec.object_key_tags()) {
+    s->handoff_authz->set_object_tags_required(true);
+    // int ret = rgw_iam_add_objtags(dpp, s, true, true);
+    // if (ret < 0) {
+    //   ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to add object key tags"), __func__) << dendl;
+    //   return ret;
+    // }
+    // edp->set_object_key_tags(true);
   }
   return 0;
 }
@@ -1096,7 +1089,7 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
 
   ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}"), __func__) << dendl;
 
-  auto opt_req = PopulateAuthorizeRequest(dpp, s, s->handoff_authz.get(), operation);
+  auto opt_req = PopulateAuthorizeRequest(dpp, s, operation);
   if (!opt_req) {
     ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to populate AuthorizeV2Request"), __func__) << dendl;
     return -EACCES;
@@ -1120,13 +1113,18 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
    */
   auto result = client.AuthorizeV2(req);
 
-  if (result.extra_data_required()) {
-    ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("{}: Authorizer requires extra data: {}"),
-        __func__, proto_to_JSON(result.response()->extra_data_required()))
-                      << dendl;
-
-    auto ret = _load_extra_data(dpp, result, req, op, s, operation, y);
+  // extra_data_required() checks that it's safe to dereference the
+  // error_details() optional.
+  if (result.is_extra_data_required()) {
+    int ret = verify_permission_update_extra_data(dpp, result.error_details()->extra_data_required(), op, s, y);
     if (ret < 0) {
+      return ret;
+    }
+
+    auto edp = req.mutable_extra_data_provided();
+    ret = PopulateAuthorizeRequestLoadExtraData(dpp, s, edp);
+    if (ret < 0) {
+      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to load extra data"), __func__) << dendl;
       return ret;
     }
 
@@ -1143,8 +1141,11 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
   }
 
   if (result.ok()) {
+
+    ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("{}: Authorizer success"), __func__) << dendl;
     return 0;
-  } else if (result.extra_data_required()) {
+
+  } else if (result.is_extra_data_required()) {
     // We're looping. Disallow this explicitly and as an internal error.
     ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Disallowing multiple extra data requests"), __func__) << dendl;
     return -ERR_INTERNAL_ERROR;
@@ -1199,8 +1200,51 @@ void SetAuthorizationCommonTimestamp(::authorizer::v1::AuthorizationCommon* comm
   ts->set_nanos(ns.count());
 }
 
+int PopulateAuthorizeRequestLoadExtraData(const DoutPrefixProvider* dpp, req_state* s,
+    ::authorizer::v1::ExtraDataSpecification* extra_spec)
+{
+  if (!s->handoff_authz) {
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: req_state->handoff_authz cannot be null"), __func__) << dendl;
+    return -ERR_INTERNAL_ERROR;
+  }
+
+  auto state = *s->handoff_authz;
+
+  if (state.bucket_tags_required()) {
+    if (!s->bucket) {
+      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: req_state->bucket cannot be null when requesting bucket tags"), __func__) << dendl;
+      return -ERR_INTERNAL_ERROR;
+    }
+    int ret = rgw_iam_add_buckettags(dpp, s);
+    if (ret < 0) {
+      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to add bucket tags"), __func__) << dendl;
+      return ret;
+    }
+    if (extra_spec) {
+      extra_spec->set_bucket_tags(true);
+    }
+  }
+
+  if (state.object_tags_required()) {
+    if (!s->object) {
+      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: req_state->object cannot be null when requesting object tags"), __func__) << dendl;
+      return -ERR_INTERNAL_ERROR;
+    }
+    int ret = rgw_iam_add_objtags(dpp, s, true, true);
+    if (ret < 0) {
+      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to add object key tags"), __func__) << dendl;
+      return ret;
+    }
+    if (extra_spec) {
+      extra_spec->set_object_key_tags(true);
+    }
+  }
+
+  return 0;
+}
+
 void PopulateAuthorizeRequestIAMEnvironment(const DoutPrefixProvider* dpp,
-    const req_state* s, ::authorizer::v1::AuthorizeV2Request& req)
+    req_state* s, ::authorizer::v1::AuthorizeV2Request& req)
 {
   // s->env is an rgw::IAM::Environment -> std::multimap<std::string,
   // std::string>. We need to translate that into a protobuf-compatible type,
@@ -1237,9 +1281,10 @@ void PopulateAuthorizeRequestIAMEnvironment(const DoutPrefixProvider* dpp,
 }
 
 std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
-    const req_state* s, const HandoffAuthzState* state, uint64_t operation)
+    req_state* s, uint64_t operation)
 {
   using namespace ::authorizer::v1;
+  ceph_assert(s->handoff_authz != nullptr);
 
   // First check for mandatory fields.
 
@@ -1271,6 +1316,7 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
   req.set_opcode(*opcode);
 
   // State fields from the HandoffAuthzState object.
+  auto state = s->handoff_authz.get(); // Naked pointer is safe here.
   req.set_canonical_user_id(state->canonical_user_id());
   req.set_user_arn(state->user_arn());
   if (state->assuming_user_arn()) {
@@ -1280,28 +1326,31 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
   req.set_bucket_name(state->bucket_name());
   req.set_object_key_name(state->object_key_name());
 
-  PopulateAuthorizeRequestIAMEnvironment(dpp, s, req);
-
   // Extra data. If configured, populate the extra_data_provided field with
   // bools for each provided type, and provide the extra data in the
   // extra_data field.
   if (state->extra_data_required()) {
     auto edp = req.mutable_extra_data_provided();
-    auto ed = req.mutable_extra_data();
+    // // // XXX actually load the extra data here.
+    // auto ed = req.mutable_extra_data();
 
-    if (state->bucket_tags_required()) {
-      edp->set_bucket_tags(true);
-      for (const auto& kv : state->bucket_tags()) {
-        (*ed->mutable_bucket_tags())[kv.first] = kv.second;
-      }
-    }
-    if (state->object_tags_required()) {
-      edp->set_object_key_tags(true);
-      for (const auto& kv : state->object_tags()) {
-        (*ed->mutable_object_key_tags())[kv.first] = kv.second;
-      }
-    }
+    // if (state->bucket_tags_required()) {
+    //   edp->set_bucket_tags(true);
+    //   // for (const auto& kv : state->bucket_tags()) {
+    //   //   (*ed->mutable_bucket_tags())[kv.first] = kv.second;
+    //   // }
+    // }
+    // if (state->object_tags_required()) {
+    //   edp->set_object_key_tags(true);
+    //   // for (const auto& kv : state->object_tags()) {
+    //   //   (*ed->mutable_object_key_tags())[kv.first] = kv.second;
+    //   // }
+    // }
+    PopulateAuthorizeRequestLoadExtraData(dpp, s, edp);
   }
+
+  // Load the IAM environment into the request.
+  PopulateAuthorizeRequestIAMEnvironment(dpp, s, req);
 
   // Additional fields from the request. Be careful! Fields here can be
   // uninitialised, you must check for null pointers.
@@ -1327,20 +1376,40 @@ AuthorizerClient::AuthorizeResult AuthorizerClient::AuthorizeV2(AuthorizeV2Reque
 
   ::grpc::Status status = stub_->AuthorizeV2(&context, req, &resp);
   if (status.ok()) {
-    // The RPC succeeded. Construct a result object from the response. Note
-    // that the first field is only true if we got an ALLOW result.
-    return AuthorizeResult(resp.result().code() == AuthorizationResultCode::AUTHZ_RESULT_ALLOW, resp);
+    // The RPC succeeded and the request is authorized. Construct a
+    // success-type result object from the response.
+    return AuthorizeResult(resp);
   }
-  // XXX support richer error model return here, if necessary.
-  return AuthorizeResult(status); // Only support standard status response initially.
+  // Do the 'richer error model' dance on the response.
+  auto error_details = status.error_details();
+  if (error_details.empty()) {
+    return AuthorizeResult(status); // Just the standard gRPC status in the failure result.
+  }
+  // Look for our error details.
+  ::google::rpc::Status s;
+  if (!s.ParseFromString(error_details)) {
+    return AuthorizeResult(status); // Couldn't parse the error details - standard gRPC status only in the failure result.
+  }
+  for (auto& detail : s.details()) {
+    authorizer::v1::AuthorizationErrorDetails aed;
+    if (detail.UnpackTo(&aed)) {
+      // Found our error detail message. Create a failure-type result
+      // containing it.
+      return AuthorizeResult(status, aed);
+    }
+  }
+  // Return standard error failure type only, we didn't find our error detail message.
+  return AuthorizeResult(status);
 }
 
-bool AuthorizerClient::AuthorizeResult::extra_data_required() const
+std::optional<ExtraDataSpecification> AuthorizerClient::AuthorizeResult::is_extra_data_required() const
 {
-  if (err() && response() && response()->result().code() == AuthorizationResultCode::AUTHZ_RESULT_EXTRA_DATA_REQUIRED && response()->has_extra_data_required()) {
-    return true;
+  if (err() && error_details()
+      && error_details()->code() == AuthorizationResultCode::AUTHZ_RESULT_EXTRA_DATA_REQUIRED
+      && error_details()->has_extra_data_required()) {
+    return std::make_optional(error_details()->extra_data_required());
   } else {
-    return false;
+    return std::nullopt;
   }
 }
 

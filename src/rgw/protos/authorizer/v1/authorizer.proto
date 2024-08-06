@@ -128,16 +128,16 @@ enum AuthorizationResultCode {
   // XXX this will almost certainly need extended.
 }
 
-message AuthorizationResult {
-  // A human-readable error message that will appear in the logs.
-  string error_message = 1;
-  // A more detailed error message that will appear in the logs, possibly
-  // only at higher debug levels than the error_message field.
-  string error_detail = 2;
-  // An unambiguous error code that will be mapped to internal RGW error
-  // types, as defined in src/rgw/rgw_common.cc as rgw_http_s3_errors and
-  // possibly new Akamai-specific values.
+message AuthorizationErrorDetails {
+  // The result code.
   AuthorizationResultCode code = 3;
+  // A hint at the HTTP code that should be returned to the user. RGW is not
+  // required, and may not be able, to respect this.
+  int32 http_code_hint = 4;
+  // If result.code is AUTHZ_RESULT_EXTRA_DATA_REQUIRED, this field must be
+  // present and must list the extra data fields required by the Authorizer in
+  // order to properly authorize the request.
+  optional ExtraDataSpecification extra_data_required = 5;
 }
 
 // Each S3 Opcode as seen by RGW.
@@ -242,11 +242,11 @@ message ExtraDataSpecification {
 }
 
 message ExtraData {
-  // The tags that were present on the bucket at the time of the request.
-  map<string, string> bucket_tags = 1;
-  // The tags that were present on the object key at the time of the
-  // request.
-  map<string, string> object_key_tags = 2;
+  // // The tags that were present on the bucket at the time of the request.
+  // map<string, string> bucket_tags = 1;
+  // // The tags that were present on the object key at the time of the
+  // // request.
+  // map<string, string> object_key_tags = 2;
 }
 
 //
@@ -294,11 +294,5 @@ message AuthorizeV2Request {
 
 message AuthorizeV2Response {
   AuthorizationCommon common = 1;
-  // An AuthorizationResult containing detailed information about the
-  // Authorizer's response, or any RPC error that occurred.
-  AuthorizationResult result = 2;
-  // If result.code is AUTHZ_RESULT_EXTRA_DATA_REQUIRED, this field must be
-  // present and must list the extra data fields required by the Authorizer in
-  // order to properly authorize the request.
-  optional ExtraDataSpecification extra_data_required = 3;
+
 }

@@ -682,7 +682,7 @@ public:
     bool success_;
     std::optional<AuthorizeV2Response> response_;
     std::optional<::grpc::Status> status_;
-    std::optional<::google::rpc::Status> rpc_status_;
+    std::optional<AuthorizationErrorDetails> error_details_;
 
   public:
     /**
@@ -691,8 +691,8 @@ public:
      *
      * @param response The AuthorizeResponse message.
      */
-    AuthorizeResult(bool success, const AuthorizeV2Response& response)
-        : success_(success)
+    AuthorizeResult(const AuthorizeV2Response& response)
+        : success_(true)
         , response_(response)
     {
     }
@@ -718,10 +718,10 @@ public:
      * @param rpc_status The ::google::rpc::Status response extracted from the
      * richer error found in the ::grpc::Status response.
      */
-    AuthorizeResult(const ::grpc::Status& status, const ::google::rpc::Status& rpc_status)
+    AuthorizeResult(const ::grpc::Status& status, const AuthorizationErrorDetails& error_details)
         : success_(false)
         , status_(status)
-        , rpc_status_(rpc_status)
+        , error_details_(error_details)
     {
     }
 
@@ -754,11 +754,10 @@ public:
      * @brief Utility function to determine if the call failed due to an extra
      * data requirement.
      *
-     * @return true The request returned with a status of EXTRA_DATA_REQUIRED
-     * and a list of requirements.
-     * @return false Otherwise.
+     * @return An optional ExtraDataSpecification object if extra data is
+     * required, otherwise std::nullopt.
      */
-    bool extra_data_required() const;
+    std::optional<ExtraDataSpecification> is_extra_data_required() const;
 
     /// @brief Return the AuthorizeResponse message resulting from the RPC call,
     /// if any.
@@ -766,7 +765,7 @@ public:
     /// @brief Return the gRPC status object from the RPC call, if any.
     std::optional<::grpc::Status> status() const { return status_; }
     /// @brief Return the google::rpc::Status object from the RPC call, if any.
-    std::optional<::google::rpc::Status> rpc_status() const { return rpc_status_; }
+    std::optional<AuthorizationErrorDetails> error_details() const { return error_details_; }
 
     friend std::ostream& operator<<(std::ostream& os, const AuthorizerClient::AuthorizeResult& ep);
   }; // class AuthorizerClient::AuthorizeResult
@@ -1125,19 +1124,19 @@ public:
       uint64_t operation, optional_yield y);
 
   /**
-   * @brief Load extra data as specified by the Authorizer.
+   * @brief Update in s->handoff_authz the set of required extra data as
+   * specified by the Authorizer.
    *
    * @param dpp The DoutPrefixProvider.
-   * @param result The result of an authorizer::v1::AuthorizeV2() RPC call.
-   * @param req The already-constructed authorizer::v1::AuthorizeV2Request
-   * message to the Authorizer.
+   * @param extra_spec The ExtraDataSpecification to load.
    * @param op The RGWOp object.
    * @param s The req_state.
-   * @param operation The IAM operation code.
    * @param y Optional yield.
    * @return int Return code. 0 for success, <0 for error.
    */
-  int _load_extra_data(const DoutPrefixProvider* dpp, const AuthorizerClient::AuthorizeResult& result, authorizer::v1::AuthorizeV2Request& req, const RGWOp* op, req_state* s, uint64_t operation, optional_yield y);
+  int verify_permission_update_extra_data(const DoutPrefixProvider* dpp,
+      const ExtraDataSpecification& extra_spec,
+      const RGWOp* op, req_state* s, optional_yield y);
 
   /**
    * @brief Assuming an already-parsed (via synthesize_auth_header) presigned
@@ -1187,18 +1186,41 @@ void SetAuthorizationCommonTimestamp(::authorizer::v1::AuthorizationCommon* comm
  * Note that the extra data fields of the request will only be filled in if
  * the corresponding toggles (HandoffAuthzState::set_bucket_tags_required(),
  * HandoffAuthzState::set_object_tags_required()) are set to true. This is so
- * we get exactly the behaviour
+ * we get exactly the behaviour.
+ *
+ * We may modify \p s. For example, loading extra data such as tags may
+ * require modification of s->env.
  *
  * @param dpp A DoutPrefixProvider for logging.
- * @param s The req_state.
- * @param state Authz-specific state.
+ * @param s The req_state. May be modified!
  * @param operation The opcode. Use the values defined in
  * <rgw/rgw_iam_policy.h> with prefix 's3'.
  * @return std::optional<::authorizer::v1::AuthorizeRequest> A populated
  * AuthorizeRequest message on success, std::nullopt on failure.
  */
 std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
-    const req_state* s, const HandoffAuthzState* state, uint64_t operation);
+    req_state* s, uint64_t operation);
+
+/**
+ * @brief Given a req_state with a populated HandoffAuthzState, load whatever
+ * extra data the HandoffAuthzState says is required.
+ *
+ * Update the provided ExtraDataSpecification with the extra data we loaded.
+ *
+ * At the time of writing, 'loading' involves calling out the the SAL to load
+ * attributes, then writing the necessary fields into s->env, the IAM
+ * environment. This is performed using already-existing code in RGW. For
+ * bucket tags, it's `rgw_iam_add_buckettags()`. For object tags, it's
+ * `rgw_iam_add_objtags()`. Both were 'un-static'ed' from rgw_op.cc for this
+ * purpose.
+ *
+ * @param dpp
+ * @param s
+ * @param spec The ExtraDataSpecification to update.
+ * @return int The error code. 0 on success, <0 on failure.
+ */
+int PopulateAuthorizeRequestLoadExtraData(const DoutPrefixProvider* dpp, req_state* s,
+    ::authorizer::v1::ExtraDataSpecification* spec);
 
 /**
  * @brief Given a req_state and an existing AuthorizeV2Request, populate the
@@ -1215,7 +1237,7 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
  * @param req The AuthorizeV2Request message.
  */
 void PopulateAuthorizeRequestIAMEnvironment(const DoutPrefixProvider* dpp,
-    const req_state* s, ::authorizer::v1::AuthorizeV2Request& req);
+    req_state* s, ::authorizer::v1::AuthorizeV2Request& req);
 
 /**
  * @brief Format a protobuf as a JSON string, or an error message on failure.
