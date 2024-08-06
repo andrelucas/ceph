@@ -369,6 +369,11 @@ class LCObjsLister {
   vector<rgw_bucket_dir_entry>::iterator obj_iter;
   rgw_bucket_dir_entry pre_obj;
   int64_t delay_ms;
+  int shard_id;
+  uint32_t init_num_shards;
+  std::map<int, bool> is_shard_empty;
+  std::map<int,string> shard_prefix;
+  std::map<int,rgw_obj_key> shard_marker;
 
 public:
   LCObjsLister(rgw::sal::Driver* _driver, rgw::sal::Bucket* _bucket) :
@@ -376,10 +381,13 @@ public:
     list_params.list_versions = bucket->versioned();
     list_params.allow_unordered = true;
     delay_ms = driver->ctx()->_conf.get_val<int64_t>("rgw_lc_thread_delay");
+    shard_id = -1;
+    init_num_shards = 0;
   }
 
   void set_prefix(const string& p) {
     prefix = p;
+    shard_prefix[shard_id] = prefix;
     list_params.prefix = prefix;
   }
 
@@ -388,13 +396,76 @@ public:
   }
 
   int fetch(const DoutPrefixProvider *dpp) {
-    int ret = bucket->list(dpp, list_params, 1000, list_results, null_yield);
+    CephContext* cct = dpp->get_cct();
+    std::string bn = bucket->get_name();
+    uint32_t cnt = 1000;
+    uint32_t num_shards = bucket->get_info().layout.current_index.layout.normal.num_shards;
+    ldpp_dout(dpp, 10) << "bucket: " << bn << " init_num_shards " << init_num_shards
+                       << " num_shards: " << num_shards << dendl;
+    bool multi_shard_list = cct->_conf.get_val<bool>("rgw_lc_multi_shard_list");
+    if(multi_shard_list) {
+      if(init_num_shards != num_shards) {
+        is_shard_empty.clear();
+        shard_prefix.clear();
+        shard_marker.clear();
+        init_num_shards = num_shards;
+      }
+      shard_id = (shard_id == num_shards+1)? 0 : (shard_id + 1) % num_shards;
+      list_params.shard_id = shard_id;
+      list_params.prefix = shard_prefix[shard_id];
+      list_params.marker = shard_marker[shard_id];
+      cnt = uint32_t(cct->_conf.get_val<uint64_t>("rgw_lc_multi_shard_list_cnt"));
+    }
+    int ret = bucket->list(dpp, list_params, cnt, list_results, null_yield);
     if (ret < 0) {
+      ldpp_dout(dpp, 1) << "ERROR: bucket->list returned ret=" << ret
+                         << dendl;
       return ret;
     }
 
     obj_iter = list_results.objs.begin();
 
+    if(multi_shard_list) {
+      if(list_results.is_truncated) {
+        //shard may not be completely empty but all remaining entries are available in list_results
+        //another list operation is not required
+        is_shard_empty[shard_id] = true;
+      }
+      if(obj_iter == list_results.objs.end()) {
+        ldpp_dout(dpp, 10) << "EMPTY: list_op shard_id " << shard_id  << " returned ret=" << ret
+                        << dendl;
+        is_shard_empty[shard_id] = true;
+	//find a shard which has objects
+	for(;;) {
+	  if(is_shard_empty.size() >= num_shards) {
+	    ldpp_dout(dpp, 10) << "EMPTY: list_op all shards empty returned ret=" << ret
+		   << dendl;
+	    return 0;
+	  }
+	  shard_id = (shard_id == num_shards + 1)? 0 : (shard_id + 1) % num_shards;
+	  list_params.shard_id = shard_id;
+	  list_params.prefix = shard_prefix[shard_id];
+          list_params.marker = shard_prefix[shard_id];
+	  ret = bucket->list(dpp, list_params, cnt, list_results, null_yield);
+	  if (ret < 0) {
+            ldpp_dout(dpp, 1) << "ERROR: bucket->list returned ret=" << ret
+                         << dendl;
+	    return ret;
+	  }
+	  if(list_results.is_truncated) {
+	    //shard may not be completely empty but all remaining entries are available in list_results
+	    //another list operation is not required
+	    is_shard_empty[shard_id] = true;
+	  }
+	  obj_iter = list_results.objs.begin();
+	  if(obj_iter != list_results.objs.end())
+	    break;
+	  ldpp_dout(dpp, 10) << "EMPTY: list_op shard_id " << shard_id  << " returned ret=" << ret
+		   << dendl;
+	  is_shard_empty[shard_id] = true;
+	}
+      }
+    }
     return 0;
   }
 
@@ -412,6 +483,9 @@ public:
       } else {
 	fetch_barrier();
         list_params.marker = pre_obj.key;
+        if(shard_id>=0) {
+          shard_marker[shard_id] = pre_obj.key;
+        }
         int ret = fetch(dpp);
         if (ret < 0) {
           ldpp_dout(dpp, 0) << "ERROR: list_op returned ret=" << ret
