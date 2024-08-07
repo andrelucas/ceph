@@ -237,7 +237,9 @@ enum S3Opcode {
 // Authorizer to distringuish between a piece of extra data that was not sent,
 // and a field that was checked and found to be empty.
 message ExtraDataSpecification {
-  bool bucket_tags = 1;
+  // Was 'bucket tags provided/required'.
+  reserved 1;
+  // Object key tags provided/required.
   bool object_key_tags = 2;
 }
 
