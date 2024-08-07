@@ -497,23 +497,8 @@ public:
    */
   bool extra_data_required() const noexcept
   {
-    return bucket_tags_required_ || object_tags_required_;
+    return object_tags_required_;
   }
-
-  /**
-   * @brief Return true if bucket tags are required.
-   *
-   * @return true Bucket tags are required.
-   * @return false Bucket tags are not required.
-   */
-  bool bucket_tags_required() const noexcept { return bucket_tags_required_; }
-
-  /**
-   * @brief Set whether or not bucket tags are required.
-   *
-   * @param required true if bucket tags are required, false otherwise.
-   */
-  void set_bucket_tags_required(bool required) noexcept { bucket_tags_required_ = required; }
 
   /**
    * @brief Return true if object tags are required.

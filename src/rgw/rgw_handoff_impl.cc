@@ -1268,10 +1268,6 @@ int PopulateAuthorizeRequestLoadExtraData(const DoutPrefixProvider* dpp, req_sta
     return -ERR_INTERNAL_ERROR;
   }
   auto state = *s->handoff_authz;
-  if (state.bucket_tags_required()) {
-    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: req_state->bucket_tags_required not supported"), __func__) << dendl;
-    return -ERR_INTERNAL_ERROR;
-  }
   if (state.object_tags_required()) {
     PopulateExtraDataObjectTags(dpp, s, extra_spec, extra_data, y, alt_load);
   }
