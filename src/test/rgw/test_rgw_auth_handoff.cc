@@ -920,8 +920,8 @@ TEST_F(HandoffHelperImplGRPCTest, ChannelRecoversFromDeadAtStartup)
   ASSERT_EQ(res.err_type(), HandoffAuthResult::error_type::TRANSPORT_ERROR) << "should return TRANSPORT_ERROR";
 
   server().start();
-  // Wait as short a time as the library allows.
-  std::this_thread::sleep_for(std::chrono::milliseconds(SMALLEST_RECONNECT_DELAY_MS));
+  // Wait as short a time as the library allows, plus a millisecond.
+  std::this_thread::sleep_for(std::chrono::milliseconds(SMALLEST_RECONNECT_DELAY_MS + 1));
   res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
   EXPECT_TRUE(res.is_ok()) << "should now succeed";
   EXPECT_EQ(res.err_type(), HandoffAuthResult::error_type::NO_ERROR) << "should now show no error";
@@ -1786,6 +1786,30 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataObjectTagsFlagButNoData)
 }
 
 /* #endregion */
+
+TEST(AuthzState, RequirementsStack)
+{
+  // Test the requirements stack. This is a simple class, but it's worth
+  // testing because it's a bit fiddly to get right.
+  HandoffAuthzState state(true);
+  ASSERT_FALSE(state.object_tags_required());
+  state.set_object_tags_required(true); // current == true, stack = empty
+  ASSERT_TRUE(state.object_tags_required());
+  state.push_requirements(); // current = false, stack[0] = true
+  ASSERT_FALSE(state.object_tags_required());
+  state.push_requirements(); // current = false, stack[0] = false, stack[1] = true
+  state.set_object_tags_required(true); // current = true
+  state.pop_requirements(); // current = false, stack[0] = true
+  ASSERT_FALSE(state.object_tags_required());
+  state.pop_requirements(); // current = true, stack = empty
+  ASSERT_TRUE(state.object_tags_required());
+}
+
+TEST(AuthzDeathTest, RequirementsStackPopEmpty)
+{
+  HandoffAuthzState state(true);
+  ASSERT_DEATH(state.pop_requirements(), ".*empty Authz state requirements stack.*");
+}
 
 } // namespace
 
