@@ -3126,22 +3126,30 @@ int RGWCreateBucket::verify_permission(optional_yield y)
     return -EACCES;
   }
 
-  rgw_bucket bucket;
-  bucket.name = s->bucket_name;
-  bucket.tenant = s->bucket_tenant;
-  ARN arn = ARN(bucket);
-  if (!verify_user_permission(this, s, arn, rgw::IAM::s3CreateBucket, false)) {
-    return -EACCES;
-  }
+  if (s->handoff_authz->enabled()) {
+    int ret = s->handoff_helper->verify_permission(this, this->s, rgw::IAM::s3CreateBucket, y);
+    if (ret < 0) {
+      return ret;
+    }
 
-  if (s->user->get_tenant() != s->bucket_tenant) {
-    //AssumeRole is meant for cross account access
-    if (s->auth.identity->get_identity_type() != TYPE_ROLE) {
-      ldpp_dout(this, 10) << "user cannot create a bucket in a different tenant"
-                        << " (user_id.tenant=" << s->user->get_tenant()
-                        << " requested=" << s->bucket_tenant << ")"
-                        << dendl;
+  } else {
+    rgw_bucket bucket;
+    bucket.name = s->bucket_name;
+    bucket.tenant = s->bucket_tenant;
+    ARN arn = ARN(bucket);
+    if (!verify_user_permission(this, s, arn, rgw::IAM::s3CreateBucket, false)) {
       return -EACCES;
+    }
+
+    if (s->user->get_tenant() != s->bucket_tenant) {
+      // AssumeRole is meant for cross account access
+      if (s->auth.identity->get_identity_type() != TYPE_ROLE) {
+        ldpp_dout(this, 10) << "user cannot create a bucket in a different tenant"
+                            << " (user_id.tenant=" << s->user->get_tenant()
+                            << " requested=" << s->bucket_tenant << ")"
+                            << dendl;
+        return -EACCES;
+      }
     }
   }
 
