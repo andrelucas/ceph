@@ -5059,6 +5059,10 @@ int RGWDeleteObj::verify_permission(optional_yield y)
     return op_ret;
   }
 
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3DeleteObject, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
     if (has_s3_existing_tag || has_s3_resource_tag)
       rgw_iam_add_objtags(this, s, has_s3_existing_tag, has_s3_resource_tag);
