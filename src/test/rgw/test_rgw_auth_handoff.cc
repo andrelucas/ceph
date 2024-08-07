@@ -1612,11 +1612,13 @@ TEST_F(AuthzGRPCTest, AuthorizeBasics)
   s.trans_id = "deadbeef";
   s.handoff_authz->set_bucket_name("bucket");
   s.handoff_authz->set_object_key_name("object");
-  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject);
+  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject, null_yield);
   ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
 
   auto res = client.AuthorizeV2(*opt_req);
   ASSERT_TRUE(res.ok()) << "expected ok(), got " << res;
+
+  // XXX more checks.
 }
 
 // Authz utility tests.
@@ -1626,7 +1628,7 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestFailureCaseBadOp)
   DEFINE_REQ_STATE;
   s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
   // 9999 is not a valid opcode.
-  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, 9999);
+  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, 9999, null_yield);
   ASSERT_THAT(opt_req, testing::Eq(std::nullopt));
 }
 
@@ -1641,7 +1643,7 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestIAMEnvironmentMapping)
   s.env.emplace("k1", "k1v2");
   s.env.emplace("k2", "k2v1");
 
-  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject);
+  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject, null_yield);
   ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
   auto& req = *opt_req;
 
@@ -1662,74 +1664,64 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestIAMEnvironmentMapping)
 
 // Check we're setting extra data when we should.
 
+// Fake object tag loader, does nothing and returns success. This is used
+// instead of calling the SAL to load object attributes, which we can't fake
+// without a lot of unnecessary machinery. We'll pass this function to
+// PopulateAuthorizeDataRequest() and let it propagate through.
+int null_object_tag_load(
+    const DoutPrefixProvider* dpp,
+    const req_state* s,
+    objtag_map_type& obj_tags,
+    optional_yield y)
+{
+  return 0;
+}
+
+class ObjectTagHolder {
+  std::unordered_map<std::string, std::string> tags_;
+
+public:
+  void set(const std::string& k, const std::string& v)
+  {
+    tags_[k] = v;
+  }
+
+  std::string& operator[](const std::string& idx) { return tags_[idx]; }
+
+  int object_tag_load(
+      const DoutPrefixProvider* dpp,
+      const req_state* s,
+      objtag_map_type& obj_tags,
+      optional_yield y)
+  {
+    for (const auto& [k, v] : tags_) {
+      obj_tags[k] = v;
+    }
+    return 0;
+  }
+
+  // Return a function that can be passed to PopulateAuthorizeRequest() in
+  // order to fake the loading of object tags.
+  load_object_tags_function get_loader()
+  {
+    using namespace std::placeholders;
+    return std::bind(&ObjectTagHolder::object_tag_load, this, _1, _2, _3, _4);
+  }
+}; // class ObjectTagHolder
+
 TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataNone)
 {
   DEFINE_REQ_STATE;
   // Set up a request with no extra data.
   s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
   s.trans_id = "deadbeef";
-  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject);
+  ObjectTagHolder tags;
+  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject,
+      null_yield, tags.get_loader());
   ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
   auto& req = *opt_req;
   ASSERT_FALSE(req.has_extra_data());
   ASSERT_FALSE(req.has_extra_data_provided());
-}
-
-TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataBucketTags)
-{
-  // Now set bucket tags in the extra data.
-  DEFINE_REQ_STATE;
-  // New request.
-  s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
-  s.trans_id = "deadbeef";
-  s.handoff_authz->set_bucket_tag_entry("bk1", "bk1v1");
-  s.handoff_authz->set_bucket_tags_required(true);
-  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject);
-  ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
-  auto& req = *opt_req;
-  ASSERT_TRUE(req.has_extra_data_provided());
-  ASSERT_TRUE(req.extra_data_provided().bucket_tags());
-  // XXX check IAM environment.
-  // ASSERT_TRUE(req.has_extra_data());
-  // auto bt = req.extra_data().bucket_tags();
-  // ASSERT_TRUE(bt.find("bk1") != bt.end());
-  // ASSERT_EQ(bt.at("bk1"), "bk1v1");
-}
-
-TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataBucketTagsButNoFlag)
-{
-  // Now set bucket tags in the extra data.
-  DEFINE_REQ_STATE;
-  // New request.
-  s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
-  s.trans_id = "deadbeef";
-  s.handoff_authz->set_bucket_tag_entry("bk1", "bk1v1");
-  s.handoff_authz->set_bucket_tags_required(false); // No flag set.
-  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject);
-  ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
-  auto& req = *opt_req;
-  ASSERT_FALSE(req.has_extra_data());
-  ASSERT_FALSE(req.has_extra_data_provided());
-}
-
-TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataBucketTagsFlagButNoData)
-{
-  // Now set bucket tags in the extra data.
-  DEFINE_REQ_STATE;
-  // New request.
-  s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
-  s.trans_id = "deadbeef";
-  // No tags set.
-  s.handoff_authz->set_bucket_tags_required(true);
-  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject);
-  ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
-  auto& req = *opt_req;
-  ASSERT_TRUE(req.has_extra_data_provided());
-  ASSERT_TRUE(req.extra_data_provided().bucket_tags());
-  // XXX check IAM environment.
-  // ASSERT_TRUE(req.has_extra_data());
-  // auto bt = req.extra_data().bucket_tags();
-  // ASSERT_TRUE(bt.find("bk1") == bt.end()); // => not found.
 }
 
 TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataObjectTags)
@@ -1739,18 +1731,19 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataObjectTags)
   // New request.
   s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
   s.trans_id = "deadbeef";
-  s.handoff_authz->set_object_tag_entry("ok1", "ok1v1");
   s.handoff_authz->set_object_tags_required(true);
-  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject);
+  ObjectTagHolder tags;
+  tags["ok1"] = "ok1v1";
+  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject,
+      null_yield, tags.get_loader());
   ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
   auto& req = *opt_req;
   ASSERT_TRUE(req.has_extra_data_provided());
   ASSERT_TRUE(req.extra_data_provided().object_key_tags());
-  // XXX check IAM environment.
-  // ASSERT_TRUE(req.has_extra_data());
-  // auto ot = req.extra_data().object_key_tags();
-  // ASSERT_TRUE(ot.find("ok1") != ot.end());
-  // ASSERT_EQ(ot.at("ok1"), "ok1v1");
+  ASSERT_TRUE(req.has_extra_data());
+  auto ot = req.extra_data().object_key_tags();
+  ASSERT_TRUE(ot.find("ok1") != ot.end());
+  ASSERT_EQ(ot.at("ok1"), "ok1v1");
 }
 
 TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataObjectTagsButNoFlag)
@@ -1760,9 +1753,11 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataObjectTagsButNoFlag)
   // New request.
   s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
   s.trans_id = "deadbeef";
-  s.handoff_authz->set_object_tag_entry("ok1", "ok1v1");
   s.handoff_authz->set_object_tags_required(false);
-  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject);
+  ObjectTagHolder tags;
+  tags["ok1"] = "ok1v1";
+  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject,
+      null_yield, tags.get_loader());
   ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
   auto& req = *opt_req;
   ASSERT_FALSE(req.has_extra_data());
@@ -1778,85 +1773,16 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataObjectTagsFlagButNoData)
   s.trans_id = "deadbeef";
   // No tags set.
   s.handoff_authz->set_object_tags_required(true);
-  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject);
+  ObjectTagHolder tags;
+  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject,
+      null_yield, tags.get_loader());
   ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
   auto& req = *opt_req;
   ASSERT_TRUE(req.has_extra_data_provided());
   ASSERT_TRUE(req.extra_data_provided().object_key_tags());
-  // XXX check IAM environment.
-  // ASSERT_TRUE(req.has_extra_data());
-  // auto ot = req.extra_data().object_key_tags();
-  // ASSERT_TRUE(ot.find("ok1") == ot.end()); // => not found.
-}
-
-TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataBucketTagsAndObjectTags)
-{
-  // Now set bucket tags and object tags in the extra data.
-  DEFINE_REQ_STATE;
-  // New request.
-  s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
-  s.trans_id = "deadbeef";
-  s.handoff_authz->set_bucket_tag_entry("bk1", "bk1v1");
-  s.handoff_authz->set_bucket_tags_required(true);
-  s.handoff_authz->set_object_tag_entry("ok1", "ok1v1");
-  s.handoff_authz->set_object_tags_required(true);
-  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject);
-  ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
-  auto& req = *opt_req;
-  ASSERT_TRUE(req.has_extra_data_provided());
-  ASSERT_TRUE(req.extra_data_provided().bucket_tags());
-  ASSERT_TRUE(req.extra_data_provided().object_key_tags());
-  // XXX check IAM environment.
-  // ASSERT_TRUE(req.has_extra_data());
-  // auto bt = req.extra_data().bucket_tags();
-  // ASSERT_TRUE(bt.find("bk1") != bt.end());
-  // ASSERT_EQ(bt.at("bk1"), "bk1v1");
-  // auto ot = req.extra_data().object_key_tags();
-  // ASSERT_TRUE(ot.find("ok1") != ot.end());
-  // ASSERT_EQ(ot.at("ok1"), "ok1v1");
-}
-
-TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataBucketTagsAndObjectTagsButNoFlags)
-{
-  // Now set bucket tags and object tags in the extra data.
-  DEFINE_REQ_STATE;
-  // New request.
-  s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
-  s.trans_id = "deadbeef";
-  s.handoff_authz->set_bucket_tag_entry("bk1", "bk1v1");
-  s.handoff_authz->set_bucket_tags_required(false);
-  s.handoff_authz->set_object_tag_entry("ok1", "ok1v1");
-  s.handoff_authz->set_object_tags_required(false);
-  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject);
-  ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
-  auto& req = *opt_req;
-  ASSERT_FALSE(req.has_extra_data());
-  ASSERT_FALSE(req.has_extra_data_provided());
-}
-
-TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataBucketTagsAndObjectTagsFlagsButNoData)
-{
-  // Now set bucket tags and object tags in the extra data.
-  DEFINE_REQ_STATE;
-  // New request.
-  s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
-  s.trans_id = "deadbeef";
-  // No bucket tags set.
-  s.handoff_authz->set_bucket_tags_required(true);
-  // No object tags set.
-  s.handoff_authz->set_object_tags_required(true);
-  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject);
-  ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
-  auto& req = *opt_req;
-  ASSERT_TRUE(req.has_extra_data_provided());
-  ASSERT_TRUE(req.extra_data_provided().bucket_tags());
-  ASSERT_TRUE(req.extra_data_provided().object_key_tags());
-  // XXX check IAM environment.
-  // ASSERT_TRUE(req.has_extra_data());
-  // auto bt = req.extra_data().bucket_tags();
-  // ASSERT_TRUE(bt.find("bk1") == bt.end()); // => not found.
-  // auto ot = req.extra_data().object_key_tags();
-  // ASSERT_TRUE(ot.find("ok1") == ot.end()); // => not found.
+  ASSERT_TRUE(req.has_extra_data());
+  auto ot = req.extra_data().object_key_tags();
+  ASSERT_TRUE(ot.find("ok1") == ot.end()); // => not found.
 }
 
 /* #endregion */

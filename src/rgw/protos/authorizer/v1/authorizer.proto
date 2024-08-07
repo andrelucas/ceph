@@ -244,11 +244,11 @@ message ExtraDataSpecification {
 }
 
 message ExtraData {
-  // // The tags that were present on the bucket at the time of the request.
-  // map<string, string> bucket_tags = 1;
-  // // The tags that were present on the object key at the time of the
-  // // request.
-  // map<string, string> object_key_tags = 2;
+  // Was bucket tags.
+  reserved 1;
+  // The tags that were present on the object key at the time of the
+  // request.
+  map<string, string> object_key_tags = 2;
 }
 
 //

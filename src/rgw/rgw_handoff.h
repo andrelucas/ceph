@@ -324,9 +324,6 @@ class HandoffAuthzState {
   bool bucket_tags_required_ = false;
   bool object_tags_required_ = false;
 
-  boost::container::flat_map<std::string, std::string> bucket_tags_;
-  boost::container::flat_map<std::string, std::string> object_tags_;
-
 public:
   HandoffAuthzState() = delete;
   /// Construct explicitly (for tests).
@@ -532,72 +529,6 @@ public:
    * @param required true if object tags are required, false otherwise.
    */
   void set_object_tags_required(bool required) noexcept { object_tags_required_ = required; }
-
-  /**
-   * @brief Set an individual entry in the bucket tags map.
-   *
-   * This is a regular map, so writing to a key that already exists will
-   * replace it.
-   *
-   * @param key The bucket tag key.
-   * @param value The bucket tag entry.
-   */
-  void set_bucket_tag_entry(const std::string& key, const std::string& value) noexcept
-  {
-    bucket_tags_[key] = value;
-  }
-
-  /**
-   * @brief Get an individual bucket tag entry, if present.
-   *
-   * @param key The bucket tag key.
-   * @return std::optional<std::string> The bucket tag entry value for \p key,
-   * or std::nullopt if the key is not present.
-   */
-  std::optional<std::string> get_bucket_tag_entry(const std::string& key) const noexcept;
-
-  /**
-   * @brief Get the object tag entry object
-   *
-   * @param key The object tag key.
-   * @return std::optional<std::string> The object tag entry value for \p key,
-   * or std::nullopt if the key is not present.
-   */
-  std::optional<std::string> get_object_tag_entry(const std::string& key) const noexcept;
-
-  /**
-   * @brief Set an individual entry in the object tags map.
-   *
-   * This is a regular map, so writing to a key that already exists will
-   * replace it.
-   *
-   * @param key The object tag key.
-   * @param value The object tag entry.
-   */
-  void set_object_tag_entry(const std::string& key, const std::string& value) noexcept
-  {
-    object_tags_[key] = value;
-  }
-
-  /**
-   * @brief Return a copy of the bucket tags map.
-   *
-   * @return const boost::container::flat_map<std::string, std::string>& The bucket tags map.
-   */
-  const boost::container::flat_map<std::string, std::string> bucket_tags() const noexcept
-  {
-    return bucket_tags_;
-  }
-
-  /**
-   * @brief Return a copy of the object tags map.
-   *
-   * @return const boost::container::flat_map<std::string, std::string>& The object tags map.
-   */
-  const boost::container::flat_map<std::string, std::string> object_tags() const noexcept
-  {
-    return object_tags_;
-  }
 
 }; // class HandoffAuthzState
 

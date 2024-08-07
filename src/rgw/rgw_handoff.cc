@@ -107,24 +107,4 @@ HandoffAuthzState::HandoffAuthzState(std::shared_ptr<HandoffHelper> helper)
   }
 }
 
-std::optional<std::string> HandoffAuthzState::get_bucket_tag_entry(const std::string& key) const noexcept
-{
-  auto it = bucket_tags_.find(key);
-  if (it == bucket_tags_.cend()) {
-    return std::nullopt;
-  } else {
-    return it->second;
-  }
-}
-
-std::optional<std::string> HandoffAuthzState::get_object_tag_entry(const std::string& key) const noexcept
-{
-  auto it = object_tags_.find(key);
-  if (it == object_tags_.cend()) {
-    return std::nullopt;
-  } else {
-    return it->second;
-  }
-}
-
 } /* namespace rgw */

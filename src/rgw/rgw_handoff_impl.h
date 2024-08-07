@@ -1131,12 +1131,10 @@ public:
    * @param extra_spec The ExtraDataSpecification to load.
    * @param op The RGWOp object.
    * @param s The req_state.
-   * @param y Optional yield.
-   * @return int Return code. 0 for success, <0 for error.
    */
-  int verify_permission_update_extra_data(const DoutPrefixProvider* dpp,
+  void verify_permission_update_authz_state(const DoutPrefixProvider* dpp,
       const ExtraDataSpecification& extra_spec,
-      const RGWOp* op, req_state* s, optional_yield y);
+      const RGWOp* op, const req_state* s);
 
   /**
    * @brief Assuming an already-parsed (via synthesize_auth_header) presigned
@@ -1171,6 +1169,18 @@ public:
  */
 void SetAuthorizationCommonTimestamp(::authorizer::v1::AuthorizationCommon* common);
 
+// The type we'll use to store object tags. Note that Amazon has a limit of
+// max 10 object tags.
+using objtag_map_type = boost::container::flat_map<std::string, std::string>;
+
+// Function used to provide an alternate implementation to load object tags.
+// Intended for unit testing without having to mock giant swathes of the SAL.
+using load_object_tags_function = std::function<int(
+    const DoutPrefixProvider* dpp,
+    const req_state* s,
+    objtag_map_type& obj_tags,
+    optional_yield y)>;
+
 /**
  * @brief Given a req_state, a HandoffAuthzState and an operation code, create
  * and populate an ::authorizer::v1::AuthorizeV2Request protobuf message.
@@ -1195,11 +1205,33 @@ void SetAuthorizationCommonTimestamp(::authorizer::v1::AuthorizationCommon* comm
  * @param s The req_state. May be modified!
  * @param operation The opcode. Use the values defined in
  * <rgw/rgw_iam_policy.h> with prefix 's3'.
+ * @param y Optional yield.
+ * @param alt_load Optional alternative implementation of the object tag
+ * loader function.
  * @return std::optional<::authorizer::v1::AuthorizeRequest> A populated
  * AuthorizeRequest message on success, std::nullopt on failure.
  */
 std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
-    req_state* s, uint64_t operation);
+    req_state* s, uint64_t operation, optional_yield y,
+    std::optional<load_object_tags_function> alt_load = std::nullopt);
+
+/**
+ * @brief Populate ExtraData and ExtraDataSpecification using the SAL, or a
+ * provided alternative implementation.
+ *
+ * @param dpp The DouPrefixProvider.
+ * @param s The req_state.
+ * @param extra_data_provided an ExtraDataProvided to populate.
+ * @param extra_data an ExtraData to populate.
+ * @param y Optional yield.
+ * @param alt_load Optional alternative implementation of the object tag
+ * loader function.
+ * @return int Zero on success, <0 error code on failure.
+ */
+int PopulateExtraDataObjectTags(const DoutPrefixProvider* dpp, const req_state* s,
+    ::authorizer::v1::ExtraDataSpecification* extra_data_provided,
+    ::authorizer::v1::ExtraData* extra_data, optional_yield y,
+    std::optional<load_object_tags_function> alt_load = std::nullopt);
 
 /**
  * @brief Given a req_state with a populated HandoffAuthzState, load whatever
@@ -1216,11 +1248,17 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
  *
  * @param dpp
  * @param s
- * @param spec The ExtraDataSpecification to update.
+ * @param spec The ExtraDataSpecification message to update.
+ * @param extra_data The ExtraData message to update.
+ * @param y Optional yield.
+ * @param alt_load Optional alternative implementation of the object tag
+ * loader function.
  * @return int The error code. 0 on success, <0 on failure.
  */
 int PopulateAuthorizeRequestLoadExtraData(const DoutPrefixProvider* dpp, req_state* s,
-    ::authorizer::v1::ExtraDataSpecification* spec);
+    ::authorizer::v1::ExtraDataSpecification* spec, ::authorizer::v1::ExtraData* extra_data,
+    optional_yield y,
+    std::optional<load_object_tags_function> alt_load = std::nullopt);
 
 /**
  * @brief Given a req_state and an existing AuthorizeV2Request, populate the

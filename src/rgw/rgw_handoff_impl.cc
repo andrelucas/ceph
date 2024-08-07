@@ -1047,33 +1047,13 @@ HandoffHelperImpl::get_signing_key(const DoutPrefixProvider* dpp,
   return std::make_optional(result.signing_key());
 }
 
-int HandoffHelperImpl::verify_permission_update_extra_data(const DoutPrefixProvider* dpp,
+void HandoffHelperImpl::verify_permission_update_authz_state(const DoutPrefixProvider* dpp,
     const ExtraDataSpecification& extra_spec,
-    const RGWOp* op, req_state* s, optional_yield y)
+    const RGWOp* op, const req_state* s)
 {
-  ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("{}: Authorizer requires extra data: {}"),
-      __func__, proto_to_JSON(extra_spec))
-                    << dendl;
-
-  if (extra_spec.bucket_tags()) {
-    s->handoff_authz->set_bucket_tags_required(true);
-    // int ret = rgw_iam_add_buckettags(dpp, s);
-    // if (ret < 0) {
-    //   ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to add bucket tags"), __func__) << dendl;
-    //   return ret;
-    // }
-    // edp->set_bucket_tags(true);
-  }
   if (extra_spec.object_key_tags()) {
     s->handoff_authz->set_object_tags_required(true);
-    // int ret = rgw_iam_add_objtags(dpp, s, true, true);
-    // if (ret < 0) {
-    //   ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to add object key tags"), __func__) << dendl;
-    //   return ret;
-    // }
-    // edp->set_object_key_tags(true);
   }
-  return 0;
 }
 
 int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
@@ -1089,7 +1069,7 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
 
   ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}"), __func__) << dendl;
 
-  auto opt_req = PopulateAuthorizeRequest(dpp, s, operation);
+  auto opt_req = PopulateAuthorizeRequest(dpp, s, operation, y);
   if (!opt_req) {
     ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to populate AuthorizeV2Request"), __func__) << dendl;
     return -EACCES;
@@ -1116,13 +1096,10 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
   // extra_data_required() checks that it's safe to dereference the
   // error_details() optional.
   if (result.is_extra_data_required()) {
-    int ret = verify_permission_update_extra_data(dpp, result.error_details()->extra_data_required(), op, s, y);
-    if (ret < 0) {
-      return ret;
-    }
+    verify_permission_update_authz_state(dpp, result.error_details()->extra_data_required(), op, s);
 
-    auto edp = req.mutable_extra_data_provided();
-    ret = PopulateAuthorizeRequestLoadExtraData(dpp, s, edp);
+    int ret = PopulateAuthorizeRequestLoadExtraData(dpp, s,
+        req.mutable_extra_data_provided(), req.mutable_extra_data(), y);
     if (ret < 0) {
       ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to load extra data"), __func__) << dendl;
       return ret;
@@ -1200,46 +1177,137 @@ void SetAuthorizationCommonTimestamp(::authorizer::v1::AuthorizationCommon* comm
   ts->set_nanos(ns.count());
 }
 
+// static int rgw_iam_add_tags_from_bl(req_state* s, bufferlist& bl, bool has_existing_obj_tag=false, bool has_resource_tag=false){
+//   RGWObjTags& tagset = s->tagset;
+//   try {
+//     auto bliter = bl.cbegin();
+//     tagset.decode(bliter);
+//   } catch (buffer::error& err) {
+//     ldpp_dout(s, 0) << "ERROR: caught buffer::error, couldn't decode TagSet" << dendl;
+//     return -EIO;
+//   }
+
+//   for (const auto& tag: tagset.get_tags()){
+//     if (has_existing_obj_tag) {}
+//       rgw_add_to_iam_environment(s->env, "s3:ExistingObjectTag/" + tag.first, tag.second);
+//     if (has_resource_tag) {}
+//       rgw_add_to_iam_environment(s->env, "s3:ResourceTag/" + tag.first, tag.second);
+//   }
+//   return 0;
+// }
+
+// static int rgw_iam_add_objtags(const DoutPrefixProvider *dpp, req_state* s, rgw::sal::Object* object, bool has_existing_obj_tag, bool has_resource_tag) {
+//   object->set_atomic();
+//   int op_ret = object->get_obj_attrs(s->yield, dpp);
+//   if (op_ret < 0)
+//     return op_ret;
+//   rgw::sal::Attrs attrs = object->get_attrs();
+//   auto tags = attrs.find(RGW_ATTR_TAGS);
+//   if (tags != attrs.end()){
+//     return rgw_iam_add_tags_from_bl(s, tags->second, has_existing_obj_tag, has_resource_tag);
+//   }
+//   return 0;
+// }
+
+// int rgw_iam_add_objtags(const DoutPrefixProvider* dpp, req_state* s, bool has_existing_obj_tag, bool has_resource_tag) {
+//   if (!rgw::sal::Object::empty(s->object.get())) {
+//     return rgw_iam_add_objtags(dpp, s, s->object.get(), has_existing_obj_tag, has_resource_tag);
+//   }
+//   return 0;
+// }
+
+/**
+ * @brief Load object tags from the SAL.
+ *
+ * Emulate operation of rgw_iam_add_objtags() by loading object tags
+ * from the SAL. Instead of placing them in the IAM environment, load them
+ * onto our map for later use.
+ *
+ * @param dpp The DoutPrefixProvider.
+ * @param s The req_state.
+ * @param obj_tags A mutable map for the object tags.
+ * @param y Optional yield (used by rgw::sal::Object::get_obj_attrs()).
+ * @return int zero on success, <0 error code on failure.
+ */
+static int _load_objtags_from_sal(const DoutPrefixProvider* dpp, const req_state* s, objtag_map_type& obj_tags, optional_yield y)
+{
+  // From rgw_iam_add_objtags()
+  if (!s->object) {
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: req_state->object cannot be null"), __func__) << dendl;
+    return -ERR_INTERNAL_ERROR;
+  }
+  // From rgw_iam_add_objtags() second variant.
+  auto& object = s->object;
+  object->set_atomic();
+  int ret = object->get_obj_attrs(y, dpp);
+  if (ret < 0) {
+    ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("{}: Failed to get object attributes"), __func__) << dendl;
+    return ret;
+  }
+  rgw::sal::Attrs attrs = object->get_attrs();
+  auto tags = attrs.find(RGW_ATTR_TAGS);
+  if (tags != attrs.end()) {
+    // From rgw_iam_add_tags_from_bl()
+    RGWObjTags tagset;
+    try {
+      auto bliter = tags->second.cbegin();
+      tagset.decode(bliter);
+    } catch (buffer::error& err) {
+      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: caught buffer::error, couldn't decode TagSet"), __func__) << dendl;
+      return -EIO;
+    }
+    // Load our map instead of the IAM environment.
+    for (const auto& tag : tagset.get_tags()) {
+      obj_tags[tag.first] = tag.second;
+    }
+  }
+  return 0;
+}
+
+int PopulateExtraDataObjectTags(const DoutPrefixProvider* dpp, const req_state* s,
+    ::authorizer::v1::ExtraDataSpecification* extra_data_provided,
+    ::authorizer::v1::ExtraData* extra_data, optional_yield y, std::optional<load_object_tags_function> alt_load)
+{
+  // First, load data from the SAL, or from wherever else we need to load
+  // it.
+  objtag_map_type obj_tags;
+  int ret;
+
+  if (alt_load) {
+    ret = (*alt_load)(dpp, s, obj_tags, y);
+  } else {
+    ret = _load_objtags_from_sal(dpp, s, obj_tags, y);
+  }
+  if (ret < 0) {
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to load object tags"), __func__) << dendl;
+    return ret;
+  }
+  extra_data_provided->set_object_key_tags(true); // This is always true, even if there are no tags.
+  if (!obj_tags.empty()) {
+    auto mokt = extra_data->mutable_object_key_tags();
+    for (const auto& kv : obj_tags) {
+      mokt->emplace(kv.first, kv.second);
+    }
+  }
+  return 0;
+}
+
 int PopulateAuthorizeRequestLoadExtraData(const DoutPrefixProvider* dpp, req_state* s,
-    ::authorizer::v1::ExtraDataSpecification* extra_spec)
+    ::authorizer::v1::ExtraDataSpecification* extra_spec, ::authorizer::v1::ExtraData* extra_data,
+    optional_yield y, std::optional<load_object_tags_function> alt_load)
 {
   if (!s->handoff_authz) {
     ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: req_state->handoff_authz cannot be null"), __func__) << dendl;
     return -ERR_INTERNAL_ERROR;
   }
-
   auto state = *s->handoff_authz;
-
   if (state.bucket_tags_required()) {
-    if (!s->bucket) {
-      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: req_state->bucket cannot be null when requesting bucket tags"), __func__) << dendl;
-      return -ERR_INTERNAL_ERROR;
-    }
-    int ret = rgw_iam_add_buckettags(dpp, s);
-    if (ret < 0) {
-      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to add bucket tags"), __func__) << dendl;
-      return ret;
-    }
-    if (extra_spec) {
-      extra_spec->set_bucket_tags(true);
-    }
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: req_state->bucket_tags_required not supported"), __func__) << dendl;
+    return -ERR_INTERNAL_ERROR;
   }
-
   if (state.object_tags_required()) {
-    if (!s->object) {
-      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: req_state->object cannot be null when requesting object tags"), __func__) << dendl;
-      return -ERR_INTERNAL_ERROR;
-    }
-    int ret = rgw_iam_add_objtags(dpp, s, true, true);
-    if (ret < 0) {
-      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to add object key tags"), __func__) << dendl;
-      return ret;
-    }
-    if (extra_spec) {
-      extra_spec->set_object_key_tags(true);
-    }
+    PopulateExtraDataObjectTags(dpp, s, extra_spec, extra_data, y, alt_load);
   }
-
   return 0;
 }
 
@@ -1281,7 +1349,7 @@ void PopulateAuthorizeRequestIAMEnvironment(const DoutPrefixProvider* dpp,
 }
 
 std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
-    req_state* s, uint64_t operation)
+    req_state* s, uint64_t operation, optional_yield y, std::optional<load_object_tags_function> alt_load)
 {
   using namespace ::authorizer::v1;
   ceph_assert(s->handoff_authz != nullptr);
@@ -1330,23 +1398,9 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
   // bools for each provided type, and provide the extra data in the
   // extra_data field.
   if (state->extra_data_required()) {
-    auto edp = req.mutable_extra_data_provided();
-    // // // XXX actually load the extra data here.
-    // auto ed = req.mutable_extra_data();
-
-    // if (state->bucket_tags_required()) {
-    //   edp->set_bucket_tags(true);
-    //   // for (const auto& kv : state->bucket_tags()) {
-    //   //   (*ed->mutable_bucket_tags())[kv.first] = kv.second;
-    //   // }
-    // }
-    // if (state->object_tags_required()) {
-    //   edp->set_object_key_tags(true);
-    //   // for (const auto& kv : state->object_tags()) {
-    //   //   (*ed->mutable_object_key_tags())[kv.first] = kv.second;
-    //   // }
-    // }
-    PopulateAuthorizeRequestLoadExtraData(dpp, s, edp);
+    PopulateAuthorizeRequestLoadExtraData(dpp, s,
+        req.mutable_extra_data_provided(), req.mutable_extra_data(),
+        y, alt_load);
   }
 
   // Load the IAM environment into the request.
