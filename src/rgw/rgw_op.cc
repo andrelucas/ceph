@@ -3727,7 +3727,16 @@ int RGWPutObj::init_processing(optional_yield y) {
 
 int RGWPutObj::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
   if (! copy_source.empty()) {
+
+    if (s->handoff_authz->enabled()) {
+      // We shouldn't get here! The microservice platform should not have
+      // allowed a copy source to be specified in a put-object request, it
+      // should have decomposed it to a separate put and get.
+      ldpp_dout(this, 0) << "ERROR: In gen2 we should not see a copy source specified in put-object request" << dendl;
+      return -ERR_INVALID_REQUEST;
+    }
 
     RGWAccessControlPolicy cs_acl(s->cct);
     boost::optional<Policy> policy;
@@ -3790,84 +3799,99 @@ int RGWPutObj::verify_permission(optional_yield y)
 	return -EACCES;
       }
     }
-  }
+  } // if copy_source
 
-  if (s->bucket_access_conf && s->bucket_access_conf->block_public_acls()) {
-    if (s->canned_acl.compare("public-read") ||
-        s->canned_acl.compare("public-read-write") ||
-        s->canned_acl.compare("authenticated-read"))
-      return -EACCES;
-  }
+  if (s->handoff_authz->enabled()) {
 
-  auto op_ret = get_params(y);
-  if (op_ret < 0) {
-    ldpp_dout(this, 20) << "get_params() returned ret=" << op_ret << dendl;
-    return op_ret;
-  }
-
-  if (s->iam_policy || ! s->iam_user_policies.empty() || !s->session_policies.empty()) {
-    rgw_add_grant_to_iam_environment(s->env, s);
-
-    rgw_add_to_iam_environment(s->env, "s3:x-amz-acl", s->canned_acl);
-
-    if (obj_tags != nullptr && obj_tags->count() > 0){
-      auto tags = obj_tags->get_tags();
-      for (const auto& kv: tags){
-        rgw_add_to_iam_environment(s->env, "s3:RequestObjectTag/"+kv.first, kv.second);
-      }
+    // Most of the other leg of the if statement is not needed for gen2, but
+    // we do need to get_params() and load the crypt attributes.
+    // Note that get_params() has multiple overloads in subclasses.
+    auto op_ret = get_params(y);
+    if (op_ret < 0) {
+      ldpp_dout(this, 20) << "get_params() returned ret=" << op_ret << dendl;
+      return op_ret;
     }
 
     // add server-side encryption headers
     rgw_iam_add_crypt_attrs(s->env, s->info.crypt_attribute_map);
 
-    // Add bucket tags for authorization
-    auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
-    if (has_s3_resource_tag)
-      rgw_iam_add_buckettags(this, s);
+    return s->handoff_helper->verify_permission(this, this->s, rgw::IAM::s3PutObject, y);
 
-    auto identity_policy_res = eval_identity_or_session_policies(this, s->iam_user_policies, s->env,
-                                            rgw::IAM::s3PutObject,
-                                            s->object->get_obj());
-    if (identity_policy_res == Effect::Deny)
-      return -EACCES;
+  } else {
+    if (s->bucket_access_conf && s->bucket_access_conf->block_public_acls()) {
+      if (s->canned_acl.compare("public-read") || s->canned_acl.compare("public-read-write") || s->canned_acl.compare("authenticated-read"))
+        return -EACCES;
+    }
 
-    rgw::IAM::Effect e = Effect::Pass;
-    rgw::IAM::PolicyPrincipal princ_type = rgw::IAM::PolicyPrincipal::Other;
-    if (s->iam_policy) {
-      ARN obj_arn(s->object->get_obj());
-      e = s->iam_policy->eval(s->env, *s->auth.identity,
+    auto op_ret = get_params(y);
+    if (op_ret < 0) {
+      ldpp_dout(this, 20) << "get_params() returned ret=" << op_ret << dendl;
+      return op_ret;
+    }
+
+    if (s->iam_policy || !s->iam_user_policies.empty() || !s->session_policies.empty()) {
+      rgw_add_grant_to_iam_environment(s->env, s);
+
+      rgw_add_to_iam_environment(s->env, "s3:x-amz-acl", s->canned_acl);
+
+      if (obj_tags != nullptr && obj_tags->count() > 0) {
+        auto tags = obj_tags->get_tags();
+        for (const auto& kv : tags) {
+          rgw_add_to_iam_environment(s->env, "s3:RequestObjectTag/" + kv.first, kv.second);
+        }
+      }
+
+      // add server-side encryption headers
+      rgw_iam_add_crypt_attrs(s->env, s->info.crypt_attribute_map);
+
+      // Add bucket tags for authorization
+      auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
+      if (has_s3_resource_tag)
+        rgw_iam_add_buckettags(this, s);
+
+      auto identity_policy_res = eval_identity_or_session_policies(this, s->iam_user_policies, s->env,
           rgw::IAM::s3PutObject,
-          obj_arn,
-          princ_type);
-    }
-    if (e == Effect::Deny) {
-      return -EACCES;
-    }
+          s->object->get_obj());
+      if (identity_policy_res == Effect::Deny)
+        return -EACCES;
 
-    if (!s->session_policies.empty()) {
-      auto session_policy_res = eval_identity_or_session_policies(this, s->session_policies, s->env,
-                                              rgw::IAM::s3PutObject,
-                                              s->object->get_obj());
-      if (session_policy_res == Effect::Deny) {
+      rgw::IAM::Effect e = Effect::Pass;
+      rgw::IAM::PolicyPrincipal princ_type = rgw::IAM::PolicyPrincipal::Other;
+      if (s->iam_policy) {
+        ARN obj_arn(s->object->get_obj());
+        e = s->iam_policy->eval(s->env, *s->auth.identity,
+            rgw::IAM::s3PutObject,
+            obj_arn,
+            princ_type);
+      }
+      if (e == Effect::Deny) {
+        return -EACCES;
+      }
+
+      if (!s->session_policies.empty()) {
+        auto session_policy_res = eval_identity_or_session_policies(this, s->session_policies, s->env,
+            rgw::IAM::s3PutObject,
+            s->object->get_obj());
+        if (session_policy_res == Effect::Deny) {
           return -EACCES;
+        }
+        if (princ_type == rgw::IAM::PolicyPrincipal::Role) {
+          // Intersection of session policy and identity policy plus intersection of session policy and bucket policy
+          if ((session_policy_res == Effect::Allow && identity_policy_res == Effect::Allow) || (session_policy_res == Effect::Allow && e == Effect::Allow))
+            return 0;
+        } else if (princ_type == rgw::IAM::PolicyPrincipal::Session) {
+          // Intersection of session policy and identity policy plus bucket policy
+          if ((session_policy_res == Effect::Allow && identity_policy_res == Effect::Allow) || e == Effect::Allow)
+            return 0;
+        } else if (princ_type == rgw::IAM::PolicyPrincipal::Other) { // there was no match in the bucket policy
+          if (session_policy_res == Effect::Allow && identity_policy_res == Effect::Allow)
+            return 0;
+        }
+        return -EACCES;
       }
-      if (princ_type == rgw::IAM::PolicyPrincipal::Role) {
-        //Intersection of session policy and identity policy plus intersection of session policy and bucket policy
-        if ((session_policy_res == Effect::Allow && identity_policy_res == Effect::Allow) ||
-            (session_policy_res == Effect::Allow && e == Effect::Allow))
-          return 0;
-      } else if (princ_type == rgw::IAM::PolicyPrincipal::Session) {
-        //Intersection of session policy and identity policy plus bucket policy
-        if ((session_policy_res == Effect::Allow && identity_policy_res == Effect::Allow) || e == Effect::Allow)
-          return 0;
-      } else if (princ_type == rgw::IAM::PolicyPrincipal::Other) {// there was no match in the bucket policy
-        if (session_policy_res == Effect::Allow && identity_policy_res == Effect::Allow)
-          return 0;
+      if (e == Effect::Allow || identity_policy_res == Effect::Allow) {
+        return 0;
       }
-      return -EACCES;
-    }
-    if (e == Effect::Allow || identity_policy_res == Effect::Allow) {
-      return 0;
     }
   }
 
