@@ -1177,44 +1177,11 @@ void SetAuthorizationCommonTimestamp(::authorizer::v1::AuthorizationCommon* comm
   ts->set_nanos(ns.count());
 }
 
-// static int rgw_iam_add_tags_from_bl(req_state* s, bufferlist& bl, bool has_existing_obj_tag=false, bool has_resource_tag=false){
-//   RGWObjTags& tagset = s->tagset;
-//   try {
-//     auto bliter = bl.cbegin();
-//     tagset.decode(bliter);
-//   } catch (buffer::error& err) {
-//     ldpp_dout(s, 0) << "ERROR: caught buffer::error, couldn't decode TagSet" << dendl;
-//     return -EIO;
-//   }
+/****************************************************************************/
 
-//   for (const auto& tag: tagset.get_tags()){
-//     if (has_existing_obj_tag) {}
-//       rgw_add_to_iam_environment(s->env, "s3:ExistingObjectTag/" + tag.first, tag.second);
-//     if (has_resource_tag) {}
-//       rgw_add_to_iam_environment(s->env, "s3:ResourceTag/" + tag.first, tag.second);
-//   }
-//   return 0;
-// }
-
-// static int rgw_iam_add_objtags(const DoutPrefixProvider *dpp, req_state* s, rgw::sal::Object* object, bool has_existing_obj_tag, bool has_resource_tag) {
-//   object->set_atomic();
-//   int op_ret = object->get_obj_attrs(s->yield, dpp);
-//   if (op_ret < 0)
-//     return op_ret;
-//   rgw::sal::Attrs attrs = object->get_attrs();
-//   auto tags = attrs.find(RGW_ATTR_TAGS);
-//   if (tags != attrs.end()){
-//     return rgw_iam_add_tags_from_bl(s, tags->second, has_existing_obj_tag, has_resource_tag);
-//   }
-//   return 0;
-// }
-
-// int rgw_iam_add_objtags(const DoutPrefixProvider* dpp, req_state* s, bool has_existing_obj_tag, bool has_resource_tag) {
-//   if (!rgw::sal::Object::empty(s->object.get())) {
-//     return rgw_iam_add_objtags(dpp, s, s->object.get(), has_existing_obj_tag, has_resource_tag);
-//   }
-//   return 0;
-// }
+//
+// AuthorizeRequest message population, update, and support code.
+//
 
 /**
  * @brief Load object tags from the SAL.
@@ -1413,6 +1380,8 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
   ldpp_dout(dpp, 20) << __func__ << ": " << req << dendl;
   return req;
 }
+
+/****************************************************************************/
 
 AuthorizerClient::AuthorizeResult AuthorizerClient::AuthorizeV2(AuthorizeV2Request& req)
 {
