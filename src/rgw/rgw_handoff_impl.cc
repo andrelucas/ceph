@@ -1093,11 +1093,17 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
    */
   auto result = client.AuthorizeV2(req);
 
-  // extra_data_required() checks that it's safe to dereference the
-  // error_details() optional.
   if (result.is_extra_data_required()) {
-    verify_permission_update_authz_state(dpp, result.error_details()->extra_data_required(), op, s);
+    // Change the transaction ID so the Authorizer can tell the difference.
+    req.mutable_common()->set_authorization_id(s->trans_id + "-extra-data");
 
+    // extra_data_required() explicitly checks that it's safe to dereference
+    // the error_details() optional.
+    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Extra data required: {}"),
+        __func__, proto_to_JSON(result.error_details()->extra_data_required()))
+                       << dendl;
+    // Update the request with the extra data required.
+    verify_permission_update_authz_state(dpp, result.error_details()->extra_data_required(), op, s);
     int ret = PopulateAuthorizeRequestLoadExtraData(dpp, s,
         req.mutable_extra_data_provided(), req.mutable_extra_data(), y);
     if (ret < 0) {
@@ -1105,15 +1111,16 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
       return ret;
     }
 
-    // Bucket tags and object key tags make changes to the IAM environment.
-    // Reload that environment in the request, otherwise the tag loads will
-    // have no effect.
-    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Reloading IAM environment"), __func__) << dendl;
-    PopulateAuthorizeRequestIAMEnvironment(dpp, s, req);
+    // // We only need to update the IAM environment if any extra data loads will
+    // // change that environment. Currently that's not true.
+    // ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Reloading IAM environment"), __func__) << dendl;
+    // PopulateAuthorizeRequestIAMEnvironment(dpp, s, req);
 
     // Resubmit the request with the extra data.
     ldpp_dout(dpp, 5)
         << fmt::format(FMT_STRING("{}: Resubmitting request with extra data: {}"), __func__, proto_to_JSON(req)) << dendl;
+    /* Second AuthorizeV2 request, if the server requested extra data. */
+
     result = client.AuthorizeV2(req);
   }
 
@@ -1129,12 +1136,16 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
 
   } else {
     auto status = result.status();
-    // XXX check for richer error message
-    if (status) {
+    if (result.error_details()) {
+      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to authorize request: code {} http code hint {}: message '{}'"),
+          __func__, *result.error_code_as_string(), result.error_details()->http_code_hint(), status->error_message())
+                        << dendl;
+    } else if (status) {
       ldpp_dout(dpp, 0)
-          << fmt::format(FMT_STRING("{}: ERROR: Failed to authorize request: code {}: {}: {}"),
-                 __func__, status->error_code(), status->error_message(), status->error_details())
+          << fmt::format(FMT_STRING("{}: ERROR: Failed to authorize request: code {}: message '{}'"),
+                 __func__, status->error_code(), status->error_message())
           << dendl;
+
     } else {
       ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to authorize request (unknown error reason)"), __func__) << dendl;
     }
@@ -1186,9 +1197,16 @@ void SetAuthorizationCommonTimestamp(::authorizer::v1::AuthorizationCommon* comm
 /**
  * @brief Load object tags from the SAL.
  *
- * Emulate operation of rgw_iam_add_objtags() by loading object tags
- * from the SAL. Instead of placing them in the IAM environment, load them
- * onto our map for later use.
+ * Emulate operation of rgw_iam_add_objtags() by loading object tags from the
+ * SAL. Instead of placing them in the IAM environment, load them onto our map
+ * for later use.
+ *
+ * Try to be tolerant. If we get errors from the SAL that indicate that the
+ * object doesn't (yet) exist, log them but return success (indicating an
+ * empty set of tags). This is to allow for the policy engine asking for
+ * things we don't yet have, for example asking for tags on an object that
+ * we're in the process of creating. XXX this might not be the right thing to
+ * do, it might mask errors.
  *
  * @param dpp The DoutPrefixProvider.
  * @param s The req_state.
@@ -1200,14 +1218,21 @@ static int _load_objtags_from_sal(const DoutPrefixProvider* dpp, const req_state
 {
   // From rgw_iam_add_objtags()
   if (!s->object) {
-    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: req_state->object cannot be null"), __func__) << dendl;
-    return -ERR_INTERNAL_ERROR;
+    ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("{}: WARNING: req_state->object cannot be null"), __func__) << dendl;
+    return 0;
   }
   // From rgw_iam_add_objtags() second variant.
   auto& object = s->object;
   object->set_atomic();
   int ret = object->get_obj_attrs(y, dpp);
   if (ret < 0) {
+    // Treat ENOENT as a special case. If we're handling the initial
+    // put-object for an object key, s->object will be set but get_obj_attrs()
+    // will return ENOENT.
+    if (ret == -ENOENT) {
+      ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("{}: WARNING: get_obj_attrs() returned ENOENT, returning empty tags"), __func__) << dendl;
+      return 0;
+    }
     ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("{}: Failed to get object attributes"), __func__) << dendl;
     return ret;
   }
@@ -1246,7 +1271,7 @@ int PopulateExtraDataObjectTags(const DoutPrefixProvider* dpp, const req_state* 
     ret = _load_objtags_from_sal(dpp, s, obj_tags, y);
   }
   if (ret < 0) {
-    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to load object tags"), __func__) << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to load object tags: error ret"), __func__, ret) << dendl;
     return ret;
   }
   extra_data_provided->set_object_key_tags(true); // This is always true, even if there are no tags.
@@ -1427,6 +1452,19 @@ std::optional<ExtraDataSpecification> AuthorizerClient::AuthorizeResult::is_extr
       && error_details()->code() == AuthorizationResultCode::AUTHZ_RESULT_EXTRA_DATA_REQUIRED
       && error_details()->has_extra_data_required()) {
     return std::make_optional(error_details()->extra_data_required());
+  } else {
+    return std::nullopt;
+  }
+}
+
+std::optional<std::string> AuthorizerClient::AuthorizeResult::error_code_as_string() const
+{
+  using namespace ::authorizer::v1;
+
+  if (err() && error_details()) {
+    auto descriptor = AuthorizationResultCode_descriptor();
+    auto code = error_details()->code();
+    return descriptor->FindValueByNumber(code)->name();
   } else {
     return std::nullopt;
   }

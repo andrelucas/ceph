@@ -767,6 +767,20 @@ public:
     /// @brief Return the google::rpc::Status object from the RPC call, if any.
     std::optional<AuthorizationErrorDetails> error_details() const { return error_details_; }
 
+    /**
+     * @brief If present, return a string representation of the error code
+     * returned in the RPC call AuthorizationErrorDetails message.
+     *
+     * If we got a richer error message, return a stringified version of the
+     * return code in AuthorizationErrorDetails.code. If that can't be done
+     * (because there was no richer error response or some other error) return
+     * nullopt.
+     *
+     * @return An optional string representation of the error code, or
+     * std::nullopt if the error code is not available.
+     */
+    std::optional<std::string> error_code_as_string() const;
+
     friend std::ostream& operator<<(std::ostream& os, const AuthorizerClient::AuthorizeResult& ep);
   }; // class AuthorizerClient::AuthorizeResult
 
