@@ -22,6 +22,7 @@
 
 #include <fmt/format.h>
 #include <iosfwd>
+#include <stack>
 #include <string>
 
 #include <boost/container/flat_map.hpp>
@@ -284,6 +285,10 @@ public:
   bool disable_local_authorization() const;
 };
 
+struct HandoffAuthzStateRequirementsBundle {
+  bool object_tags_required = false;
+}; // struct HandoffAuthzStateRequirementsBundle
+
 /**
  * @brief Per-request state information for the Handoff authorization client.
  *
@@ -321,8 +326,8 @@ class HandoffAuthzState {
 
   mutable AuthenticatorParameters authenticator_params_;
 
-  bool bucket_tags_required_ = false;
-  bool object_tags_required_ = false;
+  HandoffAuthzStateRequirementsBundle requirements_;
+  std::stack<HandoffAuthzStateRequirementsBundle> saved_requirements_;
 
 public:
   HandoffAuthzState() = delete;
@@ -497,7 +502,7 @@ public:
    */
   bool extra_data_required() const noexcept
   {
-    return object_tags_required_;
+    return requirements_.object_tags_required;
   }
 
   /**
@@ -506,14 +511,27 @@ public:
    * @return true Object tags are required.
    * @return false Object tags are not required.
    */
-  bool object_tags_required() const noexcept { return object_tags_required_; }
+  bool object_tags_required() const noexcept { return requirements_.object_tags_required; }
 
   /**
    * @brief Set whether or not object tags are required.
    *
    * @param required true if object tags are required, false otherwise.
    */
-  void set_object_tags_required(bool required) noexcept { object_tags_required_ = required; }
+  void set_object_tags_required(bool required) noexcept { requirements_.object_tags_required = required; }
+
+  void push_requirements()
+  {
+    saved_requirements_.push(requirements_);
+    requirements_ = HandoffAuthzStateRequirementsBundle(); // Clean (all-false) requirements.
+  }
+
+  void pop_requirements()
+  {
+    ceph_assertf(!saved_requirements_.empty(), "Attempt to pop empty Authz state requirements stack");
+    requirements_ = saved_requirements_.top();
+    saved_requirements_.pop();
+  }
 
 }; // class HandoffAuthzState
 
