@@ -1039,15 +1039,18 @@ int retry_raced_bucket_write(const DoutPrefixProvider *dpp, rgw::sal::Bucket* b,
 
 int RGWGetObj::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
   s->object->set_atomic();
 
   if (prefetch_data()) {
     s->object->set_prefetch_data();
   }
 
-  auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
+  if (s->handoff_authz->disabled()) {
+    auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
     if (has_s3_existing_tag || has_s3_resource_tag)
       rgw_iam_add_objtags(this, s, has_s3_existing_tag, has_s3_resource_tag);
+  }
 
   if (torrent.get_flag()) {
     if (s->object->get_instance().empty()) {
@@ -1063,13 +1066,34 @@ int RGWGetObj::verify_permission(optional_yield y)
     }
   }
 
-  if (!verify_object_permission(this, s, action)) {
-    return -EACCES;
+  if (s->handoff_authz->enabled()) {
+    int ret = s->handoff_helper->verify_permission(this, s, action, y);
+    if (ret < 0) {
+      return ret;
+    }
+
+  } else {
+    if (!verify_object_permission(this, s, action)) {
+      return -EACCES;
+    }
   }
 
   if (s->bucket->get_info().obj_lock_enabled()) {
-    get_retention = verify_object_permission(this, s, rgw::IAM::s3GetObjectRetention);
-    get_legal_hold = verify_object_permission(this, s, rgw::IAM::s3GetObjectLegalHold);
+    if (s->handoff_authz->enabled()) {
+      // XXX XXX This is super inefficient - we need these values to come back
+      // from the earlier verify_permission().
+      if (s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetObjectRetention, y) == 0) {
+        ldpp_dout(this, 20) << "Object Lock is enabled on the bucket, get_retention set true" << dendl;
+        get_retention = true;
+      }
+      if (s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetObjectLegalHold, y) == 0) {
+        ldpp_dout(this, 20) << "Object Lock is enabled on the bucket, get_legal_hold set true" << dendl;
+        get_legal_hold = true;
+      }
+    } else {
+      get_retention = verify_object_permission(this, s, rgw::IAM::s3GetObjectRetention);
+      get_legal_hold = verify_object_permission(this, s, rgw::IAM::s3GetObjectLegalHold);
+    }
   }
 
   return 0;
@@ -5054,6 +5078,7 @@ int RGWDeleteObj::handle_slo_manifest(bufferlist& bl, optional_yield y)
 
 int RGWDeleteObj::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
   int op_ret = get_params(y);
   if (op_ret) {
     return op_ret;
@@ -8424,11 +8449,17 @@ void RGWPutBucketObjectLock::pre_exec()
 
 int RGWPutBucketObjectLock::verify_permission(optional_yield y)
 {
-  auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
-  if (has_s3_resource_tag)
-    rgw_iam_add_buckettags(this, s);
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3PutBucketObjectLockConfiguration, y);
 
-  return verify_bucket_owner_or_policy(s, rgw::IAM::s3PutBucketObjectLockConfiguration);
+  } else {
+    auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
+    if (has_s3_resource_tag)
+      rgw_iam_add_buckettags(this, s);
+
+    return verify_bucket_owner_or_policy(s, rgw::IAM::s3PutBucketObjectLockConfiguration);
+  }
 }
 
 void RGWPutBucketObjectLock::execute(optional_yield y)
