@@ -1071,6 +1071,7 @@ int RGWGetObj::verify_permission(optional_yield y)
     if (ret < 0) {
       return ret;
     }
+    // We need to fall through to evaluate the object lock permissions.
 
   } else {
     if (!verify_object_permission(this, s, action)) {
@@ -1162,9 +1163,14 @@ void RGWGetObjTags::execute(optional_yield y)
 
 int RGWPutObjTags::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
   auto iam_action = s->object->get_instance().empty() ?
     rgw::IAM::s3PutObjectTagging:
     rgw::IAM::s3PutObjectVersionTagging;
+
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, iam_action, y);
+  }
 
   //Using buckets tags for authorization makes more sense.
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, true);
