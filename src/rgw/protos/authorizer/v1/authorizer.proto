@@ -11,7 +11,8 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "bits.linode.com/LinodeApi/obj-endpoint/gen/proto/authorizer/v1";
 
-service AuthorizerService {
+service AuthorizerService
+{
   // Authorize authorizes an S3 request.
   rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
 
@@ -34,7 +35,8 @@ service AuthorizerService {
 // Errors mapping to S3 errors.
 // See:
 // https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html#RESTErrorResponses
-message S3ErrorDetails {
+message S3ErrorDetails
+{
   enum Type {
     TYPE_UNSPECIFIED = 0;
     // Access Denied.
@@ -57,7 +59,8 @@ message S3ErrorDetails {
   Type type = 1;
 }
 
-message AuthorizeRequest {
+message AuthorizeRequest
+{
   enum HTTPMethod {
     HTTP_METHOD_UNSPECIFIED = 0;
     HTTP_METHOD_GET = 1;
@@ -91,10 +94,11 @@ message AuthorizeRequest {
 }
 
 // A lack of error indicates the request is succesfully authorized
-message AuthorizeResponse {}
+message AuthorizeResponse { }
 
 // Common fields for Ping() and AuthorizeV2().
-message AuthorizationCommon {
+message AuthorizationCommon
+{
   // This may be used for debugging and performance analysis.
   google.protobuf.Timestamp timestamp = 1;
   // The unique identifier for this request. This must be present in all
@@ -126,18 +130,6 @@ enum AuthorizationResultCode {
   // We have exceeded a rate limit on the Authorizer.
   AUTHZ_RESULT_RATE_LIMIT_EXCEEDED = 5;
   // XXX this will almost certainly need extended.
-}
-
-message AuthorizationErrorDetails {
-  // The result code.
-  AuthorizationResultCode code = 3;
-  // A hint at the HTTP code that should be returned to the user. RGW is not
-  // required, and may not be able, to respect this.
-  int32 http_code_hint = 4;
-  // If result.code is AUTHZ_RESULT_EXTRA_DATA_REQUIRED, this field must be
-  // present and must list the extra data fields required by the Authorizer in
-  // order to properly authorize the request.
-  optional ExtraDataSpecification extra_data_required = 5;
 }
 
 // Each S3 Opcode as seen by RGW.
@@ -236,14 +228,16 @@ enum S3Opcode {
 // indicate which extra data fields are being provided. This makes it easy for
 // Authorizer to distringuish between a piece of extra data that was not sent,
 // and a field that was checked and found to be empty.
-message ExtraDataSpecification {
+message ExtraDataSpecification
+{
   // Was 'bucket tags provided/required'.
   reserved 1;
   // Object key tags provided/required.
   bool object_key_tags = 2;
 }
 
-message ExtraData {
+message ExtraData
+{
   // Was bucket tags.
   reserved 1;
   // The tags that were present on the object key at the time of the
@@ -257,7 +251,8 @@ message ExtraData {
 // for extra data, which the client then provides in another Authorize() call.
 //
 
-message AuthorizeV2Request {
+message AuthorizeV2Question
+{
   AuthorizationCommon common = 1;
   // The canonical user ID is returned by the Authenticator and is reflected
   // back to the Authorizer verbatim.
@@ -294,7 +289,29 @@ message AuthorizeV2Request {
   optional ExtraData extra_data = 8;
 }
 
-message AuthorizeV2Response {
+message AuthorizeV2Request
+{
   AuthorizationCommon common = 1;
+  // One or more questions about the S3 request.
+  repeated AuthorizeV2Question questions = 2;
+}
 
+message AuthorizeV2Answer
+{
+  AuthorizationCommon common = 1;
+  // The result code.
+  AuthorizationResultCode code = 3;
+  // Was the 'http code hint' field. Noone has asked for that.
+  reserved 4;
+  // If result.code is AUTHZ_RESULT_EXTRA_DATA_REQUIRED, this field must be
+  // present and must list the extra data fields required by the Authorizer in
+  // order to properly authorize the request.
+  optional ExtraDataSpecification extra_data_required = 5;
+}
+
+message AuthorizeV2Response
+{
+  AuthorizationCommon common = 1;
+  // One or more answers to the questions in the AuthorizeV2Request.
+  repeated AuthorizeV2Answer answers = 2;
 }
