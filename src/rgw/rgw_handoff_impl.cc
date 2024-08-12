@@ -39,6 +39,7 @@
 #include <fmt/printf.h>
 #include <google/protobuf/timestamp.pb.h>
 #include <google/protobuf/util/json_util.h>
+#include <google/protobuf/util/time_util.h>
 #include <iostream>
 #include <mutex>
 #include <optional>
@@ -268,14 +269,13 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req, co
     // message, so we assume this is related to the RPC itself, not the
     // authentication. This gets a TRANSPORT_ERROR.
     return HandoffAuthResult(EACCES, status.error_message(),
-                             HandoffAuthResult::error_type::TRANSPORT_ERROR);
+        HandoffAuthResult::error_type::TRANSPORT_ERROR);
   }
   ::google::rpc::Status s;
   if (!s.ParseFromString(error_details)) {
     return HandoffAuthResult(
         EACCES,
-        "failed to deserialize gRPC error_details, error message follows: " +
-            status.error_message(),
+        "failed to deserialize gRPC error_details, error message follows: " + status.error_message(),
         HandoffAuthResult::error_type::INTERNAL_ERROR);
   }
   // Loop through the detail field (repeated Any) and look for our
@@ -291,9 +291,8 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req, co
   // of gRPC the transport errors use the Richer error model. (Stranger things
   // have happened.) This gets a TRANSPORT_ERROR, as above.
   return HandoffAuthResult(EACCES,
-                           "S3ErrorDetails not found, error message follows: " +
-                               status.error_message(),
-                           HandoffAuthResult::error_type::TRANSPORT_ERROR);
+      "S3ErrorDetails not found, error message follows: " + status.error_message(),
+      HandoffAuthResult::error_type::TRANSPORT_ERROR);
 }
 
 AuthServiceClient::GetSigningKeyResult
@@ -315,28 +314,29 @@ AuthServiceClient::GetSigningKey(const GetSigningKeyRequest req)
 using err_type = ::authenticator::v1::S3ErrorDetails_Type;
 
 static std::map<err_type, unsigned int> auth_map = {
-    {err_type::S3ErrorDetails_Type_TYPE_ACCESS_DENIED, EACCES},
-    {err_type::S3ErrorDetails_Type_TYPE_AUTHORIZATION_HEADER_MALFORMED,
-     ERR_INVALID_REQUEST},
-    {err_type::S3ErrorDetails_Type_TYPE_EXPIRED_TOKEN, EACCES},
-    {err_type::S3ErrorDetails_Type_TYPE_INTERNAL_ERROR, ERR_INTERNAL_ERROR},
-    {err_type::S3ErrorDetails_Type_TYPE_INVALID_ACCESS_KEY_ID,
-     ERR_INVALID_ACCESS_KEY},
-    {err_type::S3ErrorDetails_Type_TYPE_INVALID_REQUEST, EINVAL},
-    {err_type::S3ErrorDetails_Type_TYPE_INVALID_SECURITY, EINVAL},
-    {err_type::S3ErrorDetails_Type_TYPE_INVALID_TOKEN,
-     ERR_INVALID_IDENTITY_TOKEN},
-    {err_type::S3ErrorDetails_Type_TYPE_INVALID_URI, ERR_INVALID_REQUEST},
-    {err_type::S3ErrorDetails_Type_TYPE_METHOD_NOT_ALLOWED,
-     ERR_METHOD_NOT_ALLOWED},
-    {err_type::S3ErrorDetails_Type_TYPE_MISSING_SECURITY_HEADER,
-     ERR_INVALID_REQUEST},
-    {err_type::S3ErrorDetails_Type_TYPE_REQUEST_TIME_TOO_SKEWED,
-     ERR_REQUEST_TIME_SKEWED},
-    {err_type::S3ErrorDetails_Type_TYPE_SIGNATURE_DOES_NOT_MATCH,
-     ERR_SIGNATURE_NO_MATCH},
-    {err_type::S3ErrorDetails_Type_TYPE_TOKEN_REFRESH_REQUIRED,
-     ERR_INVALID_REQUEST}};
+  { err_type::S3ErrorDetails_Type_TYPE_ACCESS_DENIED, EACCES },
+  { err_type::S3ErrorDetails_Type_TYPE_AUTHORIZATION_HEADER_MALFORMED,
+      ERR_INVALID_REQUEST },
+  { err_type::S3ErrorDetails_Type_TYPE_EXPIRED_TOKEN, EACCES },
+  { err_type::S3ErrorDetails_Type_TYPE_INTERNAL_ERROR, ERR_INTERNAL_ERROR },
+  { err_type::S3ErrorDetails_Type_TYPE_INVALID_ACCESS_KEY_ID,
+      ERR_INVALID_ACCESS_KEY },
+  { err_type::S3ErrorDetails_Type_TYPE_INVALID_REQUEST, EINVAL },
+  { err_type::S3ErrorDetails_Type_TYPE_INVALID_SECURITY, EINVAL },
+  { err_type::S3ErrorDetails_Type_TYPE_INVALID_TOKEN,
+      ERR_INVALID_IDENTITY_TOKEN },
+  { err_type::S3ErrorDetails_Type_TYPE_INVALID_URI, ERR_INVALID_REQUEST },
+  { err_type::S3ErrorDetails_Type_TYPE_METHOD_NOT_ALLOWED,
+      ERR_METHOD_NOT_ALLOWED },
+  { err_type::S3ErrorDetails_Type_TYPE_MISSING_SECURITY_HEADER,
+      ERR_INVALID_REQUEST },
+  { err_type::S3ErrorDetails_Type_TYPE_REQUEST_TIME_TOO_SKEWED,
+      ERR_REQUEST_TIME_SKEWED },
+  { err_type::S3ErrorDetails_Type_TYPE_SIGNATURE_DOES_NOT_MATCH,
+      ERR_SIGNATURE_NO_MATCH },
+  { err_type::S3ErrorDetails_Type_TYPE_TOKEN_REFRESH_REQUIRED,
+      ERR_INVALID_REQUEST }
+};
 
 HandoffAuthResult AuthServiceClient::_translate_authenticator_error_code(
     ::authenticator::v1::S3ErrorDetails_Type auth_type,
@@ -801,7 +801,7 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
     if (ba::starts_with(auth, "AWS ")) {
       ldpp_dout(dpp, 0) << "V2 signatures are disabled, returning failure" << dendl;
       return HandoffAuthResult(EACCES,
-                               "Access denied (V2 signatures disabled)");
+          "Access denied (V2 signatures disabled)");
     }
   }
 
@@ -847,9 +847,8 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
   }
 
   // Perform the gRPC-specific parts of the auth* call.
-  auto result =
-      _grpc_auth(dpp, auth, authorization_param, session_token, access_key_id,
-                 string_to_sign, signature, s, y, is_presigned_request);
+  auto result = _grpc_auth(dpp, auth, authorization_param, session_token, access_key_id,
+      string_to_sign, signature, s, y, is_presigned_request);
 
   if (result.is_err()) {
     return result;
@@ -872,13 +871,14 @@ HandoffAuthResult HandoffHelperImpl::auth(const DoutPrefixProvider* dpp_in,
 };
 
 HandoffAuthResult HandoffHelperImpl::_grpc_auth(
-    const DoutPrefixProvider *dpp_in, const std::string &auth,
-    const std::optional<AuthorizationParameters> &authorization_param,
-    [[maybe_unused]] const std::string_view &session_token,
-    const std::string_view &access_key_id,
-    const std::string_view &string_to_sign, const std::string_view &signature,
-    [[maybe_unused]] const req_state *const s,
-    [[maybe_unused]] optional_yield y, bool is_presigned_request) {
+    const DoutPrefixProvider* dpp_in, const std::string& auth,
+    const std::optional<AuthorizationParameters>& authorization_param,
+    [[maybe_unused]] const std::string_view& session_token,
+    const std::string_view& access_key_id,
+    const std::string_view& string_to_sign, const std::string_view& signature,
+    [[maybe_unused]] const req_state* const s,
+    [[maybe_unused]] optional_yield y, bool is_presigned_request)
+{
   HandoffDoutPrefixPipe hdpp(*dpp_in, "grpc_auth");
   auto dpp = &hdpp;
 
@@ -1010,8 +1010,7 @@ HandoffAuthResult HandoffHelperImpl::anonymous_authorize(const DoutPrefixProvide
   }
 
   // Perform the gRPC-specific parts of the auth* call.
-  auto result =
-      _grpc_auth(dpp, "", authorization_param, "", "", "", "", s, y, false);
+  auto result = _grpc_auth(dpp, "", authorization_param, "", "", "", "", s, y, false);
 
   return result;
 };
@@ -1093,22 +1092,40 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
    */
   auto result = client.AuthorizeV2(req);
 
+  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Authorize response: {}"), __func__, proto_to_JSON(*(result.response()))) << dendl;
+
   if (result.is_extra_data_required()) {
     // Change the transaction ID so the Authorizer can tell the difference.
-    req.mutable_common()->set_authorization_id(s->trans_id + "-extra-data");
+    req.mutable_common()->set_authorization_id(s->trans_id + "-extra-data"); // XXX this should be elsewhere
 
-    // extra_data_required() explicitly checks that it's safe to dereference
-    // the error_details() optional.
-    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Extra data required: {}"),
-        __func__, proto_to_JSON(result.error_details()->extra_data_required()))
-                       << dendl;
-    // Update the request with the extra data required.
-    verify_permission_update_authz_state(dpp, result.error_details()->extra_data_required(), op, s);
-    int ret = PopulateAuthorizeRequestLoadExtraData(dpp, s,
-        req.mutable_extra_data_provided(), req.mutable_extra_data(), y);
-    if (ret < 0) {
-      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to load extra data"), __func__) << dendl;
-      return ret;
+    ExtraDataSpecification spec;
+    bool required = false;
+
+    // result.response() has a value if the result is extra data required.
+    // XXX Copy the response out of the optional, iterating directly over the
+    // optional appears to cause crashes - I don't know why.
+    auto resp = result.response().value();
+    for (const auto& answer : resp.answers()) {
+      if (answer.has_extra_data_required()) {
+        spec.set_object_key_tags(answer.extra_data_required().object_key_tags());
+      }
+    }
+    if (required) {
+      ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Extra data required: {}"),
+          __func__, proto_to_JSON(spec))
+                         << dendl;
+      // Update s->handoff_authz with the extra data required. The metadata in
+      // handoff_authz are used to populate the new AuthorizeV2 request.
+      verify_permission_update_authz_state(dpp, spec, op, s);
+
+      // Create a new request. I know the temptation is to try to modify the
+      // old request, but that just doesn't work - we can't modify the
+      // questions once they're loaded into the repeated field.
+      opt_req = PopulateAuthorizeRequest(dpp, s, operation, y);
+      if (!opt_req) {
+        ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to load extra data"), __func__) << dendl;
+        return -EACCES;
+      }
     }
 
     // // We only need to update the IAM environment if any extra data loads will
@@ -1136,11 +1153,7 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
 
   } else {
     auto status = result.status();
-    if (result.error_details()) {
-      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to authorize request: code {} http code hint {}: message '{}'"),
-          __func__, *result.error_code_as_string(), result.error_details()->http_code_hint(), status->error_message())
-                        << dendl;
-    } else if (status) {
+    if (status) {
       ldpp_dout(dpp, 0)
           << fmt::format(FMT_STRING("{}: ERROR: Failed to authorize request: code {}: message '{}'"),
                  __func__, status->error_code(), status->error_message())
@@ -1288,19 +1301,24 @@ int PopulateAuthorizeRequestLoadExtraData(const DoutPrefixProvider* dpp, req_sta
     ::authorizer::v1::ExtraDataSpecification* extra_spec, ::authorizer::v1::ExtraData* extra_data,
     optional_yield y, std::optional<load_object_tags_function> alt_load)
 {
+  using namespace ::authorizer::v1;
   if (!s->handoff_authz) {
     ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: req_state->handoff_authz cannot be null"), __func__) << dendl;
     return -ERR_INTERNAL_ERROR;
   }
+  // Load the data once.
   auto state = *s->handoff_authz;
   if (state.object_tags_required()) {
-    PopulateExtraDataObjectTags(dpp, s, extra_spec, extra_data, y, alt_load);
+    int ret = PopulateExtraDataObjectTags(dpp, s, extra_spec, extra_data, y, alt_load);
+    if (ret < 0) {
+      return ret;
+    }
   }
   return 0;
 }
 
 void PopulateAuthorizeRequestIAMEnvironment(const DoutPrefixProvider* dpp,
-    req_state* s, ::authorizer::v1::AuthorizeV2Request& req)
+    req_state* s, ::authorizer::v1::AuthorizeV2Question* question)
 {
   // s->env is an rgw::IAM::Environment -> std::multimap<std::string,
   // std::string>. We need to translate that into a protobuf-compatible type,
@@ -1321,14 +1339,14 @@ void PopulateAuthorizeRequestIAMEnvironment(const DoutPrefixProvider* dpp,
   }
   // Then load std::unordered_map<std::string, std::vector<std::string>> into
   // the protobuf in a very natural way.
-  auto env = req.mutable_environment();
+  auto env = question->mutable_environment();
   // Start from scratch. This makes more sense if you consider the case where
   // we're resubmitting a request with extra data. This is a multimap, so
   // loading new values will just duplicate everything that isn't new.
   env->clear();
 
   for (const auto& kv : env_map) {
-    AuthorizeV2Request::IAMMapEntry entry;
+    AuthorizeV2Question::IAMMapEntry entry;
     for (const auto& v : kv.second) {
       entry.add_key(v);
     }
@@ -1337,7 +1355,7 @@ void PopulateAuthorizeRequestIAMEnvironment(const DoutPrefixProvider* dpp,
 }
 
 std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
-    req_state* s, uint64_t operation, optional_yield y, std::optional<load_object_tags_function> alt_load)
+    req_state* s, std::vector<uint64_t> operations, optional_yield y, std::optional<load_object_tags_function> alt_load)
 {
   using namespace ::authorizer::v1;
   ceph_assert(s->handoff_authz != nullptr);
@@ -1349,54 +1367,67 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
     ldpp_dout(dpp, 0) << "{}: ERROR: req_state->trans_id cannot be empty" << dendl;
     return std::nullopt;
   }
-  // Check the opcode. This is a uint64_t in RGW, but an enum in the protobuf.
-  auto opcode = iam_s3_to_grpc_opcode(operation);
-  if (!opcode.has_value()) {
-    ldpp_dout(dpp, 0)
-        << fmt::format(FMT_STRING("{}: ERROR: Unable to map unknown opcode value {} to gRPC enum ::authorize::v1::S3Opcode"), __func__, operation)
-        << dendl;
-    return std::nullopt;
-  }
 
-  // We should have everything we need. Construct and populate the request.
+  // If extra data are required, load them first. We can't mutate the
+  // questions loaded into the request later.
+  ExtraDataSpecification extra_spec;
+  ExtraData extra_data;
+  if (s->handoff_authz->extra_data_required()) {
+    auto ret = PopulateAuthorizeRequestLoadExtraData(dpp, s, &extra_spec, &extra_data, y, alt_load);
+    if (ret < 0) {
+      return std::nullopt;
+    }
+  }
 
   AuthorizeV2Request req;
-  // The AuthorizationCommon submessage.
-  auto common = req.mutable_common();
 
-  req.mutable_common()->set_authorization_id(s->trans_id);
+  for (auto operation : operations) {
+    // Check the opcode. This is a uint64_t in RGW, but an enum in the protobuf.
+    auto opcode = iam_s3_to_grpc_opcode(operation);
+    if (!opcode.has_value()) {
+      ldpp_dout(dpp, 0)
+          << fmt::format(FMT_STRING("{}: ERROR: Unable to map unknown opcode value {} to gRPC enum ::authorize::v1::S3Opcode"), __func__, operation)
+          << dendl;
+      return std::nullopt;
+    }
 
-  common->set_authorization_id(s->trans_id);
-  SetAuthorizationCommonTimestamp(common);
+    // We should have everything we need. Construct and populate the request.
 
-  req.set_opcode(*opcode);
+    auto question = req.add_questions();
+    // The AuthorizationCommon submessage.
+    auto common = question->mutable_common();
 
-  // State fields from the HandoffAuthzState object.
-  auto state = s->handoff_authz.get(); // Naked pointer is safe here.
-  req.set_canonical_user_id(state->canonical_user_id());
-  req.set_user_arn(state->user_arn());
-  if (state->assuming_user_arn()) {
-    req.set_assuming_user_arn(state->assuming_user_arn().value());
+    question->mutable_common()->set_authorization_id(s->trans_id);
+
+    common->set_authorization_id(s->trans_id); // XXX this needs to mutate per-operation and be modifyable for e-d requests.
+    SetAuthorizationCommonTimestamp(common);
+
+    question->set_opcode(*opcode);
+
+    // State fields from the HandoffAuthzState object.
+    auto state = s->handoff_authz.get(); // Naked pointer is safe here.
+    question->set_canonical_user_id(state->canonical_user_id());
+    question->set_user_arn(state->user_arn());
+    if (state->assuming_user_arn()) {
+      question->set_assuming_user_arn(state->assuming_user_arn().value());
+    }
+    question->set_account_arn(state->account_arn());
+    question->set_bucket_name(state->bucket_name());
+    question->set_object_key_name(state->object_key_name());
+
+    // Load the IAM environment into the request.
+    PopulateAuthorizeRequestIAMEnvironment(dpp, s, question);
+
+    // Additional fields from the request. Be careful! Fields here can be
+    // uninitialised, you must check for null pointers.
+    // None yet.
+
+    // Populate all questions with copies of the extra data and spec.
+    if (extra_spec.object_key_tags()) {
+      question->mutable_extra_data_provided()->CopyFrom(extra_spec);
+      question->mutable_extra_data()->CopyFrom(extra_data);
+    }
   }
-  req.set_account_arn(state->account_arn());
-  req.set_bucket_name(state->bucket_name());
-  req.set_object_key_name(state->object_key_name());
-
-  // Extra data. If configured, populate the extra_data_provided field with
-  // bools for each provided type, and provide the extra data in the
-  // extra_data field.
-  if (state->extra_data_required()) {
-    PopulateAuthorizeRequestLoadExtraData(dpp, s,
-        req.mutable_extra_data_provided(), req.mutable_extra_data(),
-        y, alt_load);
-  }
-
-  // Load the IAM environment into the request.
-  PopulateAuthorizeRequestIAMEnvironment(dpp, s, req);
-
-  // Additional fields from the request. Be careful! Fields here can be
-  // uninitialised, you must check for null pointers.
-  // None yet.
 
   ldpp_dout(dpp, 20) << __func__ << ": " << req << dendl;
   return req;
@@ -1420,54 +1451,58 @@ AuthorizerClient::AuthorizeResult AuthorizerClient::AuthorizeV2(AuthorizeV2Reque
 
   ::grpc::Status status = stub_->AuthorizeV2(&context, req, &resp);
   if (status.ok()) {
-    // The RPC succeeded and the request is authorized. Construct a
-    // success-type result object from the response.
-    return AuthorizeResult(resp);
-  }
-  // Do the 'richer error model' dance on the response.
-  auto error_details = status.error_details();
-  if (error_details.empty()) {
-    return AuthorizeResult(status); // Just the standard gRPC status in the failure result.
-  }
-  // Look for our error details.
-  ::google::rpc::Status s;
-  if (!s.ParseFromString(error_details)) {
-    return AuthorizeResult(status); // Couldn't parse the error details - standard gRPC status only in the failure result.
-  }
-  for (auto& detail : s.details()) {
-    authorizer::v1::AuthorizationErrorDetails aed;
-    if (detail.UnpackTo(&aed)) {
-      // Found our error detail message. Create a failure-type result
-      // containing it.
-      return AuthorizeResult(status, aed);
+    // Check the response structure. We need the right number of answers, and
+    // the right authorization IDs in the right order.
+    if (resp.answers_size() != req.questions_size()) {
+      return AuthorizeResult("answer count mismatch");
     }
+    std::vector<std::string> question_ids, answer_ids;
+    for (auto n = 0; n < req.questions_size(); n++) {
+      question_ids.emplace_back(req.questions(n).common().authorization_id());
+      answer_ids.emplace_back(resp.answers(n).common().authorization_id());
+    }
+    if (question_ids != answer_ids) {
+      return AuthorizeResult("question/answer ID mismatch");
+    }
+
+    // We need to check the return code of each answer. If any of them are not
+    // 'Allow', we'll return an error. A caller that sends multiple requests
+    // will have to check each one.
+    for (const auto& answer : resp.answers()) {
+      if (answer.code() != AuthorizationResultCode::AUTHZ_RESULT_ALLOW) {
+        return AuthorizeResult(false, resp);
+      }
+    }
+
+    // All messages returned ALLOW, total success.
+    return AuthorizeResult(true, resp);
   }
-  // Return standard error failure type only, we didn't find our error detail message.
+  // Return standard error failure type if there was a problem with the actual
+  // RPC call.
   return AuthorizeResult(status);
 }
 
-std::optional<ExtraDataSpecification> AuthorizerClient::AuthorizeResult::is_extra_data_required() const
-{
-  if (err() && error_details()
-      && error_details()->code() == AuthorizationResultCode::AUTHZ_RESULT_EXTRA_DATA_REQUIRED
-      && error_details()->has_extra_data_required()) {
-    return std::make_optional(error_details()->extra_data_required());
-  } else {
-    return std::nullopt;
-  }
-}
-
-std::optional<std::string> AuthorizerClient::AuthorizeResult::error_code_as_string() const
+bool AuthorizerClient::AuthorizeResult::is_extra_data_required() const
 {
   using namespace ::authorizer::v1;
-
-  if (err() && error_details()) {
-    auto descriptor = AuthorizationResultCode_descriptor();
-    auto code = error_details()->code();
-    return descriptor->FindValueByNumber(code)->name();
-  } else {
-    return std::nullopt;
+  // There's no response (or any answers) to interrogate for extra data
+  // requirements.
+  if (!response() || response()->answers_size() == 0) {
+    return false;
   }
+  // The RPC itself failed, the response shouldn't be checked.
+  if (status() && !status()->ok()) {
+    return false;
+  }
+  // XXX Copy the response out of the optional, iterating directly over the
+  // optional appears to cause crashes - I don't know why.
+  auto resp = response().value();
+  for (const auto& answer : resp.answers()) {
+    if (answer.code() == ::authorizer::v1::AUTHZ_RESULT_EXTRA_DATA_REQUIRED) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /****************************************************************************/
@@ -1527,23 +1562,16 @@ std::ostream& operator<<(std::ostream& os, const AuthorizerClient::AuthorizeResu
 {
   os << "AuthorizeResult(success=" << res.ok() << ", response=";
   if (res.response()) {
-    os << (*res.response());
+    os << res.response_.value();
   } else {
     os << "nullopt";
   }
   os << ", grpc::status=";
   if (res.status()) {
-    os << (*res.status());
+    os << "(code=" << res.status_->error_code() << ", message='" << res.status_->error_message() << "')";
   } else {
     os << "nullopt";
   }
-  // XXX don't know if we need to support richer error status yet.
-  // os << ", rpc_status=";
-  // if (res.rpc_status()) {
-  //   os << (*res.rpc_status());
-  // } else {
-  //   os << "nullopt";
-  // }
   os << ")";
 
   return os;

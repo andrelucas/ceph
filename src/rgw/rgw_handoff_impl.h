@@ -672,8 +672,7 @@ public:
    *
    * There are a a lot of potential results from an Authorize() call. In the
    * successful RPC case we want to inspect the response protobuf message. In
-   * failure cases, we want at least the grpc::Status and possibly the
-   * google::rpc::Status message for richer error responses.
+   * failure cases, we want at the grpc::Status.
    *
    * Rather than use a tuple response, bit the bullet and encapsulate the lot.
    * That way we can standardise display code and error handling.
@@ -682,46 +681,45 @@ public:
     bool success_;
     std::optional<AuthorizeV2Response> response_;
     std::optional<::grpc::Status> status_;
-    std::optional<AuthorizationErrorDetails> error_details_;
+    std::optional<std::string> message_;
 
   public:
     /**
-     * @brief Construct an Authorize Result object, saving the success (ALLOW
-     * response or not) and the gRPC response message.
+     * @brief Construct a new Authorize Result object, saving the success
+     * (taking into account the answers in the response) and the response
+     * itself.
      *
-     * @param response The AuthorizeResponse message.
+     * @param success Whether or not the response indicates that all questions
+     * received an ALLOW response.
+     * @param response The AuthorizeV2Response message.
      */
-    AuthorizeResult(const AuthorizeV2Response& response)
-        : success_(true)
-        , response_(response)
+    AuthorizeResult(bool success, const AuthorizeV2Response& response)
+        : success_(success)
     {
+      response_ = std::make_optional(response);
     }
+
     /**
      * @brief Construct a failure-type Authorize Result object, saving the
-     * gRPC status code (which could not be resolved into a 'richer error'
-     * status).
-     *
-     * For richer error status, use the other constructor.
+     * gRPC status code.
      *
      * @param status the ::grpc::Status response from the RPC call.
      */
-    AuthorizeResult(const ::grpc::Status& status)
+    explicit AuthorizeResult(const ::grpc::Status& status)
         : success_(false)
         , status_(status)
     {
     }
+
     /**
      * @brief Construct a failure-type Authorize Result object, saving the
-     * gRPC status code and the richer error status.
+     * error message given by the caller.
      *
-     * @param status The ::grpc::Status response from the RPC call.
-     * @param rpc_status The ::google::rpc::Status response extracted from the
-     * richer error found in the ::grpc::Status response.
+     * @param message The error message.
      */
-    AuthorizeResult(const ::grpc::Status& status, const AuthorizationErrorDetails& error_details)
+    explicit AuthorizeResult(const std::string& message)
         : success_(false)
-        , status_(status)
-        , error_details_(error_details)
+        , message_(message)
     {
     }
 
@@ -754,32 +752,21 @@ public:
      * @brief Utility function to determine if the call failed due to an extra
      * data requirement.
      *
-     * @return An optional ExtraDataSpecification object if extra data is
-     * required, otherwise std::nullopt.
+     * If there's no saved response, or the gRPC call returned failure, this
+     * will simply return false. It will only return true if one or more of
+     * the answers in a response contained AUTHZ_STATUS_EXTRA_DATA_REQUIRED.
+     *
+     * @return true if any answer in the response required extra data.
      */
-    std::optional<ExtraDataSpecification> is_extra_data_required() const;
+    bool is_extra_data_required() const;
 
     /// @brief Return the AuthorizeResponse message resulting from the RPC call,
     /// if any.
-    std::optional<AuthorizeV2Response> response() const { return response_; }
+    std::optional<AuthorizeV2Response> response() const noexcept { return response_; }
     /// @brief Return the gRPC status object from the RPC call, if any.
-    std::optional<::grpc::Status> status() const { return status_; }
-    /// @brief Return the google::rpc::Status object from the RPC call, if any.
-    std::optional<AuthorizationErrorDetails> error_details() const { return error_details_; }
-
-    /**
-     * @brief If present, return a string representation of the error code
-     * returned in the RPC call AuthorizationErrorDetails message.
-     *
-     * If we got a richer error message, return a stringified version of the
-     * return code in AuthorizationErrorDetails.code. If that can't be done
-     * (because there was no richer error response or some other error) return
-     * nullopt.
-     *
-     * @return An optional string representation of the error code, or
-     * std::nullopt if the error code is not available.
-     */
-    std::optional<std::string> error_code_as_string() const;
+    std::optional<::grpc::Status> status() const noexcept { return status_; }
+    /// @brief Return the error message, if any.
+    std::optional<std::string> message() const noexcept { return message_; }
 
     friend std::ostream& operator<<(std::ostream& os, const AuthorizerClient::AuthorizeResult& ep);
   }; // class AuthorizerClient::AuthorizeResult
@@ -1196,28 +1183,28 @@ using load_object_tags_function = std::function<int(
     optional_yield y)>;
 
 /**
- * @brief Given a req_state, a HandoffAuthzState and an operation code, create
- * and populate an ::authorizer::v1::AuthorizeV2Request protobuf message.
+ * @brief Given a req_state, a HandoffAuthzState and a vector of operation
+ * code, create and populate an ::authorizer::v1::AuthorizeV2Request protobuf
+ * message.
  *
  * On failure, return std::nullopt.
  *
- * All the state required to fill the operation should be contained in the
- * request and in the HandoffAuthzState, except for the actual operation code
- * which is provided. The operation code is an enum value, e.g.
+ * All the state required to fill the request should be contained in the
+ * request and in the HandoffAuthzState, except for the actual operation codes
+ * which are provided. Each operation code is an enum value, e.g.
  * rgw::IAM::GetObject, which will be mapped onto the equivalent
  * ::authorizer::v1::S3Opcode value.
  *
  * Note that the extra data fields of the request will only be filled in if
  * the corresponding toggles (HandoffAuthzState::set_bucket_tags_required(),
- * HandoffAuthzState::set_object_tags_required()) are set to true. This is so
- * we get exactly the behaviour.
+ * HandoffAuthzState::set_object_tags_required()) are set to true.
  *
  * We may modify \p s. For example, loading extra data such as tags may
  * require modification of s->env.
  *
  * @param dpp A DoutPrefixProvider for logging.
  * @param s The req_state. May be modified!
- * @param operation The opcode. Use the values defined in
+ * @param operations A vector of opcodes. Use the values defined in
  * <rgw/rgw_iam_policy.h> with prefix 's3'.
  * @param y Optional yield.
  * @param alt_load Optional alternative implementation of the object tag
@@ -1226,8 +1213,30 @@ using load_object_tags_function = std::function<int(
  * AuthorizeRequest message on success, std::nullopt on failure.
  */
 std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
-    req_state* s, uint64_t operation, optional_yield y,
+    req_state* s, std::vector<uint64_t> operations, optional_yield y,
     std::optional<load_object_tags_function> alt_load = std::nullopt);
+
+/**
+ * @brief Single operation version of PopulateAuthorizeRequest.
+ *
+ * A shorthand for the common case where we only need to authorize a single
+ * operation.
+ *
+ * @param dpp A DoutPrefixProvider for logging.
+ * @param s The req_state. May be modified!
+ * @param operation An opcode.
+ * @param y Optional yield.
+ * @param alt_load Optional alternative implementation of the object tag
+ * loader function.
+ * @return std::optional<::authorizer::v1::AuthorizeV2Request> A populated
+ * AuthorizeRequest message on success, std::nullopt on failure.
+ */
+inline std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
+    req_state* s, uint64_t operation, optional_yield y,
+    std::optional<load_object_tags_function> alt_load = std::nullopt)
+{
+  return PopulateAuthorizeRequest(dpp, s, std::vector<uint64_t> { operation }, y, alt_load);
+}
 
 /**
  * @brief Populate ExtraData and ExtraDataSpecification using the SAL, or a
@@ -1249,16 +1258,11 @@ int PopulateExtraDataObjectTags(const DoutPrefixProvider* dpp, const req_state* 
 
 /**
  * @brief Given a req_state with a populated HandoffAuthzState, load whatever
- * extra data the HandoffAuthzState says is required.
+ * extra data into the request that the HandoffAuthzState says is required.
  *
- * Update the provided ExtraDataSpecification with the extra data we loaded.
- *
- * At the time of writing, 'loading' involves calling out the the SAL to load
- * attributes, then writing the necessary fields into s->env, the IAM
- * environment. This is performed using already-existing code in RGW. For
- * bucket tags, it's `rgw_iam_add_buckettags()`. For object tags, it's
- * `rgw_iam_add_objtags()`. Both were 'un-static'ed' from rgw_op.cc for this
- * purpose.
+ * Note the alt_load parameter is for unit testing only. It should be
+ * std::nullopt in production, but in tests it provides an alternative way of
+ * loading extra data that doesn't reuire mocking the SAL.
  *
  * @param dpp
  * @param s
@@ -1286,10 +1290,10 @@ int PopulateAuthorizeRequestLoadExtraData(const DoutPrefixProvider* dpp, req_sta
  *
  * @param dpp A DoutPrefixProvider for logging.
  * @param s The req_state.
- * @param req The AuthorizeV2Request message.
+ * @param question The AuthorizeV2Question message.
  */
 void PopulateAuthorizeRequestIAMEnvironment(const DoutPrefixProvider* dpp,
-    req_state* s, ::authorizer::v1::AuthorizeV2Request& req);
+    req_state* s, ::authorizer::v1::AuthorizeV2Question* question);
 
 /**
  * @brief Format a protobuf as a JSON string, or an error message on failure.

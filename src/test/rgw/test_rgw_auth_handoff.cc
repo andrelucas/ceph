@@ -15,6 +15,7 @@
 #include <fmt/format.h>
 #include <gmock/gmock-matchers.h>
 #include <google/protobuf/util/json_util.h>
+#include <google/protobuf/util/time_util.h>
 #include <grpc/grpc.h>
 #include <grpcpp/channel.h>
 #include <grpcpp/client_context.h>
@@ -43,6 +44,7 @@
 #include "rgw/rgw_sal.h"
 #include "rgw_auth_registry.h"
 
+#include "rgw_iam_policy.h"
 #include "rgw_rest_s3.h"
 #include "test_rgw_grpc_util.h"
 
@@ -1471,7 +1473,24 @@ TEST_F(HandoffHelperImplSubsysTest, TestReturnCodeMapping)
 
 class TestAuthzImpl final : public authorizer::v1::AuthorizerService::Service {
 
+public:
+  TestAuthzImpl()
+      : ::authorizer::v1::AuthorizerService::Service()
+  {
+    // It'd be lovely if C++20 ranges didn't suck.
+    std::copy(standard_canned_answers_.begin(), standard_canned_answers_.end(), std::back_inserter(canned_answers_));
+  }
+
+  void set_canned_results(const std::vector<::authorizer::v1::AuthorizationResultCode>& canned)
+  {
+    canned_answers_ = canned;
+  }
+
+private:
+  static constexpr std::array<::authorizer::v1::AuthorizationResultCode, 1> standard_canned_answers_ { ::authorizer::v1::AUTHZ_RESULT_ALLOW };
+
   DoutPrefix dpp_ { g_ceph_context, ceph_subsys_rgw, "unittest gRPC authz server " };
+  std::vector<::authorizer::v1::AuthorizationResultCode> canned_answers_;
 
   grpc::Status Ping(grpc::ServerContext* context, const authorizer::v1::PingRequest* request, authorizer::v1::PingResponse* response) override
   {
@@ -1489,9 +1508,17 @@ class TestAuthzImpl final : public authorizer::v1::AuthorizerService::Service {
     ldpp_dout(&dpp_, 20) << __func__ << ": enter" << dendl;
     ldpp_dout(&dpp_, 20) << "Request: " << *request << dendl;
 
-    SetAuthorizationCommonTimestamp(response->mutable_common());
+    // Just create matching answers and copy in the canned answer result
+    // codes.
+    for (size_t n = 0; n < request->questions_size(); n++) {
+      auto a = response->add_answers();
+      SetAuthorizationCommonTimestamp(a->mutable_common());
+      a->mutable_common()->set_authorization_id(request->questions(n).common().authorization_id());
+      size_t i = n % canned_answers_.size(); // Bound the index into canned_answers_.
+      a->set_code(canned_answers_[i]);
+    }
+
     ldpp_dout(&dpp_, 20) << "Response: " << *response << dendl;
-    ldpp_dout(&dpp_, 20) << __func__ << ": exit OK" << dendl;
     return grpc::Status::OK;
   }
 };
@@ -1601,7 +1628,7 @@ TEST_F(AuthzGRPCTest, Ping)
   ASSERT_TRUE(status);
 }
 
-TEST_F(AuthzGRPCTest, AuthorizeBasics)
+TEST_F(AuthzGRPCTest, AuthorizeBasicSingleQuestion)
 {
   authz_server().start();
   helper_init();
@@ -1617,8 +1644,106 @@ TEST_F(AuthzGRPCTest, AuthorizeBasics)
 
   auto res = client.AuthorizeV2(*opt_req);
   ASSERT_TRUE(res.ok()) << "expected ok(), got " << res;
+  ASSERT_THAT(res.response(), testing::Ne(std::nullopt)) << "expected response, got nullopt";
+  auto resp = *(res.response());
+  ASSERT_EQ(resp.answers_size(), 1) << "expected 1 answer, got " << resp.answers_size();
+  auto ans = resp.answers(0);
+  ASSERT_GT(ans.common().timestamp(), opt_req->questions(0).common().timestamp()) << "timestamp ordering";
+  ASSERT_EQ(ans.common().authorization_id(), opt_req->questions(0).common().authorization_id()) << "authorization_id mismatch";
+  ASSERT_EQ(ans.code(), AUTHZ_RESULT_ALLOW) << "code mismatch";
+}
 
-  // XXX more checks.
+TEST_F(AuthzGRPCTest, AuthorizeBasicMultipleQuestion)
+{
+  using namespace ::authorizer::v1;
+
+  authz_server().start();
+  helper_init();
+  auto client = AuthorizerClient(hh_.get_authz_channel().get_channel());
+
+  DEFINE_REQ_STATE;
+  s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
+  s.trans_id = "deadbeef";
+  s.handoff_authz->set_bucket_name("bucket");
+  s.handoff_authz->set_object_key_name("object");
+  // auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject, null_yield);
+  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, { rgw::IAM::s3GetObject, rgw::IAM::s3GetObjectLegalHold, rgw::IAM::s3GetObjectRetention }, null_yield);
+  ASSERT_THAT(opt_req, testing::Ne(std::nullopt)) << "expected request, got nullopt";
+
+  auto res = client.AuthorizeV2(*opt_req);
+  ASSERT_TRUE(res.ok()) << "expected ok(), got " << res;
+  ASSERT_THAT(res.response(), testing::Ne(std::nullopt)) << "expected response, got nullopt";
+  auto resp = *(res.response());
+  ASSERT_EQ(resp.answers_size(), opt_req->questions_size());
+  for (int n = 0; n < resp.answers_size(); n++) {
+    auto ans = resp.answers(n);
+    ASSERT_GT(ans.common().timestamp(), opt_req->questions(0).common().timestamp()) << "answer " << n << "timestamp ordering";
+    ASSERT_EQ(ans.common().authorization_id(), opt_req->questions(0).common().authorization_id())
+        << "answer " << n << "authorization_id mismatch";
+    ASSERT_EQ(ans.code(), AUTHZ_RESULT_ALLOW) << "answer " << n << "code mismatch";
+  }
+}
+
+TEST_F(AuthzGRPCTest, AuthorizeBasicSingleQuestionExpectedFail)
+{
+  authz_server().start();
+  helper_init();
+  auto client = AuthorizerClient(hh_.get_authz_channel().get_channel());
+
+  DEFINE_REQ_STATE;
+  s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
+  s.trans_id = "deadbeef";
+  s.handoff_authz->set_bucket_name("bucket");
+  s.handoff_authz->set_object_key_name("object");
+  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject, null_yield);
+  ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
+
+  // Set a failure code.
+  authz_server().instance()->set_canned_results({ ::authorizer::v1::AUTHZ_RESULT_DENY });
+  auto res = client.AuthorizeV2(*opt_req);
+  ASSERT_TRUE(res.err()) << "expected err(), got " << res;
+
+  ASSERT_THAT(res.response(), testing::Ne(std::nullopt)) << "expected response, got nullopt";
+  auto resp = *(res.response());
+  ASSERT_EQ(resp.answers_size(), 1) << "expected 1 answer, got " << resp.answers_size();
+  auto ans = resp.answers(0);
+  ASSERT_GT(ans.common().timestamp(), opt_req->questions(0).common().timestamp()) << "timestamp ordering";
+  ASSERT_EQ(ans.common().authorization_id(), opt_req->questions(0).common().authorization_id()) << "authorization_id mismatch";
+  ASSERT_EQ(ans.code(), AUTHZ_RESULT_DENY) << "code mismatch";
+}
+
+TEST_F(AuthzGRPCTest, AuthorizeBasicMultipleQuestionExpectedFail)
+{
+  authz_server().start();
+  helper_init();
+  auto client = AuthorizerClient(hh_.get_authz_channel().get_channel());
+
+  DEFINE_REQ_STATE;
+  s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
+  s.trans_id = "deadbeef";
+  s.handoff_authz->set_bucket_name("bucket");
+  s.handoff_authz->set_object_key_name("object");
+  // auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject, null_yield);
+  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, { rgw::IAM::s3GetObject, rgw::IAM::s3GetObjectLegalHold, rgw::IAM::s3GetObjectRetention }, null_yield);
+  ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
+
+  // Set a failure code for the last question.
+  using namespace ::authorizer::v1;
+  auto cr = std::vector<AuthorizationResultCode> { AUTHZ_RESULT_ALLOW, AUTHZ_RESULT_ALLOW, AUTHZ_RESULT_DENY };
+  authz_server().instance()->set_canned_results(cr);
+  auto res = client.AuthorizeV2(*opt_req);
+  ASSERT_TRUE(res.err()) << "expected err(), got " << res;
+
+  ASSERT_THAT(res.response(), testing::Ne(std::nullopt)) << "expected response, got nullopt";
+  auto resp = *(res.response());
+  ASSERT_EQ(resp.answers_size(), opt_req->questions_size());
+  for (size_t n = 0; n < resp.answers_size(); n++) {
+    auto ans = resp.answers(n);
+    ASSERT_GT(ans.common().timestamp(), opt_req->questions(0).common().timestamp()) << "answer " << n << "timestamp ordering";
+    ASSERT_EQ(ans.common().authorization_id(), opt_req->questions(0).common().authorization_id())
+        << "answer " << n << "authorization_id mismatch";
+    ASSERT_EQ(ans.code(), cr[n]) << "answer " << n << "code mismatch";
+  }
 }
 
 // Authz utility tests.
@@ -1651,7 +1776,7 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestIAMEnvironmentMapping)
   // std::ignore = google::protobuf::util::MessageToJsonString(req, &out);
   // std::cerr << "XXX: " << out << std::endl;
 
-  auto& env = req.environment();
+  auto& env = req.questions(0).environment();
   ASSERT_EQ(env.size(), 2);
   auto ek1_keys = env.at("k1").key();
   ASSERT_EQ(ek1_keys.size(), 2);
@@ -1719,9 +1844,9 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataNone)
   auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject,
       null_yield, tags.get_loader());
   ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
-  auto& req = *opt_req;
-  ASSERT_FALSE(req.has_extra_data());
-  ASSERT_FALSE(req.has_extra_data_provided());
+  auto& q = opt_req->questions(0);
+  ASSERT_FALSE(q.has_extra_data());
+  ASSERT_FALSE(q.has_extra_data_provided());
 }
 
 TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataObjectTags)
@@ -1737,11 +1862,11 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataObjectTags)
   auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject,
       null_yield, tags.get_loader());
   ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
-  auto& req = *opt_req;
-  ASSERT_TRUE(req.has_extra_data_provided());
-  ASSERT_TRUE(req.extra_data_provided().object_key_tags());
-  ASSERT_TRUE(req.has_extra_data());
-  auto ot = req.extra_data().object_key_tags();
+  auto& q = opt_req->questions(0);
+  ASSERT_TRUE(q.has_extra_data_provided());
+  ASSERT_TRUE(q.extra_data_provided().object_key_tags());
+  ASSERT_TRUE(q.has_extra_data());
+  auto ot = q.extra_data().object_key_tags();
   ASSERT_TRUE(ot.find("ok1") != ot.end());
   ASSERT_EQ(ot.at("ok1"), "ok1v1");
 }
@@ -1759,9 +1884,9 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataObjectTagsButNoFlag)
   auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject,
       null_yield, tags.get_loader());
   ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
-  auto& req = *opt_req;
-  ASSERT_FALSE(req.has_extra_data());
-  ASSERT_FALSE(req.has_extra_data_provided());
+  auto& q = opt_req->questions(0);
+  ASSERT_FALSE(q.has_extra_data());
+  ASSERT_FALSE(q.has_extra_data_provided());
 }
 
 TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataObjectTagsFlagButNoData)
@@ -1777,11 +1902,11 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataObjectTagsFlagButNoData)
   auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject,
       null_yield, tags.get_loader());
   ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
-  auto& req = *opt_req;
-  ASSERT_TRUE(req.has_extra_data_provided());
-  ASSERT_TRUE(req.extra_data_provided().object_key_tags());
-  ASSERT_TRUE(req.has_extra_data());
-  auto ot = req.extra_data().object_key_tags();
+  auto& q = opt_req->questions(0);
+  ASSERT_TRUE(q.has_extra_data_provided());
+  ASSERT_TRUE(q.extra_data_provided().object_key_tags());
+  ASSERT_TRUE(q.has_extra_data());
+  auto ot = q.extra_data().object_key_tags();
   ASSERT_TRUE(ot.find("ok1") == ot.end()); // => not found.
 }
 
