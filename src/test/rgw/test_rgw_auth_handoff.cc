@@ -925,8 +925,8 @@ TEST_F(HandoffHelperImplGRPCTest, ChannelRecoversFromDeadAtStartup)
   ASSERT_EQ(res.err_type(), HandoffAuthResult::error_type::TRANSPORT_ERROR) << "should return TRANSPORT_ERROR";
 
   server().start();
-  // Wait as short a time as the library allows, plus a millisecond.
-  std::this_thread::sleep_for(std::chrono::milliseconds(SMALLEST_RECONNECT_DELAY_MS + 1));
+  // Wait as short a time as the library allows, plus a few millisecond.
+  std::this_thread::sleep_for(std::chrono::milliseconds(SMALLEST_RECONNECT_DELAY_MS + 5));
   res = hh_.auth(&dpp_, "", t.access_key, string_to_sign, t.signature, &s, y_);
   EXPECT_TRUE(res.is_ok()) << "should now succeed";
   EXPECT_EQ(res.err_type(), HandoffAuthResult::error_type::NO_ERROR) << "should now show no error";

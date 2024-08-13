@@ -1046,6 +1046,10 @@ HandoffHelperImpl::get_signing_key(const DoutPrefixProvider* dpp,
   return std::make_optional(result.signing_key());
 }
 
+/****************************************************************************/
+
+// verify_permission() and friends.
+
 void HandoffHelperImpl::verify_permission_update_authz_state(const DoutPrefixProvider* dpp,
     const ExtraDataSpecification& extra_spec,
     const RGWOp* op, const req_state* s)
@@ -1058,6 +1062,12 @@ void HandoffHelperImpl::verify_permission_update_authz_state(const DoutPrefixPro
 int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
     uint64_t operation, optional_yield y)
 {
+  return verify_permissions(op, s, std::vector<uint64_t> { operation }, y)[0];
+}
+
+std::vector<int> HandoffHelperImpl::verify_permissions(const RGWOp* op, req_state* s,
+    const std::vector<uint64_t>& operations, optional_yield y)
+{
   // Construct a custom log prefix provider with some per-request state
   // information. This should make it easier to correlate logs on busy
   // servers.
@@ -1068,17 +1078,19 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
 
   ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}"), __func__) << dendl;
 
-  auto opt_req = PopulateAuthorizeRequest(dpp, s, operation, 0, y);
+  size_t op_count = operations.size();
+
+  auto opt_req = PopulateAuthorizeRequest(dpp, s, operations, 0, y);
   if (!opt_req) {
     ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to populate AuthorizeV2Request"), __func__) << dendl;
-    return -EACCES;
+    return std::vector(op_count, -EACCES);
   }
   auto req = *opt_req;
 
   auto channel = get_authz_channel().get_channel();
   if (!channel) {
     ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to fetch gRPC channel"), __func__) << dendl;
-    return -EACCES;
+    return std::vector(op_count, -EACCES);
   }
   auto client = AuthorizerClient(channel);
 
@@ -1120,10 +1132,10 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
     // questions once they're loaded into the repeated field. Note the
     // subrequest ID is incremented. This means a new ID so we don't confuse
     // the Authorizer with duplicates.
-    opt_req = PopulateAuthorizeRequest(dpp, s, operation, 1, y);
+    opt_req = PopulateAuthorizeRequest(dpp, s, operations, 1, y);
     if (!opt_req) {
       ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to load extra data"), __func__) << dendl;
-      return -EACCES;
+      return std::vector(op_count, -EACCES);
     }
 
     // // We only need to update the IAM environment if any extra data loads will
@@ -1139,34 +1151,67 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
     result = client.AuthorizeV2(req);
   }
 
+  /* We get here after performing either a single AuthorizeV2 request, or two
+   * requests if the first request required extra data. Either way, we have an
+   * AuthorizerClient::AuthorizeV2Result object to interpret, and we return a
+   * vector of statuses to the caller.
+   */
+
   ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Authorize result: "), __func__) << result << dendl;
 
-  if (result.ok()) {
-
-    ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("{}: Authorizer success"), __func__) << dendl;
-    return 0;
-
-  } else if (result.is_extra_data_required()) {
+  // We do not allow EXTRA_DATA_REQUIRED to loop. If the second message sent
+  // returns this status, it's a hard failure because something has gone wrong
+  // - the interaction between the client and the Authorizer is broken.
+  if (result.is_extra_data_required()) {
     // We're looping. Disallow this explicitly and as an internal error.
     ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Disallowing multiple extra data requests"), __func__) << dendl;
-    return -ERR_INTERNAL_ERROR;
-
-  } else {
-    if (result.has_status()) {
-      auto status = result.status();
-      ldpp_dout(dpp, 0)
-          << fmt::format(FMT_STRING("{}: ERROR: Failed to authorize request: code {}: message '{}'"),
-                 __func__, status.error_code(), status.error_message())
-          << dendl;
-
-    } else {
-      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to authorize request (unknown error reason)"), __func__) << dendl;
-    }
-    return -EACCES;
+    return std::vector(op_count, -ERR_INTERNAL_ERROR);
   }
 
-  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Success"), __func__) << dendl;
-  return 0;
+  // If the RPC itself failed, hard fail in the hope that a retry will succeed.
+  if (result.has_status()) {
+    auto status = result.status();
+    ldpp_dout(dpp, 0)
+        << fmt::format(FMT_STRING("{}: ERROR: Failed to authorize request: code {}: message '{}'"),
+               __func__, status.error_code(), status.error_message())
+        << dendl;
+    return std::vector<int>(op_count, -ERR_INTERNAL_ERROR);
+  }
+
+  // If the RPC succeeded but we got an error message, hard fail so the user
+  // might retry.
+  if (result.has_message()) {
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to authorize request: {}"), __func__, result.message()) << dendl;
+    return std::vector(op_count, -ERR_INTERNAL_ERROR);
+  }
+
+  // If we got here, the RPC succeeded and the response appears well-formed.
+  // Return the results. These are the codes used in RGWOp classes - zero is
+  // success, <0 is an error code from rgw_common.h.
+  std::vector<int> result_codes;
+  for (const auto& answer : result.response().answers()) {
+    using namespace ::authorizer::v1;
+    int retcode;
+    switch (answer.code()) {
+    case AUTHZ_RESULT_ALLOW:
+      retcode = 0;
+      break;
+    case AUTHZ_RESULT_DENY:
+      retcode = -EACCES;
+      break;
+    case AUTHZ_RESULT_INTERNAL_ERROR:
+      retcode = -ERR_INTERNAL_ERROR;
+      break;
+    case AUTHZ_RESULT_RATE_LIMIT_EXCEEDED:
+      retcode = -ERR_RATE_LIMITED;
+      break;
+    default:
+      retcode = -ERR_INTERNAL_ERROR;
+      break;
+    }
+    result_codes.push_back(retcode);
+  }
+  return result_codes;
 }
 
 /****************************************************************************/
@@ -1231,7 +1276,7 @@ static int _load_objtags_from_sal(const DoutPrefixProvider* dpp, const req_state
 {
   // From rgw_iam_add_objtags()
   if (!s->object) {
-    ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("{}: WARNING: req_state->object cannot be null"), __func__) << dendl;
+    ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("{}: WARNING: req_state->object is null, nothing to load"), __func__) << dendl;
     return 0;
   }
   // From rgw_iam_add_objtags() second variant.

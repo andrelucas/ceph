@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <fmt/format.h>
 #include <iosfwd>
 #include <stack>
@@ -241,14 +242,40 @@ public:
    * bucket or object tags that live in the environment, or by setting
    * additional authz state.
    *
+   * The single-operation version calls verify_permissions() and
+   * returns the first (and only) result of that call.
+   *
    * @param op The RGWOp-subclass object pointer.
    * @param s The req_state object.
    * @param operation The operation code.
-   * @param y optional yield (will likely be ignored).
+   * @param y optional yield.
    * @return int return code. 0 for success, <0 for error, typically -EACCES.
    */
   int verify_permission(const RGWOp* op, req_state* s,
       uint64_t operation, optional_yield y);
+
+  /**
+   * @brief Authorize multiple operations via the external Authorizer.
+   *
+   * Call out to the external Authorizer to verify the operations, using a
+   * combination of the req_state, our saved authorization state (if any), and
+   * the operation code (e.g. rgw::IAM::GetObject).
+   *
+   * Frustratingly, \p s is contained in \op, but it's a protected member so
+   * we provide it explicitly.
+   *
+   * \p s is non-const because we might have to modify it, e.g. by loading
+   * bucket or object tags that live in the environment, or by setting
+   * additional authz state.
+   *
+   *
+   * @param op The RGWOp-subclass object pointer.
+   * @param s The req_state object.
+   * @param operations A vector of operation codes.
+   * @param y optional yield.
+   * @return std::vector<int> A vector of return codes, one for each operation.
+   */
+  std::vector<int> verify_permissions(const RGWOp* op, req_state* s, std::vector<uint64_t>& operations, optional_yield y);
 
   /**
    * @brief Return true if anonymous authorization is enabled, false otherwise.

@@ -89,6 +89,11 @@ int HandoffHelper::verify_permission(const RGWOp* op, req_state* s, uint64_t ope
   return impl_->verify_permission(op, s, operation, y);
 };
 
+std::vector<int> HandoffHelper::verify_permissions(const RGWOp* op, req_state* s, std::vector<uint64_t>& operations, optional_yield y)
+{
+  return impl_->verify_permissions(op, s, operations, y);
+};
+
 bool HandoffHelper::anonymous_authorization_enabled() const
 {
   return impl_->anonymous_authorization_enabled();

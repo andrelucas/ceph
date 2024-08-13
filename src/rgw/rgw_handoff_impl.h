@@ -824,9 +824,11 @@ public:
     /// @brief Return a reference to the AuthorizeResponse message resulting
     /// from the RPC call, if any.
     const AuthorizeV2Response& response() const noexcept { return response_; }
-    /// @brief Return the gRPC status object from the RPC call, if any.
+    /// @brief Return the gRPC status object from the RPC call, if any. Having
+    /// a status object means the call did not succeed.
     const ::grpc::Status& status() const noexcept { return status_; }
-    /// @brief Return the error message, if any.
+    /// @brief Return the error message, if any. Having an error message
+    /// means the call did not succeed.
     std::string message() const noexcept { return message_; }
 
     friend std::ostream& operator<<(std::ostream& os, const AuthorizerClient::AuthorizeResult& ep);
@@ -1179,6 +1181,9 @@ public:
    * \p s is non-const because we might modify it by, say, loading bucket or
    * object tags.
    *
+   * This single-operation version calls verify_permissions() and
+   * returns the first (and only) result in the vector.
+   *
    * @param op The RGWOp-subclass object pointer.
    * @param s The req_state object.
    * @param operation The operation code.
@@ -1187,6 +1192,27 @@ public:
    */
   int verify_permission(const RGWOp* op, req_state* s,
       uint64_t operation, optional_yield y);
+
+  /**
+   * @brief Authorize the operation via the external Authorizer.
+   *
+   * Call out to the external Authorizer to check each operation, using a
+   * combination of the req_state (in the \p s field of the \p op parameter),
+   * our saved authorization state (if any), and the operation code (e.g.
+   * rgw::IAM::GetObject).
+   *
+   * \p s is non-const because we might modify it by, say, loading bucket or
+   * object tags.
+   *
+   * @param op The RGWOp-subclass object pointer.
+   * @param s The req_state object.
+   * @param operations A vector of operation codes to check.
+   * @param y Optional yield.
+   * @return std::vector<int> A vector of return codes, one for each code in
+   * \p operations in order. 0 for success, <0 for error, typically -EACCES.
+   */
+  std::vector<int> verify_permissions(const RGWOp* op, req_state* s,
+      const std::vector<uint64_t>& operations, optional_yield y);
 
   /**
    * @brief Update in s->handoff_authz the set of required extra data as
