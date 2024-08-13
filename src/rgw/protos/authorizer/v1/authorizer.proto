@@ -291,7 +291,7 @@ message AuthorizeV2Question
 
 message AuthorizeV2Request
 {
-  AuthorizationCommon common = 1;
+  reserved 1; // Was the common field.
   // One or more questions about the S3 request.
   repeated AuthorizeV2Question questions = 2;
 }
@@ -311,7 +311,7 @@ message AuthorizeV2Answer
 
 message AuthorizeV2Response
 {
-  AuthorizationCommon common = 1;
+  reserved 1; // Was the common field.
   // One or more answers to the questions in the AuthorizeV2Request.
   repeated AuthorizeV2Answer answers = 2;
 }
