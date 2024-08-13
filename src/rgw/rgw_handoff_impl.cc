@@ -1068,7 +1068,7 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
 
   ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}"), __func__) << dendl;
 
-  auto opt_req = PopulateAuthorizeRequest(dpp, s, operation, y);
+  auto opt_req = PopulateAuthorizeRequest(dpp, s, operation, 0, y);
   if (!opt_req) {
     ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to populate AuthorizeV2Request"), __func__) << dendl;
     return -EACCES;
@@ -1089,43 +1089,41 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
    * resubmit.
    *
    * We submit at most two requests. We don't allow loops.
+   *
+   * Note that this will std::move req! It gets moved to the result object.
    */
   auto result = client.AuthorizeV2(req);
 
-  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Authorize response: {}"), __func__, proto_to_JSON(*(result.response()))) << dendl;
-
   if (result.is_extra_data_required()) {
-    // Change the transaction ID so the Authorizer can tell the difference.
-    req.mutable_common()->set_authorization_id(s->trans_id + "-extra-data"); // XXX this should be elsewhere
+
+    // Dump the result at debug level.
+    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Authorize result: "), __func__) << result << dendl;
 
     ExtraDataSpecification spec;
-    bool required = false;
 
     // result.response() has a value if the result is extra data required.
-    // XXX Copy the response out of the optional, iterating directly over the
-    // optional appears to cause crashes - I don't know why.
-    auto resp = result.response().value();
-    for (const auto& answer : resp.answers()) {
+    for (const auto& answer : result.response().answers()) {
       if (answer.has_extra_data_required()) {
         spec.set_object_key_tags(answer.extra_data_required().object_key_tags());
       }
     }
-    if (required) {
-      ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Extra data required: {}"),
-          __func__, proto_to_JSON(spec))
-                         << dendl;
-      // Update s->handoff_authz with the extra data required. The metadata in
-      // handoff_authz are used to populate the new AuthorizeV2 request.
-      verify_permission_update_authz_state(dpp, spec, op, s);
+    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Extra data required: {}"),
+        __func__, proto_to_JSON(spec))
+                       << dendl;
 
-      // Create a new request. I know the temptation is to try to modify the
-      // old request, but that just doesn't work - we can't modify the
-      // questions once they're loaded into the repeated field.
-      opt_req = PopulateAuthorizeRequest(dpp, s, operation, y);
-      if (!opt_req) {
-        ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to load extra data"), __func__) << dendl;
-        return -EACCES;
-      }
+    // Update s->handoff_authz with the extra data required. The metadata in
+    // handoff_authz are used to populate the new AuthorizeV2 request.
+    verify_permission_update_authz_state(dpp, spec, op, s);
+
+    // Create a new request. I know the temptation is to try to modify the
+    // old request, but that just doesn't work - we can't modify the
+    // questions once they're loaded into the repeated field. Note the
+    // subrequest ID is incremented. This means a new ID so we don't confuse
+    // the Authorizer with duplicates.
+    opt_req = PopulateAuthorizeRequest(dpp, s, operation, 1, y);
+    if (!opt_req) {
+      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Failed to load extra data"), __func__) << dendl;
+      return -EACCES;
     }
 
     // // We only need to update the IAM environment if any extra data loads will
@@ -1136,10 +1134,12 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
     // Resubmit the request with the extra data.
     ldpp_dout(dpp, 5)
         << fmt::format(FMT_STRING("{}: Resubmitting request with extra data: {}"), __func__, proto_to_JSON(req)) << dendl;
-    /* Second AuthorizeV2 request, if the server requested extra data. */
-
+    /* Again, this will std::move the request! */
+    auto req = opt_req.value();
     result = client.AuthorizeV2(req);
   }
+
+  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Authorize result: "), __func__) << result << dendl;
 
   if (result.ok()) {
 
@@ -1152,11 +1152,11 @@ int HandoffHelperImpl::verify_permission(const RGWOp* op, req_state* s,
     return -ERR_INTERNAL_ERROR;
 
   } else {
-    auto status = result.status();
-    if (status) {
+    if (result.has_status()) {
+      auto status = result.status();
       ldpp_dout(dpp, 0)
           << fmt::format(FMT_STRING("{}: ERROR: Failed to authorize request: code {}: message '{}'"),
-                 __func__, status->error_code(), status->error_message())
+                 __func__, status.error_code(), status.error_message())
           << dendl;
 
     } else {
@@ -1355,7 +1355,8 @@ void PopulateAuthorizeRequestIAMEnvironment(const DoutPrefixProvider* dpp,
 }
 
 std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
-    req_state* s, std::vector<uint64_t> operations, optional_yield y, std::optional<load_object_tags_function> alt_load)
+    req_state* s, std::vector<uint64_t> operations, uint32_t subrequest_index, optional_yield y,
+    std::optional<load_object_tags_function> alt_load)
 {
   using namespace ::authorizer::v1;
   ceph_assert(s->handoff_authz != nullptr);
@@ -1381,7 +1382,8 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
 
   AuthorizeV2Request req;
 
-  for (auto operation : operations) {
+  for (size_t n = 0; n < operations.size(); n++) {
+    auto operation = operations[n];
     // Check the opcode. This is a uint64_t in RGW, but an enum in the protobuf.
     auto opcode = iam_s3_to_grpc_opcode(operation);
     if (!opcode.has_value()) {
@@ -1397,11 +1399,10 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
     // The AuthorizationCommon submessage.
     auto common = question->mutable_common();
 
-    question->mutable_common()->set_authorization_id(s->trans_id);
-
-    common->set_authorization_id(s->trans_id); // XXX this needs to mutate per-operation and be modifyable for e-d requests.
+    // Different trans ID for each question.
+    // XXX this needs be modifyable for e-d requests.
+    common->set_authorization_id(fmt::format(FMT_STRING("{}-{}-{}"), s->trans_id, n, subrequest_index));
     SetAuthorizationCommonTimestamp(common);
-
     question->set_opcode(*opcode);
 
     // State fields from the HandoffAuthzState object.
@@ -1442,40 +1443,30 @@ AuthorizerClient::AuthorizeResult AuthorizerClient::AuthorizeV2(AuthorizeV2Reque
   ::grpc::ClientContext context;
   AuthorizeV2Response resp;
 
-  // If the timestamp is zero, set it to 'now'. This is tedious code to write,
-  // let's do it once.
-  auto ts = req.common().timestamp();
-  if (ts.seconds() == 0 && ts.nanos() == 0) {
-    SetAuthorizationCommonTimestamp(req.mutable_common());
-  }
-
   ::grpc::Status status = stub_->AuthorizeV2(&context, req, &resp);
   if (status.ok()) {
     // Check the response structure. We need the right number of answers, and
     // the right authorization IDs in the right order.
     if (resp.answers_size() != req.questions_size()) {
-      return AuthorizeResult("answer count mismatch");
+      return AuthorizeResult(req, resp, "answer count mismatch");
     }
-    std::vector<std::string> question_ids, answer_ids;
+    // If only C++20 ranges didn't suck. This is a classic zip case.
     for (auto n = 0; n < req.questions_size(); n++) {
-      question_ids.emplace_back(req.questions(n).common().authorization_id());
-      answer_ids.emplace_back(resp.answers(n).common().authorization_id());
+      if (req.questions(n).common().authorization_id() != resp.answers(n).common().authorization_id()) {
+        return AuthorizeResult(req, resp, "question/answer ID mismatch");
+      }
     }
-    if (question_ids != answer_ids) {
-      return AuthorizeResult("question/answer ID mismatch");
-    }
-
     // We need to check the return code of each answer. If any of them are not
     // 'Allow', we'll return an error. A caller that sends multiple requests
     // will have to check each one.
     for (const auto& answer : resp.answers()) {
       if (answer.code() != AuthorizationResultCode::AUTHZ_RESULT_ALLOW) {
-        return AuthorizeResult(false, resp);
+        return AuthorizeResult(false, req, resp);
       }
     }
 
     // All messages returned ALLOW, total success.
-    return AuthorizeResult(true, resp);
+    return AuthorizeResult(true, req, resp);
   }
   // Return standard error failure type if there was a problem with the actual
   // RPC call.
@@ -1487,17 +1478,14 @@ bool AuthorizerClient::AuthorizeResult::is_extra_data_required() const
   using namespace ::authorizer::v1;
   // There's no response (or any answers) to interrogate for extra data
   // requirements.
-  if (!response() || response()->answers_size() == 0) {
+  if (!has_response() || response().answers_size() == 0) {
     return false;
   }
   // The RPC itself failed, the response shouldn't be checked.
-  if (status() && !status()->ok()) {
+  if (has_status() && !status().ok()) {
     return false;
   }
-  // XXX Copy the response out of the optional, iterating directly over the
-  // optional appears to cause crashes - I don't know why.
-  auto resp = response().value();
-  for (const auto& answer : resp.answers()) {
+  for (const auto& answer : response().answers()) {
     if (answer.code() == ::authorizer::v1::AUTHZ_RESULT_EXTRA_DATA_REQUIRED) {
       return true;
     }
@@ -1560,17 +1548,23 @@ std::ostream& operator<<(std::ostream& os, const ::authorizer::v1::ExtraDataSpec
 
 std::ostream& operator<<(std::ostream& os, const AuthorizerClient::AuthorizeResult& res)
 {
-  os << "AuthorizeResult(success=" << res.ok() << ", response=";
-  if (res.response()) {
-    os << res.response_.value();
+  os << "AuthorizeResult(success=" << res.ok() << ", request=";
+  if (res.has_request()) {
+    os << res.request();
   } else {
-    os << "nullopt";
+    os << "NONE";
+  }
+  os << ", response=";
+  if (res.has_response()) {
+    os << res.response();
+  } else {
+    os << "NONE";
   }
   os << ", grpc::status=";
-  if (res.status()) {
-    os << "(code=" << res.status_->error_code() << ", message='" << res.status_->error_message() << "')";
+  if (res.has_status()) {
+    os << "(code=" << res.status().error_code() << ", message='" << res.status().error_message() << "')";
   } else {
-    os << "nullopt";
+    os << "NONE";
   }
   os << ")";
 

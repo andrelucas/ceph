@@ -679,24 +679,72 @@ public:
    */
   class AuthorizeResult {
     bool success_;
-    std::optional<AuthorizeV2Response> response_;
-    std::optional<::grpc::Status> status_;
-    std::optional<std::string> message_;
+    bool has_request_ = false;
+    AuthorizeV2Request request_;
+    bool has_response_ = false;
+    AuthorizeV2Response response_;
+    bool has_status_ = false;
+    ::grpc::Status status_;
+    bool has_message_ = false;
+    std::string message_;
 
   public:
     /**
      * @brief Construct a new Authorize Result object, saving the success
-     * (taking into account the answers in the response) and the response
-     * itself.
+     * (taking into account the answers in the response) and moving the
+     * response itself.
      *
      * @param success Whether or not the response indicates that all questions
      * received an ALLOW response.
-     * @param response The AuthorizeV2Response message.
+     * @param response The AuthorizeV2Response message. This will be moved;
+     * the original response value will become useless.
      */
-    AuthorizeResult(bool success, const AuthorizeV2Response& response)
-        : success_(success)
+    AuthorizeResult(bool success, AuthorizeV2Response& response)
+        : success_ { success }
+        , has_response_ { true }
+        , response_ { std::move(response) }
     {
-      response_ = std::make_optional(response);
+    }
+
+    /**
+     * @brief Construct a new Authorize Result object, saving the success
+     * (taking into account the answers in the response) and moving the
+     * request and response into this object.
+     *
+     * @param success Whether or not the response indicates that all questions
+     * received an ALLOW response.
+     * @param request The AuthorizeV2Request message. This will be moved; the
+     * original request value will become useless.
+     * @param response The AuthorizeV2Response message. This will be moved;
+     * the original response value will become useless.
+     */
+    AuthorizeResult(bool success, AuthorizeV2Request& request, AuthorizeV2Response& response)
+        : success_ { success }
+        , has_request_ { true }
+        , request_ { std::move(request) }
+        , has_response_ { true }
+        , response_ { std::move(response) }
+    {
+    }
+
+    /**
+     * @brief Construct a new failure-type Authorize Result object, moving the
+     * request and response objects into this object, and saving the provided
+     * error message.
+     *
+     * @param request Will be moved into this object.
+     * @param response Will be moved into this object.
+     * @param message The error message.
+     */
+    AuthorizeResult(AuthorizeV2Request& request, AuthorizeV2Response& response, const std::string& message)
+        : success_(false)
+        , has_request_(true)
+        , request_(std::move(request))
+        , has_response_(true)
+        , response_(std::move(response))
+        , has_message_(true)
+        , message_(message)
+    {
     }
 
     /**
@@ -707,6 +755,7 @@ public:
      */
     explicit AuthorizeResult(const ::grpc::Status& status)
         : success_(false)
+        , has_status_(true)
         , status_(status)
     {
     }
@@ -719,13 +768,13 @@ public:
      */
     explicit AuthorizeResult(const std::string& message)
         : success_(false)
+        , has_message_(true)
         , message_(message)
     {
     }
 
-    // Standard constructors are all fine.
-    AuthorizeResult(const AuthorizeResult&) = default;
-    AuthorizeResult& operator=(const AuthorizeResult&) = default;
+    AuthorizeResult(const AuthorizeResult&) = delete;
+    AuthorizeResult& operator=(const AuthorizeResult&) = delete;
     AuthorizeResult(AuthorizeResult&&) = default;
     AuthorizeResult& operator=(AuthorizeResult&&) = default;
 
@@ -760,19 +809,34 @@ public:
      */
     bool is_extra_data_required() const;
 
-    /// @brief Return the AuthorizeResponse message resulting from the RPC call,
-    /// if any.
-    std::optional<AuthorizeV2Response> response() const noexcept { return response_; }
+    /// @brief Return true if the call has a request.
+    bool has_request() const noexcept { return has_request_; }
+    /// @brief Return true if the call has a response.
+    bool has_response() const noexcept { return has_response_; }
+    /// @brief Return true if the call has a status.
+    bool has_status() const noexcept { return has_status_; }
+    /// @brief Return true if the call has an error message.
+    bool has_message() const noexcept { return has_message_; }
+
+    /// @brief Return a reference to the AuthorizeRequest message that was
+    /// sent to the server, if any.
+    const AuthorizeV2Request& request() const noexcept { return request_; }
+    /// @brief Return a reference to the AuthorizeResponse message resulting
+    /// from the RPC call, if any.
+    const AuthorizeV2Response& response() const noexcept { return response_; }
     /// @brief Return the gRPC status object from the RPC call, if any.
-    std::optional<::grpc::Status> status() const noexcept { return status_; }
+    const ::grpc::Status& status() const noexcept { return status_; }
     /// @brief Return the error message, if any.
-    std::optional<std::string> message() const noexcept { return message_; }
+    std::string message() const noexcept { return message_; }
 
     friend std::ostream& operator<<(std::ostream& os, const AuthorizerClient::AuthorizeResult& ep);
   }; // class AuthorizerClient::AuthorizeResult
 
   /**
    * @brief Call the Authorizer Authorize() endpoint.
+   *
+   * Note that, if successful, this will *move* the request protobuf into the
+   * result!
    *
    * If the common.timestamp is set to 0, the client will fill in the current
    * time as this is almost always the correct thing to do.
@@ -1206,6 +1270,7 @@ using load_object_tags_function = std::function<int(
  * @param s The req_state. May be modified!
  * @param operations A vector of opcodes. Use the values defined in
  * <rgw/rgw_iam_policy.h> with prefix 's3'.
+ * @param subrequest_index The subrequest index.
  * @param y Optional yield.
  * @param alt_load Optional alternative implementation of the object tag
  * loader function.
@@ -1213,7 +1278,7 @@ using load_object_tags_function = std::function<int(
  * AuthorizeRequest message on success, std::nullopt on failure.
  */
 std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
-    req_state* s, std::vector<uint64_t> operations, optional_yield y,
+    req_state* s, std::vector<uint64_t> operations, uint32_t subrequest_index, optional_yield y,
     std::optional<load_object_tags_function> alt_load = std::nullopt);
 
 /**
@@ -1225,6 +1290,7 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
  * @param dpp A DoutPrefixProvider for logging.
  * @param s The req_state. May be modified!
  * @param operation An opcode.
+ * @param subrequest_index The subrequest index.
  * @param y Optional yield.
  * @param alt_load Optional alternative implementation of the object tag
  * loader function.
@@ -1232,10 +1298,10 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
  * AuthorizeRequest message on success, std::nullopt on failure.
  */
 inline std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(const DoutPrefixProvider* dpp,
-    req_state* s, uint64_t operation, optional_yield y,
+    req_state* s, uint64_t operation, uint32_t subrequest_index, optional_yield y,
     std::optional<load_object_tags_function> alt_load = std::nullopt)
 {
-  return PopulateAuthorizeRequest(dpp, s, std::vector<uint64_t> { operation }, y, alt_load);
+  return PopulateAuthorizeRequest(dpp, s, std::vector<uint64_t> { operation }, subrequest_index, y, alt_load);
 }
 
 /**
