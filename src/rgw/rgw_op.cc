@@ -1066,10 +1066,27 @@ int RGWGetObj::verify_permission(optional_yield y)
     }
   }
 
+  std::vector<int> h_ret;
+  size_t i_retention;
+  size_t i_legal_hold;
+
   if (s->handoff_authz->enabled()) {
-    int ret = s->handoff_helper->verify_permission(this, s, action, y);
-    if (ret < 0) {
-      return ret;
+    // Issue one Authorizer request for all possible operations.
+    const auto i_get = 0;
+    std::vector<uint64_t> ops { action };
+    // If object lock is enabled, we need to know if we can show the caller
+    // information about retention and legal hold.
+    i_retention = ops.size();
+    i_legal_hold = i_retention + 1;
+    if (s->bucket->get_info().obj_lock_enabled()) {
+      ops.push_back(rgw::IAM::s3GetObjectRetention);
+      ops.push_back(rgw::IAM::s3GetObjectLegalHold);
+    };
+
+    h_ret = s->handoff_helper->verify_permissions(this, s, ops, y);
+    ceph_assert(h_ret.size() == ops.size());
+    if (h_ret[i_get] < 0) {
+      return h_ret[i_get];
     }
     // We need to fall through to evaluate the object lock permissions.
 
@@ -1081,13 +1098,12 @@ int RGWGetObj::verify_permission(optional_yield y)
 
   if (s->bucket->get_info().obj_lock_enabled()) {
     if (s->handoff_authz->enabled()) {
-      // XXX XXX This is super inefficient - we need these values to come back
-      // from the earlier verify_permission().
-      if (s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetObjectRetention, y) == 0) {
+      // We already asked the Authorizer these questions.
+      if (h_ret[i_retention] == 0) {
         ldpp_dout(this, 20) << "Object Lock is enabled on the bucket, get_retention set true" << dendl;
         get_retention = true;
       }
-      if (s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetObjectLegalHold, y) == 0) {
+      if (h_ret[i_legal_hold] == 0) {
         ldpp_dout(this, 20) << "Object Lock is enabled on the bucket, get_legal_hold set true" << dendl;
         get_legal_hold = true;
       }
@@ -5097,7 +5113,39 @@ int RGWDeleteObj::verify_permission(optional_yield y)
   }
 
   if (s->handoff_authz->enabled()) {
-    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3DeleteObject, y);
+    std::vector<uint64_t> ops;
+
+    auto i_bypass = ops.size(); // The next append index.
+    bool bypass_gov = s->bucket->get_info().obj_lock_enabled() && bypass_governance_mode;
+    if (bypass_gov) {
+      ops.push_back(rgw::IAM::s3BypassGovernanceRetention);
+    }
+    auto i_delete = ops.size(); // The next append index.
+    if (s->object->get_instance().empty()) {
+      ops.push_back(rgw::IAM::s3DeleteObject);
+    } else {
+      ops.push_back(rgw::IAM::s3DeleteObjectVersion);
+    }
+
+    auto h_ret = s->handoff_helper->verify_permissions(this, s, ops, y);
+    ceph_assert(h_ret.size() == ops.size());
+
+    // Check the s3BypassGovernanceRetention permission first, if it applies.
+    if (bypass_gov) {
+      auto bypass_ret = h_ret[i_bypass];
+      if (bypass_ret == -EACCES) {
+        bypass_perm = false; // Checked by verify_object_lock().
+      } else if (bypass_ret < 0) {
+        // An error other than EACCES.
+        return bypass_ret;
+      }
+    }
+    // Check the actual delete permission.
+    if (h_ret[i_delete] < 0) {
+      return h_ret[i_delete];
+    }
+
+    return 0;
   }
 
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
