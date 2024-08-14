@@ -1112,16 +1112,25 @@ std::vector<int> HandoffHelperImpl::verify_permissions(const RGWOp* op, req_stat
     ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Authorize result: "), __func__) << result << dendl;
 
     ExtraDataSpecification spec;
+    bool seen = false;
 
     // result.response() has a value if the result is extra data required.
     for (const auto& answer : result.response().answers()) {
       if (answer.has_extra_data_required()) {
         spec.set_object_key_tags(answer.extra_data_required().object_key_tags());
+        seen = true;
       }
     }
     ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: Extra data required: {}"),
         __func__, proto_to_JSON(spec))
                        << dendl;
+
+    // Don't allow all-empty ExtraDataSpecification fields, this indicates a
+    // problem.
+    if (!seen) {
+      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("{}: ERROR: Extra data required but no extra data fields specified"), __func__) << dendl;
+      return std::vector(op_count, -ERR_INTERNAL_ERROR);
+    }
 
     // Update s->handoff_authz with the extra data required. The metadata in
     // handoff_authz are used to populate the new AuthorizeV2 request.
@@ -1175,7 +1184,7 @@ std::vector<int> HandoffHelperImpl::verify_permissions(const RGWOp* op, req_stat
         << fmt::format(FMT_STRING("{}: ERROR: Failed to authorize request: code {}: message '{}'"),
                __func__, status.error_code(), status.error_message())
         << dendl;
-    return std::vector<int>(op_count, -ERR_INTERNAL_ERROR);
+    return std::vector<int>(op_count, -EACCES);
   }
 
   // If the RPC succeeded but we got an error message, hard fail so the user
