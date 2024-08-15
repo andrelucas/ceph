@@ -3074,7 +3074,8 @@ int RGWListBucket::verify_permission(optional_yield y)
   s->env.emplace("s3:max-keys", std::to_string(max));
 
   if (s->handoff_authz->enabled()) {
-    return s->handoff_helper->verify_permission(this, this->s, rgw::IAM::s3ListBucket, y);
+    auto operation = list_versions ? rgw::IAM::s3ListBucketVersions : rgw::IAM::s3ListBucket;
+    return s->handoff_helper->verify_permission(this, this->s, operation, y);
 
   } else {
     auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
