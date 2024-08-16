@@ -2541,24 +2541,23 @@ int RGWListBuckets::verify_permission(optional_yield y)
   // HANDOFF: Visited.
   if (s->handoff_authz->enabled()) {
     return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3ListAllMyBuckets, y);
-
-  } else {
-    rgw::Partition partition = rgw::Partition::aws;
-    rgw::Service service = rgw::Service::s3;
-
-    string tenant;
-    if (s->auth.identity->get_identity_type() == TYPE_ROLE) {
-      tenant = s->auth.identity->get_role_tenant();
-    } else {
-      tenant = s->user->get_tenant();
-    }
-
-    if (!verify_user_permission(this, s, ARN(partition, service, "", tenant, "*"), rgw::IAM::s3ListAllMyBuckets, false)) {
-      return -EACCES;
-    }
-
-    return 0;
   }
+
+  rgw::Partition partition = rgw::Partition::aws;
+  rgw::Service service = rgw::Service::s3;
+
+  string tenant;
+  if (s->auth.identity->get_identity_type() == TYPE_ROLE) {
+    tenant = s->auth.identity->get_role_tenant();
+  } else {
+    tenant = s->user->get_tenant();
+  }
+
+  if (!verify_user_permission(this, s, ARN(partition, service, "", tenant, "*"), rgw::IAM::s3ListAllMyBuckets, false)) {
+    return -EACCES;
+  }
+
+  return 0;
 }
 
 int RGWGetUsage::verify_permission(optional_yield y)
