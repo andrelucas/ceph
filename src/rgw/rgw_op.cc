@@ -7052,6 +7052,21 @@ int RGWDeleteMultiObj::verify_permission(optional_yield y)
       ops.push_back(rgw::IAM::s3DeleteObjectVersion);
     }
 
+    /*
+     * This first call to verify_permissions() will, if necessary, update
+     * s->handoff_authz's state variables to indicate whether or not we need
+     * object tags (or other extra data should they become a thing) to make
+     * decisions. We will allow this state to persist for the duration of the
+     * RGWDeleteMultiObj run, knowing that verify_permission() (singular) will
+     * be called once for every object in the request body XML. Likewise, we
+     * won't reset the state for every call.
+     *
+     * This makes the assumption that, for related objects anyway, the need
+     * for object tags will be the same for many objects in a single request.
+     * If that's true, we've saved a round-trip to the Authorizer. If it's
+     * false, we've loaded tags when we didn't need to. We need to test.
+     */
+
     auto h_ret = s->handoff_helper->verify_permissions(this, s, ops, y);
     ceph_assert(h_ret.size() == ops.size());
 
@@ -7219,8 +7234,19 @@ void RGWDeleteMultiObj::handle_individual_object(const rgw_obj_key& o, optional_
    * fail. So in fine BSD kernel style I'm going to use a goto to achieve the
    * result I want. Sue me.
    *
-   * XXX these are called in individual yield contexts. We *MUST* test this in
-   * rgw_beast_enable_async = true mode.
+   * As noted in RGWDeleteMultiObj::verify_permissions(), we're allowing
+   * s->handoff_authz's state variables to persist between calls to the
+   * Authorizer, on the assumption that the policy's requirement for extra
+   * data will be the same for many objects in a single request. If that's not
+   * true, we can use the stack (s->handoff_authz->push_requirements(),
+   * ->pop_requirements()) to save and restore the state per-request.
+   *
+   * XXX each instance of this method is called in an individual yield
+   * context. We *MUST* test this in rgw_beast_enable_async = true mode, to
+   * make sure the boost async stuff works well with gRPC. Small-scale testing
+   * seems to indicate that it does work, but I'd be happier with larger
+   * tests. This is a detail note; any test at scale would almost certainly be
+   * in async=true mode, it's just a developer trick to turn it off.
    */
 
   if (s->handoff_authz->enabled()) {
