@@ -1234,11 +1234,15 @@ int RGWDeleteObjTags::verify_permission(optional_yield y)
       rgw::IAM::s3DeleteObjectTagging:
       rgw::IAM::s3DeleteObjectVersionTagging;
 
-  auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
-  if (has_s3_existing_tag || has_s3_resource_tag)
-    rgw_iam_add_objtags(this, s, has_s3_existing_tag, has_s3_resource_tag);
-  if (!verify_object_permission(this, s, iam_action))
-    return -EACCES;
+    if (s->handoff_authz->enabled()) {
+      return s->handoff_helper->verify_permission(this, s, iam_action, y);
+    }
+
+    auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
+    if (has_s3_existing_tag || has_s3_resource_tag)
+      rgw_iam_add_objtags(this, s, has_s3_existing_tag, has_s3_resource_tag);
+    if (!verify_object_permission(this, s, iam_action))
+      return -EACCES;
   }
   return 0;
 }
