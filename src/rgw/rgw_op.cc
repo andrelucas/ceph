@@ -2801,6 +2801,11 @@ void RGWStatAccount::execute(optional_yield y)
 
 int RGWGetBucketVersioning::verify_permission(optional_yield y)
 {
+  // Handoff: Visited.
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetBucketVersioning, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
