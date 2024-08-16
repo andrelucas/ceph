@@ -7024,9 +7024,53 @@ void RGWGetHealthCheck::execute(optional_yield y)
 
 int RGWDeleteMultiObj::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
   int op_ret = get_params(y);
   if (op_ret) {
     return op_ret;
+  }
+
+  if (s->handoff_authz->enabled()) {
+
+    /* Handoff: Be aware that every object to be deleted will be checked later
+     * in the request processing, in
+     * RGWDeleteMultiObj::handle_individual_object(). This appears (in the
+     * original code) to just check delete permission on the bucket.
+     */
+    std::vector<uint64_t> ops;
+
+    auto i_bypass = ops.size();
+    bool bypass_gov = s->bucket->get_info().obj_lock_enabled() && bypass_governance_mode;
+    if (bypass_gov) {
+      ops.push_back(rgw::IAM::s3BypassGovernanceRetention);
+    }
+    auto i_delete = ops.size(); // The next append index.
+    bool not_versioned = rgw::sal::Object::empty(s->object.get()) || s->object->get_instance().empty();
+    if (not_versioned) {
+      ops.push_back(rgw::IAM::s3DeleteObject);
+    } else {
+      ops.push_back(rgw::IAM::s3DeleteObjectVersion);
+    }
+
+    auto h_ret = s->handoff_helper->verify_permissions(this, s, ops, y);
+    ceph_assert(h_ret.size() == ops.size());
+
+    // Check the s3BypassGovernanceRetention permission first, if it applies.
+    if (bypass_gov) {
+      auto bypass_ret = h_ret[i_bypass];
+      if (bypass_ret == -EACCES) {
+        bypass_perm = false; // Checked by verify_object_lock().
+      } else if (bypass_ret < 0) {
+        // An error other than EACCES.
+        return bypass_ret;
+      }
+    }
+    // Check the actual delete permission.
+    if (h_ret[i_delete] < 0) {
+      return h_ret[i_delete];
+    }
+
+    return 0;
   }
 
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
@@ -7157,8 +7201,37 @@ void RGWDeleteMultiObj::wait_flush(optional_yield y,
 void RGWDeleteMultiObj::handle_individual_object(const rgw_obj_key& o, optional_yield y,
                                                  boost::asio::deadline_timer *formatter_flush_cond)
 {
+  // HANDOFF: Visited.
   std::string version_id;
   std::unique_ptr<rgw::sal::Object> obj = bucket->get_object(o);
+
+  /* Handoff: The first part of this function does a lot of permissions checks
+   * for this object key, and if the permissions checks fail it sends a
+   * partial response and returns. This means we can have a handoff-specific
+   * section first, then allow the internal permissions checks to run because
+   * in handoff mode we've made all their preconditions fail! Their policies
+   * will be empty (we didn't load them).
+   *
+   * This matters because we want to minimise the diff.
+   *
+   * HOWEVER... I'm not really happy leaving this to chance, because a version
+   * upgrade might break the assumption that all the old-code checks will
+   * fail. So in fine BSD kernel style I'm going to use a goto to achieve the
+   * result I want. Sue me.
+   *
+   * XXX these are called in individual yield contexts. We *MUST* test this in
+   * rgw_beast_enable_async = true mode.
+   */
+
+  if (s->handoff_authz->enabled()) {
+    auto ret = s->handoff_helper->verify_permission(this, s, rgw::IAM::s3DeleteObject, y);
+    if (ret < 0) {
+      send_partial_response(o, false, "", -EACCES, formatter_flush_cond);
+      return;
+    }
+    goto authz_done; // Sue me.
+  }
+
   if (s->iam_policy || ! s->iam_user_policies.empty() || !s->session_policies.empty()) {
     auto identity_policy_res = eval_identity_or_session_policies(this, s->iam_user_policies, s->env,
                                                                  o.instance.empty() ?
@@ -7226,6 +7299,7 @@ void RGWDeleteMultiObj::handle_individual_object(const rgw_obj_key& o, optional_
     }
   }
 
+authz_done:
   uint64_t obj_size = 0;
   std::string etag;
 
