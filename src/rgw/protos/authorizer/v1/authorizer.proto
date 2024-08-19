@@ -272,6 +272,11 @@ message AuthorizeV2Question
   string bucket_name = 6;
   // The S3 object key name. May be empty.
   string object_key_name = 7;
+  
+  // All the parameters from the S3 request.
+  map<string, string> query_parameters = 12;
+  // All the x-amz-* headers from the S3 request.
+  map<string, string> x_amz_headers = 13;
 
   message IAMMapEntry { repeated string key = 1; }
   // The authorization 'environment', a multimap of key-value pairs with
