@@ -1257,6 +1257,11 @@ void RGWDeleteObjTags::execute(optional_yield y)
 
 int RGWGetBucketTags::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetBucketTagging, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
@@ -1286,6 +1291,11 @@ void RGWGetBucketTags::execute(optional_yield y)
 }
 
 int RGWPutBucketTags::verify_permission(optional_yield y) {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3PutBucketTagging, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
@@ -1320,6 +1330,11 @@ void RGWDeleteBucketTags::pre_exec()
 
 int RGWDeleteBucketTags::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3PutBucketTagging, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
