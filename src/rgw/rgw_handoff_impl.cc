@@ -1470,6 +1470,26 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
     question->set_bucket_name(state->bucket_name());
     question->set_object_key_name(state->object_key_name());
 
+    // Include query parameters.
+    auto qparam = question->mutable_query_parameters();
+    for (const auto& kv : s->info.args.get_params()) {
+      qparam->emplace(kv.first, kv.second);
+    }
+
+    // Save all the HTTP headers starting with 'x_amz_'.
+    auto awz_headers = question->mutable_x_amz_headers();
+    ceph_assert(s->cio != nullptr); // Give a helpful error to unit tests.
+    for (const auto& kv : s->cio->get_env().get_map()) {
+      std::string key = kv.first;
+      // HTTP headers are uppercased and have hyphens replaced with underscores.
+      if (ba::starts_with(key, "HTTP_X_AMZ_")) {
+        key = key.substr(5);
+        ba::replace_all(key, "_", "-");
+        ba::to_lower(key);
+        awz_headers->emplace(key, kv.second);
+      }
+    }
+
     // Load the IAM environment into the request.
     PopulateAuthorizeRequestIAMEnvironment(dpp, s, question);
 

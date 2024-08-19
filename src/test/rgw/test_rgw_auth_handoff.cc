@@ -1638,6 +1638,9 @@ TEST_F(AuthzGRPCTest, AuthorizeBasicSingleQuestion)
   auto client = AuthorizerClient(hh_.get_authz_channel().get_channel());
 
   DEFINE_REQ_STATE;
+  TestClient cio;
+  s.cio = &cio;
+
   s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
   s.trans_id = "deadbeef";
   s.handoff_authz->set_bucket_name("bucket");
@@ -1670,6 +1673,9 @@ TEST_F(AuthzGRPCTest, AuthorizeBasicMultipleQuestion)
   auto client = AuthorizerClient(hh_.get_authz_channel().get_channel());
 
   DEFINE_REQ_STATE;
+  TestClient cio;
+  s.cio = &cio;
+
   s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
   s.trans_id = "deadbeef";
   s.handoff_authz->set_bucket_name("bucket");
@@ -1704,6 +1710,9 @@ TEST_F(AuthzGRPCTest, AuthorizeBasicSingleQuestionExpectedFail)
   auto client = AuthorizerClient(hh_.get_authz_channel().get_channel());
 
   DEFINE_REQ_STATE;
+  TestClient cio;
+  s.cio = &cio;
+
   s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
   s.trans_id = "deadbeef";
   s.handoff_authz->set_bucket_name("bucket");
@@ -1738,6 +1747,9 @@ TEST_F(AuthzGRPCTest, AuthorizeBasicMultipleQuestionExpectedFail)
   auto client = AuthorizerClient(hh_.get_authz_channel().get_channel());
 
   DEFINE_REQ_STATE;
+  TestClient cio;
+  s.cio = &cio;
+
   s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
   s.trans_id = "deadbeef";
   s.handoff_authz->set_bucket_name("bucket");
@@ -1785,6 +1797,9 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestFailureCaseBadOp)
 TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestIAMEnvironmentMapping)
 {
   DEFINE_REQ_STATE;
+  TestClient cio;
+  s.cio = &cio;
+
   s.trans_id = "deadbeef";
 
   s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
@@ -1810,6 +1825,49 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestIAMEnvironmentMapping)
   auto ek2_keys = env.at("k2").key();
   ASSERT_EQ(ek2_keys.size(), 1);
   ASSERT_EQ(ek2_keys.at(0), "k2v1");
+}
+
+TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestQueryParameters)
+{
+  DEFINE_REQ_STATE;
+  TestClient cio;
+  s.cio = &cio;
+
+  s.trans_id = "deadbeef";
+
+  s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
+
+  auto& param = s.info.args.get_params();
+  param.emplace("versionId", "foo");
+  ASSERT_EQ(s.info.args.get_params().size(), 1);
+
+  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject, 0, null_yield);
+  ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
+  auto& req = *opt_req;
+
+  ASSERT_EQ(req.questions(0).query_parameters_size(), 1);
+  auto& qp = req.questions(0).query_parameters();
+  ASSERT_EQ(qp.at("versionId"), "foo");
+}
+
+TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestXAmzHeaders)
+{
+  DEFINE_REQ_STATE;
+  TestClient cio;
+  cio.get_env().set("HTTP_X_AMZ_FOO", "bar");
+  s.cio = &cio;
+
+  s.trans_id = "deadbeef";
+
+  s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
+
+  auto opt_req = PopulateAuthorizeRequest(&dpp_, &s, rgw::IAM::s3GetObject, 0, null_yield);
+  ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
+  auto& req = *opt_req;
+
+  ASSERT_EQ(req.questions(0).x_amz_headers_size(), 1);
+  auto& xah = req.questions(0).x_amz_headers();
+  ASSERT_EQ(xah.at("x-amz-foo"), "bar");
 }
 
 // Check we're setting extra data when we should.
@@ -1862,6 +1920,9 @@ public:
 TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataNone)
 {
   DEFINE_REQ_STATE;
+  TestClient cio;
+  s.cio = &cio;
+
   // Set up a request with no extra data.
   s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
   s.trans_id = "deadbeef";
@@ -1878,6 +1939,9 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataObjectTags)
 {
   // Now set object tags in the extra data.
   DEFINE_REQ_STATE;
+  TestClient cio;
+  s.cio = &cio;
+
   // New request.
   s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
   s.trans_id = "deadbeef";
@@ -1900,6 +1964,9 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataObjectTagsButNoFlag)
 {
   // Now set object tags in the extra data.
   DEFINE_REQ_STATE;
+  TestClient cio;
+  s.cio = &cio;
+
   // New request.
   s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
   s.trans_id = "deadbeef";
@@ -1918,6 +1985,9 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataObjectTagsFlagButNoData)
 {
   // Now set object tags in the extra data.
   DEFINE_REQ_STATE;
+  TestClient cio;
+  s.cio = &cio;
+
   // New request.
   s.handoff_authz = std::make_unique<HandoffAuthzState>(true);
   s.trans_id = "deadbeef";
