@@ -5866,6 +5866,19 @@ void RGWCopyObj::execute(optional_yield y)
 
 int RGWGetACLs::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    if (!rgw::sal::Object::empty(s->object.get())) {
+      // Object ACLs.
+      auto action = s->object->get_instance().empty() ? rgw::IAM::s3GetObjectAcl : rgw::IAM::s3GetObjectVersionAcl;
+      return s->handoff_helper->verify_permission(this, s, action, y);
+
+    } else {
+      // Bucket ACLs.
+      return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetBucketAcl, y);
+    }
+  }
+
   bool perm;
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
   if (!rgw::sal::Object::empty(s->object.get())) {
@@ -5909,6 +5922,19 @@ void RGWGetACLs::execute(optional_yield y)
 
 int RGWPutACLs::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    if (!rgw::sal::Object::empty(s->object.get())) {
+      // Object ACLs.
+      auto action = s->object->get_instance().empty() ? rgw::IAM::s3PutObjectAcl : rgw::IAM::s3PutObjectVersionAcl;
+      return s->handoff_helper->verify_permission(this, s, action, y);
+
+    } else {
+      // Bucket ACLs.
+      return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3PutBucketAcl, y);
+    }
+  }
+
   bool perm;
 
   rgw_add_to_iam_environment(s->env, "s3:x-amz-acl", s->canned_acl);
