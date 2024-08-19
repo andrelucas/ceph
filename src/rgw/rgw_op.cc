@@ -4430,7 +4430,7 @@ void RGWPutObj::execute(optional_yield y)
     cs_info.compression_type = plugin->get_type_name();
     cs_info.orig_size = s->obj_size;
     cs_info.compressor_message = compressor->get_compressor_message();
-    cs_info.blocks = std::move(compressor->get_compression_blocks());
+    cs_info.blocks = move(compressor->get_compression_blocks());
     encode(cs_info, tmp);
     attrs[RGW_ATTR_COMPRESSION] = tmp;
     ldpp_dout(this, 20) << "storing " << RGW_ATTR_COMPRESSION
@@ -4774,7 +4774,7 @@ void RGWPostObj::execute(optional_yield y)
       cs_info.compression_type = plugin->get_type_name();
       cs_info.orig_size = s->obj_size;
       cs_info.compressor_message = compressor->get_compressor_message();
-      cs_info.blocks = std::move(compressor->get_compression_blocks());
+      cs_info.blocks = move(compressor->get_compression_blocks());
       encode(cs_info, tmp);
       emplace_attr(RGW_ATTR_COMPRESSION, std::move(tmp));
     }
@@ -5866,19 +5866,6 @@ void RGWCopyObj::execute(optional_yield y)
 
 int RGWGetACLs::verify_permission(optional_yield y)
 {
-  // HANDOFF: Visited.
-  if (s->handoff_authz->enabled()) {
-    if (!rgw::sal::Object::empty(s->object.get())) {
-      // Object ACLs.
-      auto action = s->object->get_instance().empty() ? rgw::IAM::s3GetObjectAcl : rgw::IAM::s3GetObjectVersionAcl;
-      return s->handoff_helper->verify_permission(this, s, action, y);
-
-    } else {
-      // Bucket ACLs.
-      return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetBucketAcl, y);
-    }
-  }
-
   bool perm;
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
   if (!rgw::sal::Object::empty(s->object.get())) {
