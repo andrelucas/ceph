@@ -5492,6 +5492,16 @@ int RGWCopyObj::init_processing(optional_yield y)
 
 int RGWCopyObj::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  // XXX is this correct?
+  if (s->handoff_authz->enabled()) {
+    // We shouldn't get here! The microservice platform should not have
+    // allowed a copy through to RGW, it should have decomposed it to a
+    // separate put and get.
+    ldpp_dout(this, 0) << "ERROR: In gen2 we should not see a copy-object request" << dendl;
+    return -ERR_INVALID_REQUEST;
+  }
+
   RGWAccessControlPolicy src_acl(s->cct);
   boost::optional<Policy> src_policy;
 
