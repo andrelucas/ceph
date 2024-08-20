@@ -353,6 +353,13 @@ public:
  * for authorization of multiple operations in a single RPC), and where not
  * all of those authorizations involve the same target and/or extra data
  * requirements settings.
+ *
+ * When issuing multiple calls to verify_permission()/verify_permissions() per
+ * S3 request, you MUST call set_trans_id_suffix() and set a different value
+ * each time. It may help the SREs to set the suffix to something helpful,
+ * e.g. 'source' for the copy source. This will, as the name suggests, be
+ * appended to the RGW transaction ID when constructing the authorization ID
+ * field that goes into each RPC question.
  */
 class HandoffAuthzState {
 
@@ -392,6 +399,7 @@ public:
 
 private:
   bool enabled_ = false;
+  std::optional<std::string> trans_id_suffix_;
 
   Target target_;
   std::stack<Target> saved_targets_;
@@ -450,6 +458,24 @@ public:
    * @return false Handoff Authorization is enabled.
    */
   bool disabled() const noexcept { return !enabled_; }
+
+  /**
+   * @brief Return the transaction ID suffix, which may be nullopt.
+   *
+   * @return std::optional<std::string> The transaction ID suffix, or
+   * std::nullopt.
+   */
+  const std::optional<std::string>& trans_id_suffix() const { return trans_id_suffix_; }
+
+  void set_trans_id_suffix(const std::string& suffix)
+  {
+    trans_id_suffix_ = suffix;
+  }
+
+  void clear_trans_id_suffix()
+  {
+    trans_id_suffix_ = std::nullopt;
+  }
 
   /**
    * @brief Return the bucket name.

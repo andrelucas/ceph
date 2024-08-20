@@ -1419,6 +1419,12 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
     ldpp_dout(dpp, 0) << "{}: ERROR: req_state->trans_id cannot be empty" << dendl;
     return std::nullopt;
   }
+  std::string trans_id = s->trans_id;
+  auto& suffix = s->handoff_authz->trans_id_suffix();
+  if (suffix) {
+    trans_id += "-" + *suffix;
+  }
+  ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("{}: trans_id={}"), __func__, trans_id) << dendl;
 
   // If extra data are required, load them first. We can't mutate the
   // questions loaded into the request later.
@@ -1452,7 +1458,7 @@ std::optional<::authorizer::v1::AuthorizeV2Request> PopulateAuthorizeRequest(con
 
     // Different trans ID for each question.
     // XXX this needs be modifyable for e-d requests.
-    common->set_authorization_id(fmt::format(FMT_STRING("{}-{}-{}"), s->trans_id, n, subrequest_index));
+    common->set_authorization_id(fmt::format(FMT_STRING("{}-{}-{}"), trans_id, n, subrequest_index));
     SetAuthorizationCommonTimestamp(common);
     question->set_opcode(*opcode);
 
