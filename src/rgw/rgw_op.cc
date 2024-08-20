@@ -7301,6 +7301,9 @@ void RGWDeleteMultiObj::handle_individual_object(const rgw_obj_key& o, optional_
    */
 
   if (s->handoff_authz->enabled()) {
+    // This relies on the caller updating handoff_item_count...
+    s->handoff_authz->set_trans_id_suffix(fmt::format(FMT_STRING("item{}"), handoff_item_count));
+
     auto ret = s->handoff_helper->verify_permission(this, s, rgw::IAM::s3DeleteObject, y);
     if (ret < 0) {
       send_partial_response(o, false, "", -EACCES, formatter_flush_cond);
@@ -7517,6 +7520,9 @@ void RGWDeleteMultiObj::execute(optional_yield y)
   for (iter = multi_delete->objects.begin();
         iter != multi_delete->objects.end();
         ++iter) {
+    // This means the item count will be 1-based, not 0-based. That's ok.
+    // Easier to just increment it than to check the optional first.
+    handoff_item_count++;
     rgw_obj_key obj_key = *iter;
     if (y) {
       wait_flush(y, &*formatter_flush_cond, [&aio_count, max_aio] {
