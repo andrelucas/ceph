@@ -104,6 +104,11 @@ bool HandoffHelper::disable_local_authorization() const
   return impl_->disable_local_authorization();
 }
 
+bool HandoffHelper::reject_filtered_commands() const
+{
+  return impl_->reject_filtered_commands();
+}
+
 HandoffAuthzState::HandoffAuthzState(std::shared_ptr<HandoffHelper> helper)
 {
   // helper may be nullptr, you MUST check before dereferencing!

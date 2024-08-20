@@ -310,6 +310,16 @@ public:
    * @return false Local authorization is enabled and should not be bypassed.
    */
   bool disable_local_authorization() const;
+
+  /**
+   * @brief Return true if Handoff Authz is configured to reject commands that
+   * should be filtered out by the microservices platform.
+   *
+   * @return true S3 commands that should be filtered out should be rejected
+   * and an error logged.
+   * @return false RGW should attempt to authorize all commands.
+   */
+  bool reject_filtered_commands() const;
 };
 
 /**
