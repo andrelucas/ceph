@@ -471,10 +471,13 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Driver* store, con
   grpc_mode_ = true;
   disable_local_authorization_ = cct->_conf->rgw_handoff_authz_disable_local;
   ldout(cct, 1)
-      << fmt::format(
-             FMT_STRING(
-                 "HandoffHelperImpl::init(): NOTE: local authorization {}"),
+      << fmt::format(FMT_STRING("HandoffHelperImpl::init(): NOTE: local authorization {}"),
              (disable_local_authorization_ ? "DISABLED" : "ENABLED"))
+      << dendl;
+  reject_filtered_commands_ = cct->_conf->rgw_handoff_authz_reject_filtered_commands;
+  ldout(cct, 1)
+      << fmt::format(FMT_STRING("HandoffHelperImpl::init(): reject filtered commands {}"),
+             (reject_filtered_commands_ ? "ENABLED" : "DISABLED"))
       << dendl;
 
   // Production calls to this function will have grpc_uri empty, so we'll
@@ -551,12 +554,6 @@ bool HandoffHelperImpl::anonymous_authorization_enabled() const
 {
   std::shared_lock<std::shared_mutex> g(m_config_);
   return enable_anonymous_authorization_;
-}
-
-bool HandoffHelperImpl::disable_local_authorization() const
-{
-  // This is a simple bool set at init() time, there's no need for locking etc.
-  return disable_local_authorization_;
 }
 
 std::optional<std::string> HandoffHelperImpl::synthesize_auth_header(

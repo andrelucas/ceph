@@ -1004,6 +1004,18 @@ options:
   services:
   - rgw
   with_legacy: true
+- name: rgw_handoff_authz_reject_filtered_commands
+  type: bool
+  level: advanced
+  desc: Refuse S3 commands that we expect to have been filtered by the
+    microservice environment.
+  long_desc: If enabled, RGW will explicitly reject commands we do not expect
+    to see in a gen2 cluster, because the microservices environment is
+    expected to have handled them by other means.
+  default: true
+  services:
+  - rgw
+  with_legacy: true
 - name: rgw_handoff_enable_anonymous_authorization
   type: bool
   level: advanced

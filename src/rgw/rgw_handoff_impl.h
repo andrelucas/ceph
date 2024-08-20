@@ -877,6 +877,7 @@ private:
   bool grpc_mode_ = true; // Not runtime-alterable.
   bool presigned_expiry_check_ = false; // Not runtime-alterable.
   bool disable_local_authorization_ = false; // Not runtime-alterable.
+  bool reject_filtered_commands_ = true; // Not runtime-alterable.
 
   bool enable_anonymous_authorization_ = true; // Runtime-alterable.
   bool enable_signature_v2_ = true; // Runtime-alterable.
@@ -1012,7 +1013,35 @@ public:
    * @return true Local authorization is disabled.
    * @return false Local authorization is enabled and should not be bypassed.
    */
-  bool disable_local_authorization() const;
+  bool disable_local_authorization() const
+  {
+    // This is a simple bool set at init() time, there's no need for locking
+    // etc.
+    return disable_local_authorization_;
+  }
+
+  /**
+   * @brief Return true if Handoff Authz is configured to reject filtered
+   * commands.
+   *
+   * This is intended for use in operation verify_permission() overrides,
+   * where we can decide whether or not a command that we don't expect to see
+   * in the presence of the microservices environment should be rejected with
+   * a failure code, rather than attempting to authorize it.
+   *
+   * The aim here is to assist testing, by allowing tests to operate in the
+   * absence of the microservices environment.
+   *
+   * @return true Handoff Authz is configured to reject filtered commands.
+   * @return false Handoff Authz should attempt to authorize commands that
+   * would normally be filtered.
+   */
+  bool reject_filtered_commands() const
+  {
+    // This is a simple bool set at init() time, there's no need for locking
+    // etc.
+    return reject_filtered_commands_;
+  }
 
   /**
    * @brief Authenticate the transaction using the Handoff engine.

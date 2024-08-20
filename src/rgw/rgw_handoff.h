@@ -312,10 +312,6 @@ public:
   bool disable_local_authorization() const;
 };
 
-struct HandoffAuthzStateRequirementsBundle {
-  bool object_tags_required = false;
-}; // struct HandoffAuthzStateRequirementsBundle
-
 /**
  * @brief Per-request state information for the Handoff authorization client.
  *
@@ -335,14 +331,60 @@ struct HandoffAuthzStateRequirementsBundle {
  *   }
  * ```
  *
- * It has a constructior with a HandoffHelper pointer simply so it can call
+ * It has a constructor with a HandoffHelper pointer simply so it can call
  * methods on the helper to initialise itself. Other constructors will server
  * for unit tests.
+ *
+ * It also has a pair of stacks, one for the 'target' of the request (bucket
+ * and object key names), and one for the extra data requirements of the
+ * request. These are unlikely to be used for all but the most complex of
+ * requests. They're intended to be used in the rare cases where a request has
+ * to perform multiple authorizations (more sophisticated than simply asking
+ * for authorization of multiple operations in a single RPC), and where not
+ * all of those authorizations involve the same target and/or extra data
+ * requirements settings.
  */
 class HandoffAuthzState {
+
+public:
+  /**
+   * @brief Container for the 'target' of a request, i.e. the bucket and
+   * object key name.
+   *
+   * Bundling the target this way makes it easy to have a stack of targets,
+   * for operations (e.g. copy-object) that have to send multiple
+   * AuthorizeV2() requests involving differing buckets and/or object keys.
+   */
+  struct Target {
+    std::string bucket_name;
+    std::string object_key_name;
+
+    Target() = default;
+    Target(const std::string& bucket_name, const std::string& object_key_name)
+        : bucket_name(bucket_name)
+        , object_key_name(object_key_name)
+    {
+    }
+  }; // struct HandoffAuthzState::Target
+
+  /**
+   * @brief Container for the extra data requirements of a request.
+   *
+   * For a single extra data requirement this seems like overkill, but let's
+   * not assume this is the only one we'll ever have.
+   *
+   * Bundling the requirements this way makes it easy to have a stack of
+   * requirements.
+   */
+  struct Requirements {
+    bool object_tags_required = false;
+  }; // struct HandoffAuthzState::Requirements
+
+private:
   bool enabled_ = false;
-  std::string bucket_name_;
-  std::string object_key_name_;
+
+  Target target_;
+  std::stack<Target> saved_targets_;
 
   struct AuthenticatorParameters {
     std::string canonical_user_id_;
@@ -353,8 +395,8 @@ class HandoffAuthzState {
 
   mutable AuthenticatorParameters authenticator_params_;
 
-  HandoffAuthzStateRequirementsBundle requirements_;
-  std::stack<HandoffAuthzStateRequirementsBundle> saved_requirements_;
+  Requirements requirements_;
+  std::stack<Requirements> saved_requirements_;
 
 public:
   HandoffAuthzState() = delete;
@@ -404,7 +446,7 @@ public:
    *
    * @return std::string The bucket name.
    */
-  std::string bucket_name() const noexcept { return bucket_name_; }
+  std::string bucket_name() const noexcept { return target_.bucket_name; }
 
   /**
    * @brief Set the bucket name.
@@ -422,7 +464,7 @@ public:
    *
    * @param name The bucket name.
    */
-  void set_bucket_name(const std::string& name) noexcept { bucket_name_ = name; }
+  void set_bucket_name(const std::string& name) noexcept { target_.bucket_name = name; }
 
   /**
    * @brief Return the object key name.
@@ -440,14 +482,56 @@ public:
    *
    * @return std::string The object key name.
    */
-  std::string object_key_name() const noexcept { return object_key_name_; }
+  std::string object_key_name() const noexcept { return target_.object_key_name; }
 
   /**
    * @brief Set the object key name.
    *
    * @param name The object key name.
    */
-  void set_object_key_name(const std::string& name) noexcept { object_key_name_ = name; }
+  void set_object_key_name(const std::string& name) noexcept { target_.object_key_name = name; }
+
+  /**
+   * @brief Push the current Target onto the stack, setting the current Target
+   * to empty.
+   */
+  void push_target()
+  {
+    saved_targets_.push(target_);
+    target_ = Target(); // Clean (all-false) requirements.
+  }
+
+  /**
+   * @brief Push a new Target onto the stack, setting the current Target to
+   * the given values.
+   *
+   * @param bucket_name The new target bucket name.
+   * @param object_key_name The new target object key name.
+   */
+  void push_target(const std::string& bucket_name, const std::string& object_key_name)
+  {
+    saved_targets_.push(target_);
+    target_ = Target(bucket_name, object_key_name);
+  }
+
+  /**
+   * @brief Pop the top Target off the stack, setting the current Target to
+   * the popped value.
+   *
+   * Will assert if the stack is empty!
+   */
+  void pop_target()
+  {
+    ceph_assertf(!saved_targets_.empty(), "Attempt to pop empty Authz state target stack");
+    target_ = saved_targets_.top();
+    saved_targets_.pop();
+  }
+
+  /// @brief Return true if the target stack is empty.
+  bool target_stack_empty()
+  {
+    return saved_targets_.empty();
+  }
 
   /**
    * @brief Preserve ID-related fields returned by the Authenticator.
@@ -547,17 +631,55 @@ public:
    */
   void set_object_tags_required(bool required) noexcept { requirements_.object_tags_required = required; }
 
+  /**
+   * @brief Push the current Requirements onto the stack, setting the
+   * new Requirements to empty.
+   */
   void push_requirements()
   {
     saved_requirements_.push(requirements_);
-    requirements_ = HandoffAuthzStateRequirementsBundle(); // Clean (all-false) requirements.
+    requirements_ = Requirements(); // Clean (all-false) requirements.
   }
 
+  /**
+   * @brief Pop the top Requirements off the stack, setting the current
+   * Requirements to the popped value.
+   *
+   * Will assert if the stack is empty!
+   */
   void pop_requirements()
   {
     ceph_assertf(!saved_requirements_.empty(), "Attempt to pop empty Authz state requirements stack");
     requirements_ = saved_requirements_.top();
     saved_requirements_.pop();
+  }
+
+  /// @brief Return true if the requirements stack is empty.
+  bool requirements_stack_empty()
+  {
+    return saved_requirements_.empty();
+  }
+
+  /**
+   * @brief Push target and requirements state onto their stacks, setting the
+   * current states to empty values.
+   */
+  void push()
+  {
+    push_target();
+    push_requirements();
+  }
+
+  /**
+   * @brief Pop target and requirements state off their stacks, setting the
+   * current states to the popped values.
+   *
+   * Will assert if either stack is empty!
+   */
+  void pop()
+  {
+    pop_target();
+    pop_requirements();
   }
 
 }; // class HandoffAuthzState

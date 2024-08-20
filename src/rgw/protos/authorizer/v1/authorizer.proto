@@ -273,7 +273,7 @@ message AuthorizeV2Question
   // The S3 object key name. May be empty.
   string object_key_name = 7;
   
-  // All the parameters from the S3 request.
+  // All the query parameters from the S3 request.
   map<string, string> query_parameters = 12;
   // All the x-amz-* headers from the S3 request.
   map<string, string> x_amz_headers = 13;

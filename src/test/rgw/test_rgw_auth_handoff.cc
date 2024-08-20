@@ -2007,10 +2007,45 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestExtraDataObjectTagsFlagButNoData)
 
 /* #endregion */
 
+TEST(AuthzState, TargetStack)
+{
+  // Test the target stack.
+  HandoffAuthzState state(true);
+  state.set_bucket_name("b1");
+  state.set_object_key_name("o1");
+  ASSERT_EQ(state.bucket_name(), "b1");
+  ASSERT_EQ(state.object_key_name(), "o1");
+
+  state.push_target();
+  ASSERT_EQ(state.bucket_name(), "");
+  ASSERT_EQ(state.object_key_name(), "");
+  state.set_bucket_name("b2");
+  state.set_object_key_name("o2");
+  ASSERT_EQ(state.bucket_name(), "b2");
+  ASSERT_EQ(state.object_key_name(), "o2");
+
+  state.push_target("b3", "o3");
+  ASSERT_EQ(state.bucket_name(), "b3");
+  ASSERT_EQ(state.object_key_name(), "o3");
+
+  state.pop_target();
+  ASSERT_EQ(state.bucket_name(), "b2");
+  ASSERT_EQ(state.object_key_name(), "o2");
+
+  state.pop_target();
+  ASSERT_EQ(state.bucket_name(), "b1");
+  ASSERT_EQ(state.object_key_name(), "o1");
+}
+
+TEST(AuthzDeathTest, TargetStackPopEmpty)
+{
+  HandoffAuthzState state(true);
+  ASSERT_DEATH(state.pop_target(), ".*empty Authz state target stack.*");
+}
+
 TEST(AuthzState, RequirementsStack)
 {
-  // Test the requirements stack. This is a simple class, but it's worth
-  // testing because it's a bit fiddly to get right.
+  // Test the requirements stack.
   HandoffAuthzState state(true);
   ASSERT_FALSE(state.object_tags_required());
   state.set_object_tags_required(true); // current == true, stack = empty
