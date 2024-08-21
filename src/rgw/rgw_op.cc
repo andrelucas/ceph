@@ -5297,6 +5297,12 @@ void RGWDeleteObj::execute(optional_yield y)
     std::string etag;
     {
       RGWObjState* astate = nullptr;
+      //// AKAMAI (André 20240821): I'm convinced this is bugged - if we just do
+      //// a regular delete (e.g. s3cmd rm) on an object, even with a legal hold
+      //// on it, it succeeds. s->object->have_instance() is false in that case.
+      //// I think we should be checking if the bucket is versioned.
+      // Working version: bool check_obj_lock = s->bucket->get_info().obj_lock_enabled();
+
       bool check_obj_lock = s->object->have_instance() && s->bucket->get_info().obj_lock_enabled();
 
       op_ret = s->object->get_obj_state(this, &astate, s->yield, true);
