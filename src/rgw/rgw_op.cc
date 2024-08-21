@@ -8837,6 +8837,38 @@ void RGWGetBucketObjectLock::execute(optional_yield y)
 
 int RGWPutObjRetention::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    // Duplicate the existing verify_permission() logic here to avoid
+    // confusing diff.
+
+    // Have to call get_params() to set bypass_governance_mode.
+    op_ret = get_params(y);
+    if (op_ret) {
+      return op_ret;
+    }
+
+    std::vector<uint64_t> ops;
+    size_t i_retention = ops.size();
+    ops.push_back(rgw::IAM::s3PutObjectRetention);
+    size_t i_bypass = ops.size();
+    if (bypass_governance_mode) {
+      // Only ask two questions if we need to.
+      ops.push_back(rgw::IAM::s3BypassGovernanceRetention);
+    }
+    auto h_ret = s->handoff_helper->verify_permissions(this, s, ops, y);
+    ceph_assert(h_ret.size() == ops.size());
+
+    if (h_ret[i_retention] < 0) {
+      return h_ret[i_retention];
+    }
+    if (bypass_governance_mode && h_ret[i_bypass] == 0) {
+      ldpp_dout(this, 20) << "enable governance bypass mode" << dendl;
+      bypass_perm = true;
+    }
+    return 0;
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
     if (has_s3_existing_tag || has_s3_resource_tag)
       rgw_iam_add_objtags(this, s, has_s3_existing_tag, has_s3_resource_tag);
@@ -8940,6 +8972,11 @@ void RGWPutObjRetention::execute(optional_yield y)
 
 int RGWGetObjRetention::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetObjectRetention, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
     if (has_s3_existing_tag || has_s3_resource_tag)
       rgw_iam_add_objtags(this, s, has_s3_existing_tag, has_s3_resource_tag);
@@ -8989,6 +9026,11 @@ void RGWGetObjRetention::execute(optional_yield y)
 
 int RGWPutObjLegalHold::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3PutObjectLegalHold, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
     if (has_s3_existing_tag || has_s3_resource_tag)
       rgw_iam_add_objtags(this, s, has_s3_existing_tag, has_s3_resource_tag);
@@ -9044,6 +9086,11 @@ void RGWPutObjLegalHold::execute(optional_yield y) {
 
 int RGWGetObjLegalHold::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetObjectLegalHold, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
     if (has_s3_existing_tag || has_s3_resource_tag)
       rgw_iam_add_objtags(this, s, has_s3_existing_tag, has_s3_resource_tag);
