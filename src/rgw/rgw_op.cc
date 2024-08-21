@@ -5908,11 +5908,20 @@ int RGWGetACLs::verify_permission(optional_yield y)
   if (s->handoff_authz->enabled()) {
     if (!rgw::sal::Object::empty(s->object.get())) {
       // Object ACLs.
+      if (s->handoff_helper->reject_filtered_commands()) {
+        ldpp_dout(this, 0) << "ERROR: In gen2 we should not see a get-object-acl request" << dendl;
+        return -ERR_INVALID_REQUEST;
+      }
       auto action = s->object->get_instance().empty() ? rgw::IAM::s3GetObjectAcl : rgw::IAM::s3GetObjectVersionAcl;
       return s->handoff_helper->verify_permission(this, s, action, y);
 
     } else {
-      // Bucket ACLs.
+      // Bucket ACLs. Gen2 does support bucket ACLs, but we shouldn't see this
+      // in the microservices environment.
+      if (s->handoff_helper->reject_filtered_commands()) {
+        ldpp_dout(this, 0) << "ERROR: In gen2 we should not see a get-bucket-acl request" << dendl;
+        return -ERR_INVALID_REQUEST;
+      }
       return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetBucketAcl, y);
     }
   }
@@ -5973,7 +5982,12 @@ int RGWPutACLs::verify_permission(optional_yield y)
       return s->handoff_helper->verify_permission(this, s, action, y);
 
     } else {
-      // Bucket ACLs. Gen2 does support bucket ACLs.
+      // Bucket ACLs. Gen2 does support bucket ACLs, but we shouldn't see this
+      // in the microservices environment.
+      if (s->handoff_helper->reject_filtered_commands()) {
+        ldpp_dout(this, 0) << "ERROR: In gen2 we should not see a put-bucket-acl request" << dendl;
+        return -ERR_INVALID_REQUEST;
+      }
       return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3PutBucketAcl, y);
     }
   }
@@ -6065,7 +6079,14 @@ void RGWPutACLs::execute(optional_yield y)
   if (s->handoff_authz->enabled()) {
     std::string request = rgw::sal::Object::empty(s->object.get()) ? "put-bucket-acl" : "put-object-acl";
     ldpp_dout(this, 0) << fmt::format(FMT_STRING("ERROR: In gen2 we should not see a {} request"), request) << dendl;
-    op_ret = 0; // XXX redundant?
+    if (s->handoff_helper->reject_filtered_commands()) {
+      // If we got here by mistake, because of an error in
+      // verify_permission(), still fail.
+      op_ret = -ERR_INVALID_REQUEST;
+    } else {
+      // In test-only mode, just do nothing.
+      op_ret = 0;
+    }
     return;
   }
 
