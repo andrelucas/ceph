@@ -8600,6 +8600,15 @@ void RGWPutBucketPolicy::send_response()
 
 int RGWPutBucketPolicy::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    if (s->handoff_helper->reject_filtered_commands()) {
+      ldpp_dout(this, 0) << "ERROR: In gen2 we should not see put-bucket-policy" << dendl;
+      return -ERR_INVALID_REQUEST;
+    }
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3PutBucketPolicy, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
@@ -8672,6 +8681,15 @@ void RGWGetBucketPolicy::send_response()
 
 int RGWGetBucketPolicy::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    if (s->handoff_helper->reject_filtered_commands()) {
+      ldpp_dout(this, 0) << "ERROR: In gen2 we should not see get-bucket-policy" << dendl;
+      return -ERR_INVALID_REQUEST;
+    }
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetBucketPolicy, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
@@ -8717,6 +8735,15 @@ void RGWDeleteBucketPolicy::send_response()
 
 int RGWDeleteBucketPolicy::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    if (s->handoff_helper->reject_filtered_commands()) {
+      ldpp_dout(this, 0) << "ERROR: In gen2 we should not see delete-bucket-policy" << dendl;
+      return -ERR_INVALID_REQUEST;
+    }
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3DeleteBucketPolicy, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
@@ -9153,6 +9180,11 @@ void RGWGetClusterStat::execute(optional_yield y)
 
 int RGWGetBucketPolicyStatus::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetBucketPolicyStatus, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
