@@ -7339,11 +7339,13 @@ void RGWDeleteMultiObj::handle_individual_object(const rgw_obj_key& o, optional_
    * result I want. Sue me.
    *
    * As noted in RGWDeleteMultiObj::verify_permissions(), we're allowing
-   * s->handoff_authz's state variables to persist between calls to the
-   * Authorizer, on the assumption that the policy's requirement for extra
+   * s->handoff_authz's extra data state variables to persist between calls to
+   * the Authorizer, on the assumption that the policy's requirement for extra
    * data will be the same for many objects in a single request. If that's not
    * true, we can use the stack (s->handoff_authz->push_requirements(),
    * ->pop_requirements()) to save and restore the state per-request.
+   *
+   * We're changing the target for each request, because that's the point.
    *
    * XXX each instance of this method is called in an individual yield
    * context. We *MUST* test this in rgw_beast_enable_async = true mode, to
@@ -7357,7 +7359,13 @@ void RGWDeleteMultiObj::handle_individual_object(const rgw_obj_key& o, optional_
     // This relies on the caller updating handoff_item_count...
     s->handoff_authz->set_trans_id_suffix(fmt::format(FMT_STRING("item{}"), handoff_item_count));
 
+    s->handoff_authz->push_target();
+    s->handoff_authz->set_object_key_name(o.name);
+    s->handoff_authz->set_bucket_name(s->bucket_name);
+    ldpp_dout(this, 20) << fmt::format(FMT_STRING("{}: checking s3DeleteObject permissions for object key {}"), __func__, o.name) << dendl;
     auto ret = s->handoff_helper->verify_permission(this, s, rgw::IAM::s3DeleteObject, y);
+    s->handoff_authz->pop_target();
+
     if (ret < 0) {
       send_partial_response(o, false, "", -EACCES, formatter_flush_cond);
       return;
