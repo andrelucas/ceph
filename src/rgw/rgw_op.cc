@@ -9218,6 +9218,15 @@ void RGWGetBucketPolicyStatus::execute(optional_yield y)
 
 int RGWPutBucketPublicAccessBlock::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    if (s->handoff_helper->reject_filtered_commands()) {
+      ldpp_dout(this, 0) << "ERROR: In gen2 we should not see put-bucket-public-access-block" << dendl;
+      return -ERR_INVALID_REQUEST;
+    }
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3PutBucketPublicAccessBlock, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
@@ -9281,10 +9290,20 @@ void RGWPutBucketPublicAccessBlock::execute(optional_yield y)
 
 int RGWGetBucketPublicAccessBlock::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    if (s->handoff_helper->reject_filtered_commands()) {
+      ldpp_dout(this, 0) << "ERROR: In gen2 we should not see get-bucket-public-access-block" << dendl;
+      return -ERR_INVALID_REQUEST;
+    }
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetPublicAccessBlock, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
+  // AKAMAI (André 20240823): I believe this is a bug, should be s3GetPublicAccessBlock.
   if (!verify_bucket_permission(this, s, rgw::IAM::s3GetBucketPolicy)) {
     return -EACCES;
   }
@@ -9325,10 +9344,20 @@ void RGWDeleteBucketPublicAccessBlock::send_response()
 
 int RGWDeleteBucketPublicAccessBlock::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    if (s->handoff_helper->reject_filtered_commands()) {
+      ldpp_dout(this, 0) << "ERROR: In gen2 we should not see delete-bucket-public-access-block" << dendl;
+      return -ERR_INVALID_REQUEST;
+    }
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3DeletePublicAccessBlock, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
+  // AKAMAI (André 20240823): I believe this is a bug, should be s3DeletePublicAccessBlock.
   if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketPublicAccessBlock)) {
     return -EACCES;
   }
