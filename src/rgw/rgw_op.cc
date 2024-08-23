@@ -9362,6 +9362,11 @@ int RGWPutBucketEncryption::get_params(optional_yield y)
 
 int RGWPutBucketEncryption::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3PutBucketEncryption, y);
+  }
+
   if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketEncryption)) {
     return -EACCES;
   }
@@ -9411,6 +9416,11 @@ void RGWPutBucketEncryption::execute(optional_yield y)
 
 int RGWGetBucketEncryption::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetBucketEncryption, y);
+  }
+
   if (!verify_bucket_permission(this, s, rgw::IAM::s3GetBucketEncryption)) {
     return -EACCES;
   }
@@ -9440,6 +9450,11 @@ void RGWGetBucketEncryption::execute(optional_yield y)
 
 int RGWDeleteBucketEncryption::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3PutBucketEncryption, y);
+  }
+
   if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketEncryption)) {
     return -EACCES;
   }
