@@ -479,6 +479,10 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Driver* store, con
       << fmt::format(FMT_STRING("HandoffHelperImpl::init(): reject filtered commands {}"),
              (reject_filtered_commands_ ? "ENABLED" : "DISABLED"))
       << dendl;
+  allow_native_copy_object_ = cct->_conf->rgw_handoff_authz_allow_native_copy_object;
+  ldout(cct, 1) << fmt::format(FMT_STRING("HandoffHelperImpl::init(): Cluster-local copy-object is {}"),
+      (allow_native_copy_object_ ? "ENABLED" : "DISABLED"))
+                << dendl;
 
   // Production calls to this function will have grpc_uri empty, so we'll
   // fetch configuration. Unit tests will pass a URI.

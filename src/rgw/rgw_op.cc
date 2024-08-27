@@ -5515,7 +5515,7 @@ int RGWCopyObj::verify_permission(optional_yield y)
 {
   // HANDOFF: Visited.
   if (s->handoff_authz->enabled()) {
-    if (s->handoff_helper->reject_filtered_commands()) {
+    if (!s->handoff_helper->allow_native_copy_object() && s->handoff_helper->reject_filtered_commands()) {
       // The microservice platform should not have allowed a copy through to
       // RGW, it should have decomposed it to a separate put and get.
       ldpp_dout(this, 0) << "ERROR: In gen2 we should not see a copy-object request" << dendl;

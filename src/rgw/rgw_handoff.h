@@ -320,6 +320,14 @@ public:
    * @return false RGW should attempt to authorize all commands.
    */
   bool reject_filtered_commands() const;
+
+  /**
+   * @brief Return true if Handoff is configured to allow native copy-object.
+   *
+   * @return true copy-object should be processed normally.
+   * @return false copy-object should be rejected with INVALID REQUEST.
+   */
+  bool allow_native_copy_object() const;
 };
 
 /**

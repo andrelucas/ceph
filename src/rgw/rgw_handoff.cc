@@ -109,6 +109,11 @@ bool HandoffHelper::reject_filtered_commands() const
   return impl_->reject_filtered_commands();
 }
 
+bool HandoffHelper::allow_native_copy_object() const
+{
+  return impl_->allow_native_copy_object();
+}
+
 HandoffAuthzState::HandoffAuthzState(std::shared_ptr<HandoffHelper> helper)
 {
   // helper may be nullptr, you MUST check before dereferencing!

@@ -979,6 +979,17 @@ options:
   flags:
   - runtime
   with_legacy: true
+- name: rgw_handoff_authz_allow_native_copy_object
+  type: bool
+  level: advanced
+  desc: Don't filter copy-object requests in gen2 environments.
+  long_desc: If enabled, RGW will not filter copy-object requests in a gen2
+    environment, as the microservices environment may still pass copy-object
+    requests verbatim.
+  default: true
+  services:
+  - rgw
+  with_legacy: true
 - name: rgw_handoff_authz_disable_local
   type: bool
   level: advanced

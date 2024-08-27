@@ -878,6 +878,7 @@ private:
   bool presigned_expiry_check_ = false; // Not runtime-alterable.
   bool disable_local_authorization_ = false; // Not runtime-alterable.
   bool reject_filtered_commands_ = true; // Not runtime-alterable.
+  bool allow_native_copy_object_ = true; // Not runtime-alterable.
 
   bool enable_anonymous_authorization_ = true; // Runtime-alterable.
   bool enable_signature_v2_ = true; // Runtime-alterable.
@@ -1044,6 +1045,17 @@ public:
   }
 
   /**
+   * @brief Return true if Handoff is configured to allow native copy-object.
+   *
+   * @return true copy-object should be processed normally.
+   * @return false copy-object should be rejected with INVALID REQUEST.
+   */
+  bool allow_native_copy_object() const
+  {
+    return allow_native_copy_object_;
+  }
+
+  /**
    * @brief Authenticate the transaction using the Handoff engine.
    * @param dpp Debug prefix provider. Points to the Ceph context.
    * @param session_token Unused by Handoff.
@@ -1081,7 +1093,8 @@ public:
    *   the HTTP arm (_http_auth()) and return the result.
    *
    */
-  HandoffAuthResult auth(const DoutPrefixProvider* dpp,
+  HandoffAuthResult
+  auth(const DoutPrefixProvider* dpp,
       const std::string_view& session_token,
       const std::string_view& access_key_id,
       const std::string_view& string_to_sign,
