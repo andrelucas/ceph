@@ -6560,6 +6560,14 @@ void RGWSetRequestPayment::execute(optional_yield y)
 
 int RGWInitMultipart::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    // Add server-side encryption headers to the IAM environment.
+    rgw_iam_add_crypt_attrs(s->env, s->info.crypt_attribute_map);
+
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3PutObject, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
   if (has_s3_existing_tag || has_s3_resource_tag)
     rgw_iam_add_objtags(this, s, has_s3_existing_tag, has_s3_resource_tag);
@@ -6679,6 +6687,14 @@ void RGWInitMultipart::execute(optional_yield y)
 
 int RGWCompleteMultipart::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    // Add server-side encryption headers to the IAM environment.
+    rgw_iam_add_crypt_attrs(s->env, s->info.crypt_attribute_map);
+
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3PutObject, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
   if (has_s3_existing_tag || has_s3_resource_tag)
     rgw_iam_add_objtags(this, s, has_s3_existing_tag, has_s3_resource_tag);
@@ -6943,6 +6959,26 @@ void RGWCompleteMultipart::complete()
 
 int RGWAbortMultipart::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+
+    // I interpret the standard checks as follows:
+    // If the user is denied s3AbortMultipartUpload, the operation is denied.
+    // Otherwise, if the user is allowed s3PutObject, the operation is
+    // allowed.
+
+    std::vector<uint64_t> ops;
+    auto i_abort = ops.size();
+    ops.push_back(rgw::IAM::s3AbortMultipartUpload);
+    auto i_put = ops.size();
+    ops.push_back(rgw::IAM::s3PutObject);
+    auto res = s->handoff_helper->verify_permissions(this, s, ops, y);
+    if (res[i_abort] < 0) {
+      return res[i_abort];
+    }
+    return res[i_put];
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
   if (has_s3_existing_tag || has_s3_resource_tag)
     rgw_iam_add_objtags(this, s, has_s3_existing_tag, has_s3_resource_tag);
@@ -7037,6 +7073,11 @@ void RGWAbortMultipart::execute(optional_yield y)
 
 int RGWListMultipart::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3ListMultipartUploadParts, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s);
   if (has_s3_existing_tag || has_s3_resource_tag)
     rgw_iam_add_objtags(this, s, has_s3_existing_tag, has_s3_resource_tag);
@@ -7081,6 +7122,11 @@ void RGWListMultipart::execute(optional_yield y)
 
 int RGWListBucketMultiparts::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3ListBucketMultipartUploads, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
