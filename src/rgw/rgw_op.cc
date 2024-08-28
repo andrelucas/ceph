@@ -2978,6 +2978,15 @@ void RGWSetBucketVersioning::execute(optional_yield y)
 
 int RGWGetBucketWebsite::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    if (s->handoff_helper->reject_filtered_commands()) {
+      ldpp_dout(this, 0) << "ERROR: in gen2 we should not see get-bucket-website" << dendl;
+      return -ERR_INVALID_REQUEST;
+    }
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetBucketWebsite, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
@@ -2999,6 +3008,15 @@ void RGWGetBucketWebsite::execute(optional_yield y)
 
 int RGWSetBucketWebsite::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    if (s->handoff_helper->reject_filtered_commands()) {
+      ldpp_dout(this, 0) << "ERROR: in gen2 we should not see put-bucket-website" << dendl;
+      return -ERR_INVALID_REQUEST;
+    }
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3PutBucketWebsite, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
@@ -3045,6 +3063,15 @@ void RGWSetBucketWebsite::execute(optional_yield y)
 
 int RGWDeleteBucketWebsite::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    if (s->handoff_helper->reject_filtered_commands()) {
+      ldpp_dout(this, 0) << "ERROR: in gen2 we should not see delete-bucket-website" << dendl;
+      return -ERR_INVALID_REQUEST;
+    }
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3DeleteBucketWebsite, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
