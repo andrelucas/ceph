@@ -1366,6 +1366,15 @@ void RGWDeleteBucketTags::execute(optional_yield y)
 
 int RGWGetBucketReplication::verify_permission(optional_yield y)
 {
+  // Handoff: Visited.
+  if (s->handoff_authz->enabled()) {
+    if (s->handoff_helper->reject_filtered_commands()) {
+      ldpp_dout(this, 0) << "ERROR: In gen2 we should not see get-bucket-replication" << dendl;
+      return -ERR_INVALID_REQUEST;
+    }
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3GetReplicationConfiguration, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
@@ -1388,6 +1397,15 @@ void RGWGetBucketReplication::execute(optional_yield y)
 }
 
 int RGWPutBucketReplication::verify_permission(optional_yield y) {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    if (s->handoff_helper->reject_filtered_commands()) {
+      ldpp_dout(this, 0) << "ERROR: In gen2 we should not see put-bucket-replication" << dendl;
+      return -ERR_INVALID_REQUEST;
+    }
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3PutReplicationConfiguration, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
@@ -1432,6 +1450,15 @@ void RGWDeleteBucketReplication::pre_exec()
 
 int RGWDeleteBucketReplication::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
+  if (s->handoff_authz->enabled()) {
+    if (s->handoff_helper->reject_filtered_commands()) {
+      ldpp_dout(this, 0) << "ERROR: In gen2 we should not see delete-bucket-replication" << dendl;
+      return -ERR_INVALID_REQUEST;
+    }
+    return s->handoff_helper->verify_permission(this, s, rgw::IAM::s3DeleteReplicationConfiguration, y);
+  }
+
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
