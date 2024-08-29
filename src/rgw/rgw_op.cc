@@ -4604,6 +4604,7 @@ void RGWPutObj::execute(optional_yield y)
 
 int RGWPostObj::verify_permission(optional_yield y)
 {
+  // HANDOFF: Visited.
   return 0;
 }
 
@@ -4614,6 +4615,8 @@ void RGWPostObj::pre_exec()
 
 void RGWPostObj::execute(optional_yield y)
 {
+  // HANDOFF: Visited.
+
   boost::optional<RGWPutObj_Compress> compressor;
   CompressorRef plugin;
   char supplied_md5[CEPH_CRYPTO_MD5_DIGESTSIZE * 2 + 1];
@@ -4631,6 +4634,15 @@ void RGWPostObj::execute(optional_yield y)
 
   // add server-side encryption headers
   rgw_iam_add_crypt_attrs(s->env, s->info.crypt_attribute_map);
+
+  if (s->handoff_authz->enabled()) {
+    auto ret = s->handoff_helper->verify_permission(this, s, rgw::IAM::s3PutObject, y);
+    if (ret < 0) {
+      op_ret = ret;
+      return;
+    }
+    goto auth_done; // Sue me. This is to reduce the diff.
+  }
 
   if (s->iam_policy || ! s->iam_user_policies.empty() || !s->session_policies.empty()) {
     auto identity_policy_res = eval_identity_or_session_policies(this, s->iam_user_policies, s->env,
@@ -4693,6 +4705,8 @@ void RGWPostObj::execute(optional_yield y)
     op_ret = -EACCES;
     return;
   }
+
+auth_done:
 
   // make reservation for notification if needed
   std::unique_ptr<rgw::sal::Notification> res
