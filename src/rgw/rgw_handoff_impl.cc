@@ -1098,7 +1098,7 @@ std::vector<int> HandoffHelperImpl::verify_permissions(const RGWOp* op, req_stat
   /* AuthorizeV2 request. We can submit at most two of these requests. The
    * first request will (in the first iteration of this client) never have the
    * extra_data_required field set. If the server responds with
-   * AUTHZ_RESULT_EXTRA_DATA_REQUIRED, we then fetch what data it asks for and
+   * AUTHORIZATION_RESULT_CODE_EXTRA_DATA_REQUIRED, we then fetch what data it asks for and
    * resubmit.
    *
    * We submit at most two requests. We don't allow loops.
@@ -1203,16 +1203,16 @@ std::vector<int> HandoffHelperImpl::verify_permissions(const RGWOp* op, req_stat
     using namespace ::authorizer::v1;
     int retcode;
     switch (answer.code()) {
-    case AUTHZ_RESULT_ALLOW:
+    case AUTHORIZATION_RESULT_CODE_ALLOW:
       retcode = 0;
       break;
-    case AUTHZ_RESULT_DENY:
+    case AUTHORIZATION_RESULT_CODE_DENY:
       retcode = -EACCES;
       break;
-    case AUTHZ_RESULT_INTERNAL_ERROR:
+    case AUTHORIZATION_RESULT_CODE_INTERNAL_ERROR:
       retcode = -ERR_INTERNAL_ERROR;
       break;
-    case AUTHZ_RESULT_RATE_LIMIT_EXCEEDED:
+    case AUTHORIZATION_RESULT_CODE_RATE_LIMIT_EXCEEDED:
       retcode = -ERR_RATE_LIMITED;
       break;
     default:
@@ -1541,7 +1541,7 @@ AuthorizerClient::AuthorizeResult AuthorizerClient::AuthorizeV2(AuthorizeV2Reque
     // 'Allow', we'll return an error. A caller that sends multiple requests
     // will have to check each one.
     for (const auto& answer : resp.answers()) {
-      if (answer.code() != AuthorizationResultCode::AUTHZ_RESULT_ALLOW) {
+      if (answer.code() != AuthorizationResultCode::AUTHORIZATION_RESULT_CODE_ALLOW) {
         return AuthorizeResult(false, req, resp);
       }
     }
@@ -1567,7 +1567,7 @@ bool AuthorizerClient::AuthorizeResult::is_extra_data_required() const
     return false;
   }
   for (const auto& answer : response().answers()) {
-    if (answer.code() == ::authorizer::v1::AUTHZ_RESULT_EXTRA_DATA_REQUIRED) {
+    if (answer.code() == ::authorizer::v1::AUTHORIZATION_RESULT_CODE_EXTRA_DATA_REQUIRED) {
       return true;
     }
   }
