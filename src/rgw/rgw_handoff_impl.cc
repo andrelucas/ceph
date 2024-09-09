@@ -1403,7 +1403,7 @@ void PopulateAuthorizeRequestIAMEnvironment(const DoutPrefixProvider* dpp,
   for (const auto& kv : env_map) {
     AuthorizeV2Question::IAMMapEntry entry;
     for (const auto& v : kv.second) {
-      entry.add_key(v);
+      entry.add_values(v);
     }
     env->emplace(kv.first, entry);
   }

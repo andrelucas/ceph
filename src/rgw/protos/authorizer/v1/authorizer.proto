@@ -278,7 +278,7 @@ message AuthorizeV2Question
   // All the x-amz-* headers from the S3 request.
   map<string, string> x_amz_headers = 13;
 
-  message IAMMapEntry { repeated string key = 1; }
+  message IAMMapEntry { repeated string values = 1; }
   // The authorization 'environment', a multimap of key-value pairs with
   // authorization parameters. E.g. 's3:prefix' => '/path'. Protobuf has no
   // multimap type, we have to simulate one.
