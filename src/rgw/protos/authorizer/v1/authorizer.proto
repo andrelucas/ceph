@@ -116,19 +116,19 @@ message PingResponse { AuthorizationCommon common = 1; }
 //
 
 enum AuthorizationResultCode {
-  AUTHZ_RESULT_UNSPECIFIED = 0;
+  AUTHORIZATION_RESULT_CODE_UNSPECIFIED = 0;
   // Proceed with the request, which is now authorized.
-  AUTHZ_RESULT_ALLOW = 1;
+  AUTHORIZATION_RESULT_CODE_ALLOW = 1;
   // Refuse the request and stop further processing.
-  AUTHZ_RESULT_DENY = 2;
+  AUTHORIZATION_RESULT_CODE_DENY = 2;
   // This value means that the Authorizer needs more data from Ceph to
   // authorize. The client must either provide those data or fail the
   // authorization entirely.
-  AUTHZ_RESULT_EXTRA_DATA_REQUIRED = 3;
+  AUTHORIZATION_RESULT_CODE_EXTRA_DATA_REQUIRED = 3;
   // An internal error occurred. This should be logged and investigated.
-  AUTHZ_RESULT_INTERNAL_ERROR = 4;
+  AUTHORIZATION_RESULT_CODE_INTERNAL_ERROR = 4;
   // We have exceeded a rate limit on the Authorizer.
-  AUTHZ_RESULT_RATE_LIMIT_EXCEEDED = 5;
+  AUTHORIZATION_RESULT_CODE_RATE_LIMIT_EXCEEDED = 5;
   // XXX this will almost certainly need extended.
 }
 
@@ -308,7 +308,7 @@ message AuthorizeV2Answer
   AuthorizationResultCode code = 3;
   // Was the 'http code hint' field. Noone has asked for that.
   reserved 4;
-  // If result.code is AUTHZ_RESULT_EXTRA_DATA_REQUIRED, this field must be
+  // If result.code is AUTHORIZATION_RESULT_CODE_EXTRA_DATA_REQUIRED, this field must be
   // present and must list the extra data fields required by the Authorizer in
   // order to properly authorize the request.
   optional ExtraDataSpecification extra_data_required = 5;

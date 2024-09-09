@@ -1490,7 +1490,7 @@ public:
   }
 
 private:
-  static constexpr std::array<::authorizer::v1::AuthorizationResultCode, 1> standard_canned_answers_ { ::authorizer::v1::AUTHZ_RESULT_ALLOW };
+  static constexpr std::array<::authorizer::v1::AuthorizationResultCode, 1> standard_canned_answers_ { ::authorizer::v1::AUTHORIZATION_RESULT_CODE_ALLOW };
 
   DoutPrefix dpp_ { g_ceph_context, ceph_subsys_rgw, "unittest gRPC authz server " };
   std::vector<::authorizer::v1::AuthorizationResultCode> canned_answers_;
@@ -1661,7 +1661,7 @@ TEST_F(AuthzGRPCTest, AuthorizeBasicSingleQuestion)
   auto req = res.request();
   ASSERT_GT(ans.common().timestamp(), req.questions(0).common().timestamp()) << "timestamp ordering";
   ASSERT_EQ(ans.common().authorization_id(), req.questions(0).common().authorization_id()) << "authorization_id mismatch";
-  ASSERT_EQ(ans.code(), AUTHZ_RESULT_ALLOW) << "code mismatch";
+  ASSERT_EQ(ans.code(), AUTHORIZATION_RESULT_CODE_ALLOW) << "code mismatch";
 }
 
 TEST_F(AuthzGRPCTest, AuthorizeBasicMultipleQuestion)
@@ -1699,7 +1699,7 @@ TEST_F(AuthzGRPCTest, AuthorizeBasicMultipleQuestion)
     ASSERT_GT(ans.common().timestamp(), req.questions(n).common().timestamp()) << "answer " << n << "timestamp ordering";
     ASSERT_EQ(ans.common().authorization_id(), req.questions(n).common().authorization_id())
         << "answer " << n << "authorization_id mismatch";
-    ASSERT_EQ(ans.code(), AUTHZ_RESULT_ALLOW) << "answer " << n << "code mismatch";
+    ASSERT_EQ(ans.code(), AUTHORIZATION_RESULT_CODE_ALLOW) << "answer " << n << "code mismatch";
   }
 }
 
@@ -1721,7 +1721,7 @@ TEST_F(AuthzGRPCTest, AuthorizeBasicSingleQuestionExpectedFail)
   ASSERT_THAT(opt_req, testing::Ne(std::nullopt));
 
   // Set a failure code.
-  authz_server().instance()->set_canned_results({ ::authorizer::v1::AUTHZ_RESULT_DENY });
+  authz_server().instance()->set_canned_results({ ::authorizer::v1::AUTHORIZATION_RESULT_CODE_DENY });
 
   // Note that this will std::move the request!
   auto res = client.AuthorizeV2(*opt_req);
@@ -1737,7 +1737,7 @@ TEST_F(AuthzGRPCTest, AuthorizeBasicSingleQuestionExpectedFail)
   auto ans = resp.answers(0);
   ASSERT_GT(ans.common().timestamp(), req.questions(0).common().timestamp()) << "timestamp ordering";
   ASSERT_EQ(ans.common().authorization_id(), req.questions(0).common().authorization_id()) << "authorization_id mismatch";
-  ASSERT_EQ(ans.code(), AUTHZ_RESULT_DENY) << "code mismatch";
+  ASSERT_EQ(ans.code(), AUTHORIZATION_RESULT_CODE_DENY) << "code mismatch";
 }
 
 TEST_F(AuthzGRPCTest, AuthorizeBasicMultipleQuestionExpectedFail)
@@ -1760,7 +1760,7 @@ TEST_F(AuthzGRPCTest, AuthorizeBasicMultipleQuestionExpectedFail)
 
   // Set a failure code for the last question.
   using namespace ::authorizer::v1;
-  auto cr = std::vector<AuthorizationResultCode> { AUTHZ_RESULT_ALLOW, AUTHZ_RESULT_ALLOW, AUTHZ_RESULT_DENY };
+  auto cr = std::vector<AuthorizationResultCode> { AUTHORIZATION_RESULT_CODE_ALLOW, AUTHORIZATION_RESULT_CODE_ALLOW, AUTHORIZATION_RESULT_CODE_DENY };
   authz_server().instance()->set_canned_results(cr);
 
   // Note that this will std::move the request!
