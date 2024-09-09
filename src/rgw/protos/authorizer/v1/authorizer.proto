@@ -1,8 +1,3 @@
-// authorizer.v1.AuthorizerService
-//
-// The Authorization Handoff protocol definition.
-//
-
 syntax = "proto3";
 
 package authorizer.v1;
@@ -11,30 +6,8 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "bits.linode.com/LinodeApi/obj-endpoint/gen/proto/authorizer/v1";
 
-service AuthorizerService
-{
-  // Authorize authorizes an S3 request.
-  rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
-
-  // Ping allows us to (a) check and test the connection to the authorizer,
-  // and (b) easily avoid the lazy initialization behaviour of the gRPC
-  // channel, so we can give helpful error messages at startup.
-  rpc Ping(PingRequest) returns (PingResponse);
-
-  // A request for authorization. Provide easily-available information about
-  // the request such as user, bucket and object key, so that the Authorizer
-  // can work out what additional data it will need to make a proper
-  // decision. Failures here will result in the user getting an error
-  // message. An Allow or Deny code means the protocol is ended. An 'extra
-  // data required' code means the client should either fail authorization
-  // or submit another Authorize() request with the required data.
-  //
-  rpc AuthorizeV2(AuthorizeV2Request) returns (AuthorizeV2Response);
-}
-
 // Errors mapping to S3 errors.
-// See:
-// https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html#RESTErrorResponses
+// See: https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html#RESTErrorResponses
 message S3ErrorDetails
 {
   enum Type {
@@ -59,6 +32,27 @@ message S3ErrorDetails
   Type type = 1;
 }
 
+// AuthorizerService provides RPCs for authorizing S3 requests.
+service AuthorizerService
+{
+  // Authorize authorizes an S3 request.
+  rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
+
+  // Ping allows us to (a) check and test the connection to the authorizer,
+  // and (b) easily avoid the lazy initialization behaviour of the gRPC
+  // channel, so we can give helpful error messages at startup.
+  rpc Ping(PingRequest) returns (PingResponse);
+
+  // A request for authorization. Provide easily-available information about
+  // the request such as user, bucket and object key, so that the Authorizer
+  // can work out what additional data it will need to make a proper
+  // decision. Failures here will result in the user getting an error
+  // message. An Allow or Deny code means the protocol is ended. An 'extra
+  // data required' code means the client should either fail authorization
+  // or submit another AuthorizeV2() request with the required data.
+  rpc AuthorizeV2(AuthorizeV2Request) returns (AuthorizeV2Response);
+}
+
 message AuthorizeRequest
 {
   enum HTTPMethod {
@@ -76,18 +70,16 @@ message AuthorizeRequest
   optional string role_arn = 2;
   // The HTTP method from the user's S3 REST request used for the S3 request.
   HTTPMethod http_method = 3;
-  // The name of the bucket the operation was performed on from the user's S3
-  // REST request. For actions such as ListBuckets, this field will be empty
+  // The name of the bucket the operation was performed on from the user's S3 REST request. For actions such as ListBuckets, this field will be empty
   optional string bucket_name = 4;
-  // The object key the operation was performed on from the user's S3 REST
-  // request. For actions performed against a bucket, this field will be empty.
+  // The object key the operation was performed on from the user's S3 REST request. For actions performed against a
+  // bucket, this field will be empty.
   optional string object_key = 5;
   // A map of all query string parameters from the user's S3 REST request.
   map<string, string> query_parameters = 6;
   // A map of all relevant x-amz-* headers from the user's S3 REST request.
   map<string, string> x_amz_headers = 7;
-  // A generic resource key, used when neither object_key or bucket_name make
-  // sense.
+  // A generic resource key, used when neither object_key or bucket_name make sense.
   optional string resource = 8;
   // Account arn is used to check if the account is suspended or not.
   string account_arn = 9;
@@ -114,7 +106,6 @@ message PingResponse { AuthorizationCommon common = 1; }
 //
 // Utility messages and enums.
 //
-
 enum AuthorizationResultCode {
   AUTHORIZATION_RESULT_CODE_UNSPECIFIED = 0;
   // Proceed with the request, which is now authorized.
@@ -230,19 +221,15 @@ enum S3Opcode {
 // and a field that was checked and found to be empty.
 message ExtraDataSpecification
 {
-  // Was 'bucket tags provided/required'.
-  reserved 1;
   // Object key tags provided/required.
-  bool object_key_tags = 2;
+  bool object_key_tags = 1;
 }
 
 message ExtraData
 {
-  // Was bucket tags.
-  reserved 1;
   // The tags that were present on the object key at the time of the
   // request.
-  map<string, string> object_key_tags = 2;
+  map<string, string> object_key_tags = 1;
 }
 
 //
@@ -250,73 +237,72 @@ message ExtraData
 // Allow or Deny and we're done. Otherwise the Authorizer can return a request
 // for extra data, which the client then provides in another Authorize() call.
 //
-
 message AuthorizeV2Question
 {
+  // common holds an id to match responses
   AuthorizationCommon common = 1;
+
   // The canonical user ID is returned by the Authenticator and is reflected
   // back to the Authorizer verbatim.
-  string canonical_user_id = 9;
+  string canonical_user_id = 2;
   // user_arn is returned by the Authenticator and is reflected back
   // to the Authorizer verbatim.
-  string user_arn = 2;
+  string user_arn = 3;
   // assuming_user_arn is returned by the Authenticator and is reflected
   // back to the Authorizer verbatim.
-  optional string assuming_user_arn = 3;
+  optional string assuming_user_arn = 4;
   // account_arn is returned by the Authenticator and is reflected back to
   // the Authorizer verbatim.
-  string account_arn = 4;
+  string account_arn = 5;
+
   // The S3 operation.
-  S3Opcode opcode = 5;
+  S3Opcode opcode = 6;
   // The S3 bucket name. May be empty.
-  string bucket_name = 6;
+  string bucket_name = 7;
   // The S3 object key name. May be empty.
-  string object_key_name = 7;
-  
+  string object_key_name = 8;
+
   // All the query parameters from the S3 request.
-  map<string, string> query_parameters = 12;
+  map<string, string> query_parameters = 9;
   // All the x-amz-* headers from the S3 request.
-  map<string, string> x_amz_headers = 13;
+  map<string, string> x_amz_headers = 10;
 
   message IAMMapEntry { repeated string values = 1; }
   // The authorization 'environment', a multimap of key-value pairs with
   // authorization parameters. E.g. 's3:prefix' => '/path'. Protobuf has no
   // multimap type, we have to simulate one.
-  map<string, IAMMapEntry> environment = 10;
+  map<string, IAMMapEntry> environment = 11;
 
   // Mask for which extra data we're sending. This allows the Authorizer to
   // distinguish between the case where the client hasn't _sent_ a piece of
   // data, and where the client has sent an _empty_ piece of data.
-  optional ExtraDataSpecification extra_data_provided = 11;
+  optional ExtraDataSpecification extra_data_provided = 12;
   // Extra data that the Authorizer may require in order to make a decision.
   // This can either be added unilaterally by the client, or specifically
   // requested by the Authorizer in the AuthorizeResponse.
-  optional ExtraData extra_data = 8;
+  optional ExtraData extra_data = 13;
 }
 
 message AuthorizeV2Request
 {
-  reserved 1; // Was the common field.
   // One or more questions about the S3 request.
-  repeated AuthorizeV2Question questions = 2;
+  repeated AuthorizeV2Question questions = 1;
 }
 
 message AuthorizeV2Answer
 {
+  // common holds an id to match responses
   AuthorizationCommon common = 1;
   // The result code.
-  AuthorizationResultCode code = 3;
-  // Was the 'http code hint' field. Noone has asked for that.
-  reserved 4;
+  AuthorizationResultCode code = 2;
   // If result.code is AUTHORIZATION_RESULT_CODE_EXTRA_DATA_REQUIRED, this field must be
   // present and must list the extra data fields required by the Authorizer in
   // order to properly authorize the request.
-  optional ExtraDataSpecification extra_data_required = 5;
+  optional ExtraDataSpecification extra_data_required = 3;
 }
 
 message AuthorizeV2Response
 {
-  reserved 1; // Was the common field.
   // One or more answers to the questions in the AuthorizeV2Request.
-  repeated AuthorizeV2Answer answers = 2;
+  repeated AuthorizeV2Answer answers = 1;
 }
