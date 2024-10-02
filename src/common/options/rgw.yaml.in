@@ -998,7 +998,7 @@ options:
   long_desc: Only effective if Handoff is enabled. Disable all authorization
     checks using internal policies and acls, in favour of an authorization
     handoff.
-  default: true
+  default: false
   services:
   - rgw
   with_legacy: true
