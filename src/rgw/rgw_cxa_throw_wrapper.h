@@ -11,8 +11,8 @@
 
 #pragma once
 
-#import <atomic>
-#import <typeinfo>
+#include <atomic>
+#include <typeinfo>
 
 extern std::atomic<uint64_t> _cxa_throw_exception_count;
 extern std::atomic<uint64_t> _cxa_throw_nested_exception_count;

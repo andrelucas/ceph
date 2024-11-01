@@ -21,6 +21,8 @@ constexpr uint64_t rep_count = 10000;
 // wrapper.
 TEST(TestRgwCxaThrowWrapper, NormalThrow)
 {
+  uint64_t start_exception_count = _cxa_throw_exception_count;
+
   for (uint64_t n = 0; n < rep_count; n++) {
     uint64_t exception_count = _cxa_throw_exception_count;
     try {
@@ -30,12 +32,15 @@ TEST(TestRgwCxaThrowWrapper, NormalThrow)
     }
     ASSERT_GT(_cxa_throw_exception_count, exception_count);
   }
+  ASSERT_GE(_cxa_throw_exception_count, start_exception_count+rep_count);
 }
 
 // Check that nested exceptions work normally and that we appear to visit the
 // wrapper.
 TEST(TestRgwCxaThrowWrapper, NestedThrow)
 {
+  uint64_t start_exception_count = _cxa_throw_exception_count;
+
   for (uint64_t n = 0; n < rep_count; n++) {
     uint64_t exception_count = _cxa_throw_exception_count;
     try {
@@ -50,6 +55,7 @@ TEST(TestRgwCxaThrowWrapper, NestedThrow)
     }
     ASSERT_GT(_cxa_throw_exception_count, exception_count);
   }
+  ASSERT_GE(_cxa_throw_exception_count, start_exception_count+rep_count);
 }
 
 /**
