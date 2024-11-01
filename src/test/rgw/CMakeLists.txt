@@ -301,3 +301,11 @@ target_link_libraries(unittest_rgw_auth_handoff
   ${UNITTEST_LIBS}
   ${rgw_libs}
 )
+
+add_executable(unittest_rgw_cxa_throw_wrapper test_rgw_cxa_throw_wrapper.cc)
+add_ceph_unittest(unittest_rgw_cxa_throw_wrapper)
+target_link_libraries(unittest_rgw_cxa_throw_wrapper
+  ${UNITTEST_LIBS}
+  ${rgw_libs}
+)
+# target_link_options(unittest_rgw_cxa_throw_wrapper PUBLIC "-Wl,--wrap,__cxa_throw")

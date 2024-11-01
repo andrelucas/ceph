@@ -74,6 +74,7 @@ set(librgw_common_srcs
   rgw_compression.cc
   rgw_cors.cc
   rgw_cors_s3.cc
+  rgw_cxa_throw_wrapper.cc
   rgw_env.cc
   rgw_es_query.cc
   rgw_formats.cc
@@ -234,6 +235,7 @@ endif(WITH_RADOSGW_ARROW_FLIGHT)
 
 
 add_library(rgw_common STATIC ${librgw_common_srcs})
+target_link_options(rgw_common PUBLIC "-Wl,--wrap,__cxa_throw")
 
 include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-Wimplicit-const-int-float-conversion"
