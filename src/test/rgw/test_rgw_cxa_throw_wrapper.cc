@@ -10,6 +10,7 @@
  */
 
 #include "rgw_cxa_throw_wrapper.h"
+
 #include <gtest/gtest-death-test.h>
 #include <gtest/gtest.h>
 
@@ -45,10 +46,10 @@ TEST(TestRgwCxaThrowWrapper, NestedThrow)
     uint64_t exception_count = _cxa_throw_exception_count;
     try {
       try {
-        throw std::runtime_error("Nested throw");
+        throw std::runtime_error("Outer throw");
       } catch (const std::exception& e) {
         // std::cerr << "Caught exception: " << e.what() << std::endl;
-        throw;
+        throw std::runtime_error("Inner throw");
       }
     } catch (const std::exception& e) {
       // std::cerr << "Caught exception: " << e.what() << std::endl;
@@ -79,20 +80,21 @@ class Cleanup {
 public:
   ~Cleanup() noexcept(false)
   {
-    std::cout << "Cleanup function called during stack unwinding" << std::endl;
+    // std::cout << "Cleanup function called during stack unwinding" <<
+    // std::endl;
     throw std::runtime_error("Error in cleanup function"); // Throwing during stack unwinding
   }
 };
 
 void recursiveFunction(int depth)
 {
-  if (std::uncaught_exceptions() > 0) {
-    std::cerr << "Zhopa: " << std::endl;
-    return;
-  }
+  // if (std::uncaught_exceptions() > 0) {
+  //   std::cerr << "std::uncaught_exceptions() = " <<
+  //   std::uncaught_exceptions() << std::endl; return;
+  // }
   try {
     Cleanup cleanup; // This object will be destroyed during stack unwinding
-    if (depth == 3) {
+    if (depth == 16) {
       throw std::runtime_error("Initial exception");
     }
     recursiveFunction(depth + 1);
