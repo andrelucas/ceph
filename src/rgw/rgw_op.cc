@@ -533,7 +533,7 @@ int rgw_build_bucket_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* d
     // HANDOFF: Allow read of bucket attrs, these aren't just for authz.
     s->bucket_attrs = s->bucket->get_attrs();
 
-    if (s->handoff_authz->enabled()) {
+    if (s->handoff_authz->enabled() && s->handoff_helper->enable_early_load_skip()) {
       ldpp_dout(dpp, 20) << "handoff authz: rgw_build_bucket_policies(): Skip read_bucket_policy() and s->bucket_owner set" << dendl;
     } else {
       ret = read_bucket_policy(dpp, driver, s, s->bucket->get_info(),
@@ -584,14 +584,14 @@ int rgw_build_bucket_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* d
       return -EINVAL;
     }
 
-    if (s->handoff_authz->enabled()) {
+    if (s->handoff_authz->enabled() && s->handoff_helper->enable_early_load_skip()) {
       ldpp_dout(dpp, 20) << "handoff authz: rgw_build_bucket_policies(): Skip get_public_access_conf_from_attr()" << dendl;
     } else {
       s->bucket_access_conf = get_public_access_conf_from_attr(s->bucket->get_attrs());
     }
   }
 
-  if (s->handoff_authz->enabled()) {
+  if (s->handoff_authz->enabled() && s->handoff_helper->enable_early_load_skip()) {
     ldpp_dout(dpp, 20) << "handoff authz: rgw_build_bucket_policies(): Skip get_user_policy_from_attr() for user ACL" << dendl;
   } else {
     /* handle user ACL only for those APIs which support it */
@@ -625,7 +625,7 @@ int rgw_build_bucket_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* d
   // We don't need user policies in case of STS token returned by AssumeRole,
   // hence the check for user type
   if (!s->user->get_id().empty() && s->auth.identity->get_identity_type() != TYPE_ROLE) {
-    if (s->handoff_authz->enabled()) {
+    if (s->handoff_authz->enabled() && s->handoff_helper->enable_early_load_skip()) {
       ldpp_dout(dpp, 20) << "handoff authz: rgw_build_bucket_policies(): Skip get_iam_user_policy_from_attr() for STS Role" << dendl;
     } else {
       try {
@@ -650,7 +650,7 @@ int rgw_build_bucket_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* d
     }
   }
 
-  if (s->handoff_authz->enabled()) {
+  if (s->handoff_authz->enabled() && s->handoff_helper->enable_early_load_skip()) {
     ldpp_dout(dpp, 20) << "handoff authz: rgw_build_bucket_policies(): Skip get_iam_policy_from_attr() for IAM policy" << dendl;
   } else {
     try {
@@ -694,7 +694,7 @@ int rgw_build_object_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* d
     if (prefetch_data) {
       s->object->set_prefetch_data();
     }
-    if (s->handoff_authz->enabled()) {
+    if (s->handoff_authz->enabled() && s->handoff_helper->enable_early_load_skip()) {
       ldpp_dout(dpp, 20) << "handoff authz: rgw_build_object_policies(): Skip read_obj_policy()" << dendl;
     } else {
       ret = read_obj_policy(dpp, driver, s, s->bucket->get_info(), s->bucket_attrs,
