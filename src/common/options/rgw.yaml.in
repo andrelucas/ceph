@@ -990,6 +990,18 @@ options:
   services:
   - rgw
   with_legacy: true
+- name: rgw_handoff_authz_debug_early_load_skip
+  type: bool
+  level: advanced
+  desc: Advanced option to disable early load skip optimization for authz handoff.
+  long_desc: When using Handoff Authorization, we can skip the load of some
+    items because they will never be used. This configuration item allows this
+    behaviour to be changed. If true, skip loading unused items. If false,
+    load those items anyway.
+  default: false
+  services:
+  - rgw
+  with_legacy: true
 - name: rgw_handoff_authz_disable_local
   type: bool
   level: advanced

@@ -879,6 +879,7 @@ private:
   bool disable_local_authorization_ = false; // Not runtime-alterable.
   bool reject_filtered_commands_ = true; // Not runtime-alterable.
   bool allow_native_copy_object_ = true; // Not runtime-alterable.
+  bool enable_early_load_skip_ = true; // Not runtime-alterable.
 
   bool enable_anonymous_authorization_ = true; // Runtime-alterable.
   bool enable_signature_v2_ = true; // Runtime-alterable.
@@ -1053,6 +1054,22 @@ public:
   bool allow_native_copy_object() const
   {
     return allow_native_copy_object_;
+  }
+
+  /**
+   * @brief Return true if Handoff is configured to skip the load of
+   * data specific to local authorization. DEBUG ONLY.
+   *
+   * There's no point in loading local authorization data that we have no
+   * intention of using. This is a debug item; we should not need to use this
+   * in production.
+   *
+   * @return true Enable skips of local authz data.
+   * @return false Load the local authz data anyway.
+   */
+  bool enable_early_load_skip() const
+  {
+    return enable_early_load_skip_;
   }
 
   /**

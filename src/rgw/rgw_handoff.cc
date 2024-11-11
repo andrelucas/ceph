@@ -114,6 +114,11 @@ bool HandoffHelper::allow_native_copy_object() const
   return impl_->allow_native_copy_object();
 }
 
+bool HandoffHelper::enable_early_load_skip() const
+{
+  return impl_->enable_early_load_skip();
+}
+
 HandoffAuthzState::HandoffAuthzState(std::shared_ptr<HandoffHelper> helper)
 {
   // helper may be nullptr, you MUST check before dereferencing!

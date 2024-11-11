@@ -328,6 +328,19 @@ public:
    * @return false copy-object should be rejected with INVALID REQUEST.
    */
   bool allow_native_copy_object() const;
+
+  /**
+   * @brief Return true if Handoff is configured to skip the load of
+   * data specific to local authorization. DEBUG ONLY.
+   *
+   * There's no point in loading local authorization data that we have no
+   * intention of using. This is a debug item; we should not need to use this
+   * in production.
+   *
+   * @return true Enable skips of local authz data.
+   * @return false Load the local authz data anyway.
+   */
+  bool enable_early_load_skip() const;
 };
 
 /**

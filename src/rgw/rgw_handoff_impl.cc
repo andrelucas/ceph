@@ -481,6 +481,10 @@ int HandoffHelperImpl::init(CephContext* const cct, rgw::sal::Driver* store, con
   ldout(cct, 1) << fmt::format(FMT_STRING("HandoffHelperImpl::init(): Cluster-local copy-object is {}"),
       (allow_native_copy_object_ ? "ENABLED" : "DISABLED"))
                 << dendl;
+  enable_early_load_skip_ = cct->_conf->rgw_handoff_authz_debug_early_load_skip;
+  ldout(cct, 1) << fmt::format(FMT_STRING("HandoffHelperImpl::init(): Early load skip is {}"),
+      (enable_early_load_skip_ ? "ENABLED" : "DISABLED"))
+                << dendl;
 
   // Production calls to this function will have grpc_uri empty, so we'll
   // fetch configuration. Unit tests will pass a URI.
