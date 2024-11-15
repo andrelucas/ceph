@@ -1872,7 +1872,7 @@ int RGWHandler_REST::init_permissions(RGWOp* op, optional_yield y)
   if (op->get_type() == RGW_OP_CREATE_BUCKET) {
     // We don't need user policies in case of STS token returned by AssumeRole, hence the check for user type
     if (! s->user->get_id().empty() && s->auth.identity->get_identity_type() != TYPE_ROLE) {
-      if (s->handoff_authz->enabled()) {
+      if (s->handoff_authz->enabled() && s->handoff_helper->enable_early_load_skip()) {
         // XXX do we have a shortcut for create_bucket with STS? or do we just
         // allow standard processing? I prefer the latter.
         ldpp_dout(s, 20) << "handoff authz: RGWHandler_REST::init_permissions(): skip OP_CREATE_BUCKET attr read" << dendl;
