@@ -1904,7 +1904,7 @@ TEST_F(AuthzGRPCTest, PopulateAuthorizeRequestXAmzHeaders)
 
   ASSERT_EQ(req.questions(0).x_amz_headers_size(), 1);
   auto& xah = req.questions(0).x_amz_headers();
-  ASSERT_TRUE(xah.find("x-amz-foo") != xah.end());
+  ASSERT_NE(xah.find("x-amz-foo"), xah.end());
   ASSERT_EQ(xah.at("x-amz-foo"), "bar");
 }
 
