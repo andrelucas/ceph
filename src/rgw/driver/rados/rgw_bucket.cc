@@ -1,6 +1,8 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab ft=cpp
 
+#include <fmt/format.h>
+
 #include "rgw_acl_s3.h"
 #include "rgw_tag_s3.h"
 
@@ -1518,11 +1520,13 @@ int RGWBucketAdminOp::info(rgw::sal::Driver* driver,
     constexpr bool no_need_stats = false; // set need_stats to false
 
     do {
+      ldpp_dout(dpp, 5) << "SAL: list_buckets()" << dendl;
       ret = user->list_buckets(dpp, marker, empty_end_marker, max_entries,
 			      no_need_stats, buckets, y);
       if (ret < 0) {
         return ret;
       }
+      ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("SAL: list_buckets() returned {} entries"), buckets.get_buckets().size()) << dendl;
 
       const std::string* marker_cursor = nullptr;
       map<string, std::unique_ptr<rgw::sal::Bucket>>& m = buckets.get_buckets();
@@ -1534,6 +1538,7 @@ int RGWBucketAdminOp::info(rgw::sal::Driver* driver,
         }
 
         if (show_stats) {
+          ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("SAL: bucket_stats() for {}"), obj_name) << dendl;
           bucket_stats(driver, user_id.tenant, obj_name, formatter, dpp);
 	} else {
           formatter->dump_string("bucket", obj_name);
@@ -1550,6 +1555,7 @@ int RGWBucketAdminOp::info(rgw::sal::Driver* driver,
 
     formatter->close_section();
   } else if (!bucket_name.empty()) {
+    ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("SAL: bucket_stats() for {}"), bucket_name) << dendl;
     ret = bucket_stats(driver, user_id.tenant, bucket_name, formatter, dpp);
     if (ret < 0) {
       return ret;
@@ -1567,6 +1573,7 @@ int RGWBucketAdminOp::info(rgw::sal::Driver* driver,
 						   &truncated);
       for (auto& bucket_name : buckets) {
         if (show_stats) {
+          ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("SAL: bucket_stats() for {}"), bucket_name) << dendl;
           bucket_stats(driver, user_id.tenant, bucket_name, formatter, dpp);
 	} else {
           formatter->dump_string("bucket", bucket_name);
