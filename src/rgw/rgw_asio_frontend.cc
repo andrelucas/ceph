@@ -285,8 +285,12 @@ void handle_connection(boost::asio::io_context& context,
                       scheduler, &user, &latency, &http_ret);
 
       if (cct->_conf->subsys.should_gather(ceph_subsys_rgw_access, 1)) {
+        std::string tracestr;
+        if (!req.otel_trace_id.empty()) {
+          tracestr = " trace_id " + req.otel_trace_id;
+        }
         // access log line elements begin per Apache Combined Log Format with additions following
-        lsubdout(cct, rgw_access, 1) << "beast: " << std::hex << &req << std::dec << ": "
+        lsubdout(cct, rgw_access, 1) << "beast: " << std::hex << &req << std::dec << tracestr << ": "
             << remote_endpoint.address() << " - " << user << " [" << log_apache_time{started} << "] \""
             << message.method_string() << ' ' << message.target() << ' '
             << http_version{message.version()} << "\" " << http_ret << ' '
