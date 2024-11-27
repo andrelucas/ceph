@@ -280,3 +280,10 @@ target_link_libraries(radosgw-cr-test ${rgw_libs} librados
   OATH::OATH
   ${CURL_LIBRARIES} ${EXPAT_LIBRARIES} ${BLKID_LIBRARIES}
   GTest::GTest)
+
+  add_executable(unittest_rgw_otel_trace test_rgw_otel_trace.cc)
+  add_ceph_unittest(unittest_rgw_otel_trace)
+  target_include_directories(unittest_rgw_otel_trace
+    SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/src/rgw"
+    SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/src/rgw/store/rados")
+  target_link_libraries(unittest_rgw_otel_trace ${rgw_libs})
