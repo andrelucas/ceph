@@ -262,6 +262,53 @@ int rgw_process_authenticated(RGWHandler_REST * const handler,
   return 0;
 }
 
+/**
+ * @brief Get the OpenTelemetery trace ID from the HTTP traceparent header in
+ * \p env.
+ *
+ * This assumes RGWEnv is set up as would be for process_request(). The
+ * traceparent header will be in \p env as 'HTTP_TRACEPARENT'. The format is
+ * strictly defined here:
+ *   https://uptrace.dev/opentelemetry/opentelemetry-traceparent.html
+ *
+ * Go to reasonable lengths to ensure the header is well-formed and safe to
+ * include in a log file. If the header is not present, or is malformed,
+ * return std::nullopt. Otherwise, return the trace ID as a string.
+ *
+ * @param dpp DoutPrefixProvider. May not be nullptr.
+ * @param env An RGWEnv reference, containing the HTTP headers.
+ * @return std::optional<std::string> A trace ID as string, otherwise
+ * std::nullopt. Errors will be sent to \p dpp at level 1.
+ */
+std::optional<std::string> get_traceid_from_traceparent(DoutPrefixProvider* dpp, const RGWEnv& env)
+{
+  namespace ba = boost::algorithm;
+  static constexpr size_t tp_expected_len = 55;
+
+  ceph_assert(dpp != nullptr);
+
+  const char* traceparent_char = env.get("HTTP_TRACEPARENT");
+  if (!traceparent_char) {
+    return std::nullopt;
+  }
+  std::string traceparent(traceparent_char);
+  // Trim any whitespace that might have crept in.
+  ba::trim(traceparent);
+  // Strictly enforce the header length.
+  if (traceparent.size() != tp_expected_len) {
+    ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("TRACEPARENT header length {} != expected length {}"), traceparent.size(), tp_expected_len) << dendl;
+    return std::nullopt;
+  }
+  // Only hex digits and hyphens are valid.
+  if (!std::all_of(traceparent.begin(), traceparent.end(), [](char c) { return std::isxdigit(c) || c == '-'; })) {
+    ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("TRACEPARENT header contents invalid")) << dendl;
+    return std::nullopt;
+  }
+  // Just return the substring. Whilst the trace ID may still be invalid, it
+  // is at least safe to output to a log file.
+  return traceparent.substr(3, 32);
+}
+
 int process_request(const RGWProcessEnv& penv,
                     RGWRequest* const req,
                     const std::string& frontend_prefix,
