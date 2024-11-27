@@ -1,7 +1,6 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab ft=cpp
 
-#include "common/errno.h"
 #include "common/Throttle.h"
 #include "common/WorkQueue.h"
 #include "include/scope_guard.h"
@@ -320,14 +319,33 @@ int process_request(const RGWProcessEnv& penv,
                     int* http_ret)
 {
   int ret = client_io->init(g_ceph_context);
-  dout(1) << "====== starting new request req=" << hex << req << dec
-	  << " =====" << dendl;
   perfcounter->inc(l_rgw_req);
 
   RGWEnv& rgw_env = client_io->get_env();
 
   req_state rstate(g_ceph_context, penv, &rgw_env, req->id);
   req_state *s = &rstate;
+
+  // Check for the traceparent header.
+  auto opt_traceid = get_traceid_from_traceparent(s, rgw_env);
+  std::string tracestr;
+  if (opt_traceid) {
+    ldpp_dout(s, 20) << "TRACEPARENT header found, trace_id=" << *opt_traceid << dendl;
+    // Set the trace ID for req_state s. This will helpfully flow through
+    // automatically to op, set below, because RGWOp::gen_prefix() will use
+    // its consituent req_state to generate the prefix.
+    s->otel_trace_id = *opt_traceid;
+    // The the trace ID in the RGWRequest passed in to us. This allows us to
+    // use it in the beast access log line, which is output by the caller of
+    // process_request().
+    req->otel_trace_id = *opt_traceid;
+    // This is used in the 'starting' and 'req done' log lines below, which
+    // use dout() instead of ldpp_dout().
+    tracestr = " trace_id " + *opt_traceid;
+  }
+
+  dout(1) << "====== starting new request req=" << hex << req << dec
+          << tracestr << " =====" << dendl;
 
   s->ratelimit_data = penv.ratelimiting->get_active();
 
@@ -508,12 +526,12 @@ done:
   if (latency) {
     *latency = lat;
   }
-  dout(1) << "====== req done req=" << hex << req << dec
-	  << " op status=" << op_ret
-	  << " http_status=" << s->err.http_ret
-	  << " latency=" << lat
-	  << " ======"
-	  << dendl;
+  dout(1) << "====== req done req=" << hex << req << dec << tracestr
+          << " op status=" << op_ret
+          << " http_status=" << s->err.http_ret
+          << " latency=" << lat
+          << " ======"
+          << dendl;
 
   return (ret < 0 ? ret : s->err.ret);
 } /* process_request */
