@@ -1,7 +1,6 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab ft=cpp
 
-#include "common/errno.h"
 #include "common/Throttle.h"
 #include "common/WorkQueue.h"
 #include "include/scope_guard.h"
@@ -291,14 +290,59 @@ int process_request(const RGWProcessEnv& penv,
                     int* http_ret)
 {
   int ret = client_io->init(g_ceph_context);
-  dout(1) << "====== starting new request req=" << hex << req << dec
-	  << " =====" << dendl;
   perfcounter->inc(l_rgw_req);
 
   RGWEnv& rgw_env = client_io->get_env();
 
   req_state rstate(g_ceph_context, penv, &rgw_env, req->id);
   req_state *s = &rstate;
+
+  //
+  // Tracing setup.
+  //
+
+  // Check for the traceparent header.
+  const char* traceparent_char = rgw_env.get("HTTP_TRACEPARENT");
+  if (traceparent_char) {
+    std::string traceparent = traceparent_char;
+    boost::algorithm::trim(traceparent);
+    s->otel_traceparent = std::move(traceparent);
+  }
+  if (tracing::rgw::tracer.is_enabled()) {
+    // Likewise the tracestate header, but only if tracing is enabled -
+    // tracestate is only used for Jaeger/Otel traces, whereas traceparent
+    // contains the trace ID which is also used for logging.
+    const char* tracestate_char = rgw_env.get("HTTP_TRACESTATE");
+    if (tracestate_char) {
+      std::string tracestate = tracestate_char;
+      boost::algorithm::trim(tracestate);
+      s->otel_tracestate = std::move(tracestate);
+    }
+  }
+
+  std::string tracestr;
+  if (!s->otel_traceparent.empty()) {
+    auto opt_traceid = get_traceid_from_traceparent(s, s->otel_traceparent);
+    if (opt_traceid) {
+      ldpp_dout(s, 20) << "traceparent header present, trace_id=" << *opt_traceid << dendl;
+
+      // Set the trace ID for req_state s. This will helpfully flow through
+      // automatically to op, set below, because RGWOp::gen_prefix() will use
+      // its consituent req_state to generate the prefix.
+      s->otel_trace_id = *opt_traceid;
+      // The the trace ID in the RGWRequest passed in to us. This allows us to
+      // use it in the beast access log line, which is output by the caller of
+      // process_request().
+      req->otel_trace_id = *opt_traceid;
+      // This is used in the 'starting' and 'req done' log lines below, which
+      // use dout() instead of ldpp_dout().
+      tracestr = " trace_id " + *opt_traceid;
+    }
+  }
+  // End of tracing setup.
+
+  dout(1) << "====== starting new request req=" << hex << req << dec
+          << tracestr << " =====" << dendl;
 
   s->ratelimit_data = penv.ratelimiting->get_active();
 
@@ -407,9 +451,17 @@ int process_request(const RGWProcessEnv& penv,
 
 
     const auto trace_name = std::string(op->name()) + " " + s->trans_id;
-    s->trace = tracing::rgw::tracer.start_trace(trace_name, s->trace_enabled);
+    if (!s->otel_traceparent.empty()) {
+      s->trace = tracing::rgw::tracer.start_trace_with_req_state_parent(trace_name,
+          s->trace_enabled, s->otel_traceparent, s->otel_tracestate);
+    } else {
+      s->trace = tracing::rgw::tracer.start_trace(trace_name, s->trace_enabled);
+    }
     s->trace->SetAttribute(tracing::rgw::OP, op->name());
     s->trace->SetAttribute(tracing::rgw::TYPE, tracing::rgw::REQUEST);
+    if (s->cct->_conf->rgw_jaeger_agent_extra_attributes) {
+      set_extra_trace_attributes(s, s->trace);
+    }
 
     ret = rgw_process_authenticated(handler, op, req, s, yield, driver);
     if (ret < 0) {
@@ -483,12 +535,12 @@ done:
   if (latency) {
     *latency = lat;
   }
-  dout(1) << "====== req done req=" << hex << req << dec
-	  << " op status=" << op_ret
-	  << " http_status=" << s->err.http_ret
-	  << " latency=" << lat
-	  << " ======"
-	  << dendl;
+  dout(1) << "====== req done req=" << hex << req << dec << tracestr
+          << " op status=" << op_ret
+          << " http_status=" << s->err.http_ret
+          << " latency=" << lat
+          << " ======"
+          << dendl;
 
   return (ret < 0 ? ret : s->err.ret);
 } /* process_request */
