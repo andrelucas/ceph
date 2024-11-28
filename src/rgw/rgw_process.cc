@@ -279,23 +279,49 @@ int process_request(const RGWProcessEnv& penv,
   req_state rstate(g_ceph_context, penv, &rgw_env, req->id);
   req_state *s = &rstate;
 
+  //
+  // Tracing setup.
+  //
+
   // Check for the traceparent header.
-  auto opt_traceid = get_traceid_from_traceparent(s, rgw_env);
-  std::string tracestr;
-  if (opt_traceid) {
-    ldpp_dout(s, 20) << "TRACEPARENT header found, trace_id=" << *opt_traceid << dendl;
-    // Set the trace ID for req_state s. This will helpfully flow through
-    // automatically to op, set below, because RGWOp::gen_prefix() will use
-    // its consituent req_state to generate the prefix.
-    s->otel_trace_id = *opt_traceid;
-    // The the trace ID in the RGWRequest passed in to us. This allows us to
-    // use it in the beast access log line, which is output by the caller of
-    // process_request().
-    req->otel_trace_id = *opt_traceid;
-    // This is used in the 'starting' and 'req done' log lines below, which
-    // use dout() instead of ldpp_dout().
-    tracestr = " trace_id " + *opt_traceid;
+  const char* traceparent_char = rgw_env.get("HTTP_TRACEPARENT");
+  if (traceparent_char) {
+    std::string traceparent = traceparent_char;
+    boost::algorithm::trim(traceparent);
+    s->otel_traceparent = std::move(traceparent);
   }
+  if (tracing::rgw::tracer.is_enabled()) {
+    // Likewise the tracestate header, but only if tracing is enabled -
+    // tracestate is only used for Jaeger/Otel traces, whereas traceparent
+    // contains the trace ID which is also used for logging.
+    const char* tracestate_char = rgw_env.get("HTTP_TRACESTATE");
+    if (tracestate_char) {
+      std::string tracestate = tracestate_char;
+      boost::algorithm::trim(tracestate);
+      s->otel_tracestate = std::move(tracestate);
+    }
+  }
+
+  std::string tracestr;
+  if (!s->otel_traceparent.empty()) {
+    auto opt_traceid = get_traceid_from_traceparent(s, s->otel_traceparent);
+    if (opt_traceid) {
+      ldpp_dout(s, 20) << "traceparent header present, trace_id=" << *opt_traceid << dendl;
+
+      // Set the trace ID for req_state s. This will helpfully flow through
+      // automatically to op, set below, because RGWOp::gen_prefix() will use
+      // its consituent req_state to generate the prefix.
+      s->otel_trace_id = *opt_traceid;
+      // The the trace ID in the RGWRequest passed in to us. This allows us to
+      // use it in the beast access log line, which is output by the caller of
+      // process_request().
+      req->otel_trace_id = *opt_traceid;
+      // This is used in the 'starting' and 'req done' log lines below, which
+      // use dout() instead of ldpp_dout().
+      tracestr = " trace_id " + *opt_traceid;
+    }
+  }
+  // End of tracing setup.
 
   dout(1) << "====== starting new request req=" << hex << req << dec
           << tracestr << " =====" << dendl;
