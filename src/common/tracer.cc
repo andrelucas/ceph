@@ -85,9 +85,6 @@ jspan Tracer::start_trace_with_req_state_parent(opentelemetry::nostd::string_vie
   trace::StartSpanOptions span_opts;
   span_opts.parent = remote_span->GetContext();
 
-  using namespace opentelemetry::trace;
-  using namespace opentelemetry::context;
-
   return tracer->StartSpan(trace_name, {}, span_opts);
 }
 
