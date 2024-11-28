@@ -6337,7 +6337,6 @@ void RGWInitMultipart::pre_exec()
 
 void RGWInitMultipart::execute(optional_yield y)
 {
-  multipart_trace = tracing::rgw::tracer.start_trace(tracing::rgw::MULTIPART, s->trace_enabled);
   bufferlist aclbl, tracebl;
   rgw::sal::Attrs attrs;
 
@@ -6389,7 +6388,6 @@ void RGWInitMultipart::execute(optional_yield y)
   }
   s->trace->SetAttribute(tracing::rgw::UPLOAD_ID, upload_id);
   multipart_trace->UpdateName(tracing::rgw::MULTIPART + upload_id);
-
 }
 
 int RGWCompleteMultipart::verify_permission(optional_yield y)
