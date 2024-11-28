@@ -429,7 +429,12 @@ int process_request(const RGWProcessEnv& penv,
 
 
     const auto trace_name = std::string(op->name()) + " " + s->trans_id;
-    s->trace = tracing::rgw::tracer.start_trace(trace_name, s->trace_enabled);
+    if (!s->otel_traceparent.empty()) {
+      s->trace = tracing::rgw::tracer.start_trace_with_req_state_parent(trace_name,
+          s->trace_enabled, s->otel_traceparent, s->otel_tracestate);
+    } else {
+      s->trace = tracing::rgw::tracer.start_trace(trace_name, s->trace_enabled);
+    }
     s->trace->SetAttribute(tracing::rgw::OP, op->name());
     s->trace->SetAttribute(tracing::rgw::TYPE, tracing::rgw::REQUEST);
 
