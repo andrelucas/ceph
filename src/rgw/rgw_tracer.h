@@ -32,3 +32,7 @@ static inline void extract_span_context(const rgw::sal::Attrs& attr, jspan_conte
     } catch (buffer::error& err) {}
   }
 }
+
+// Utility function for process_request(), used also by unit tests.
+extern std::optional<std::string> get_traceid_from_traceparent(DoutPrefixProvider* dpp, const std::string& traceparent);
+
