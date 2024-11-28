@@ -6326,6 +6326,16 @@ void RGWInitMultipart::execute(optional_yield y)
   bufferlist aclbl, tracebl;
   rgw::sal::Attrs attrs;
 
+  if (!s->otel_traceparent.empty()) {
+    multipart_trace = tracing::rgw::tracer.start_trace_with_req_state_parent(tracing::rgw::MULTIPART,
+        s->trace_enabled, s->otel_traceparent, s->otel_tracestate);
+  } else {
+    multipart_trace = tracing::rgw::tracer.start_trace(tracing::rgw::MULTIPART, s->trace_enabled);
+  }
+  if (s->cct->_conf->rgw_jaeger_agent_extra_attributes) {
+    set_extra_trace_attributes(s, multipart_trace);
+  }
+
   op_ret = get_params(y);
   if (op_ret < 0) {
     return;
