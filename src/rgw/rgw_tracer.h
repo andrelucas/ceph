@@ -36,3 +36,4 @@ static inline void extract_span_context(const rgw::sal::Attrs& attr, jspan_conte
 // Utility function for process_request(), used also by unit tests.
 extern std::optional<std::string> get_traceid_from_traceparent(DoutPrefixProvider* dpp, const std::string& traceparent);
 
+extern void set_extra_trace_attributes(const req_state* s, jspan span);

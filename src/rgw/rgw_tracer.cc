@@ -4,6 +4,8 @@
 #include <string>
 #include "rgw_tracer.h"
 
+#include "opentelemetry/trace/experimental_semantic_conventions.h"
+
 namespace tracing {
 namespace rgw {
 
@@ -51,3 +53,23 @@ std::optional<std::string> get_traceid_from_traceparent(DoutPrefixProvider* dpp,
   return traceparent.substr(3, 32);
 }
 
+/**
+ * @brief Set additional attributes on a trace using request information.
+ *
+ * @param s The req_state.
+ * @param span A configured span.
+ */
+void set_extra_trace_attributes(const req_state* s, jspan span)
+{
+  if (!s->trace_enabled) {
+    return;
+  }
+  using namespace opentelemetry::trace;
+  span->SetAttribute(OTEL_GET_TRACE_ATTR(AttrHttpRequestContentLength), s->content_length);
+  if (s->info.method) { // _Should_ never be null, req_info::req_info() defaults it to "".
+    span->SetAttribute(OTEL_GET_TRACE_ATTR(AttrHttpMethod), s->info.method);
+  }
+  span->SetAttribute("akamai.rgw.host", s->info.host);
+  span->SetAttribute("akamai.rgw.relative_uri", s->relative_uri);
+  span->SetAttribute("akamai.rgw.request_uri", s->info.request_uri);
+}

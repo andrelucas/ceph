@@ -437,6 +437,9 @@ int process_request(const RGWProcessEnv& penv,
     }
     s->trace->SetAttribute(tracing::rgw::OP, op->name());
     s->trace->SetAttribute(tracing::rgw::TYPE, tracing::rgw::REQUEST);
+    if (s->cct->_conf->rgw_jaeger_agent_extra_attributes) {
+      set_extra_trace_attributes(s, s->trace);
+    }
 
     ret = rgw_process_authenticated(handler, op, req, s, yield, driver);
     if (ret < 0) {
