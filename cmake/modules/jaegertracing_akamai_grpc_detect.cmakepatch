@@ -1,8 +1,7 @@
-Submodule src/jaegertracing/opentelemetry-cpp contains modified content
-diff --git a/src/jaegertracing/opentelemetry-cpp/CMakeLists.txt b/src/jaegertracing/opentelemetry-cpp/CMakeLists.txt
+diff --git a/CMakeLists.txt b/CMakeLists.txt
 index 6d2b2743..7fa86c7c 100755
---- a/src/jaegertracing/opentelemetry-cpp/CMakeLists.txt
-+++ b/src/jaegertracing/opentelemetry-cpp/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
 @@ -297,7 +297,7 @@ endif()
  
  if(WITH_OTLP)
