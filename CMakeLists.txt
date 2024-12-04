@@ -505,7 +505,7 @@ if(WITH_RADOSGW)
 
     list(APPEND CMAKE_PREFIX_PATH ${RGW_ABSL_ROOT_DIR}/lib/cmake/absl)
 
-    foreach(pkg in utf8_range protobuf grpc)
+    foreach(pkg utf8_range protobuf grpc)
       list(APPEND CMAKE_PREFIX_PATH ${RGW_GRPC_ROOT_DIR}/lib/cmake/${pkg})
     endforeach()
 
