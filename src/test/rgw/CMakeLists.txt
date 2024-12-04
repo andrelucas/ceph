@@ -301,3 +301,9 @@ target_link_libraries(unittest_rgw_auth_handoff
   ${UNITTEST_LIBS}
   ${rgw_libs}
 )
+add_executable(unittest_rgw_otel_trace test_rgw_otel_trace.cc)
+add_ceph_unittest(unittest_rgw_otel_trace)
+target_include_directories(unittest_rgw_otel_trace
+  SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/src/rgw"
+  SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/src/rgw/store/rados")
+target_link_libraries(unittest_rgw_otel_trace ${rgw_libs})

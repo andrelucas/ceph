@@ -25,6 +25,7 @@ void Tracer::init(opentelemetry::nostd::string_view service_name) {
   if (!tracer) {
     opentelemetry::exporter::jaeger::JaegerExporterOptions exporter_options;
     if (g_ceph_context) {
+      exporter_options.endpoint = g_ceph_context->_conf.get_val<std::string>("jaeger_agent_host");
       exporter_options.server_port = g_ceph_context->_conf.get_val<int64_t>("jaeger_agent_port");
     }
     const opentelemetry::sdk::trace::BatchSpanProcessorOptions processor_options;
