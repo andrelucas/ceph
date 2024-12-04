@@ -511,6 +511,7 @@ if(WITH_RADOSGW)
 
     find_package(absl REQUIRED)
     find_package(utf8_range REQUIRED)
+    set(protobuf_MODULE_COMPATIBLE TRUE)
     find_package(protobuf REQUIRED)
     find_package(gRPC REQUIRED)
 
