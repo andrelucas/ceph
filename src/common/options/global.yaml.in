@@ -6395,6 +6395,34 @@ options:
   services:
   - rgw
   - osd
+- name: otlp_tracing_enable
+  type: bool
+  level: advanced
+  desc: Ceph should use OpenTelemetry tracing system
+  long_desc: Send OpenTelemetry traces to a collector using gRPC. If true,
+    this will disable Jaeger traces.
+  see_also:
+  - jaeger_tracing_enable
+  - otlp_endpoint_url
+  default: false
+  services:
+  - rgw
+  - osd
+  with_legacy: true
+- name: otlp_endpoint_url
+  type: str
+  level: advanced
+  desc: Endpoint of the OpenTelemetry collector
+  long_desc: The endpoint of the OpenTelemetry collector to which traces should
+    be sent. This is an http(s) URL, not a gRPC endpoint spec. That's what
+    the OpenTelemetry library wants. https is not currently supported.
+  see_also:
+  - otlp_tracing_enable
+  default: http://127.0.0.1:4317
+  services:
+  - rgw
+  - osd
+  with_legacy: true
 - name: mgr_ttl_cache_expire_seconds
   type: uint
   level: dev

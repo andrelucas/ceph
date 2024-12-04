@@ -10,6 +10,7 @@
 #ifdef HAVE_JAEGER
 #include "opentelemetry/context/propagation/global_propagator.h"
 #include "opentelemetry/exporters/jaeger/jaeger_exporter.h"
+#include "opentelemetry/exporters/otlp/otlp_grpc_exporter.h"
 #include "opentelemetry/sdk/trace/batch_span_processor.h"
 #include "opentelemetry/sdk/trace/tracer_provider.h"
 #include "opentelemetry/trace/propagation/http_trace_context.h"
@@ -27,16 +28,36 @@ Tracer::Tracer(opentelemetry::nostd::string_view service_name) {
 
 void Tracer::init(opentelemetry::nostd::string_view service_name) {
   if (!tracer) {
-    opentelemetry::exporter::jaeger::JaegerExporterOptions exporter_options;
-    if (g_ceph_context) {
-      exporter_options.endpoint = g_ceph_context->_conf.get_val<std::string>("jaeger_agent_host");
-      exporter_options.server_port = g_ceph_context->_conf.get_val<int64_t>("jaeger_agent_port");
-    }
+    opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider> provider;
     const opentelemetry::sdk::trace::BatchSpanProcessorOptions processor_options;
-    const auto jaeger_resource = opentelemetry::sdk::resource::Resource::Create(std::move(opentelemetry::sdk::resource::ResourceAttributes{{"service.name", service_name}}));
-    auto jaeger_exporter = std::unique_ptr<opentelemetry::sdk::trace::SpanExporter>(new opentelemetry::exporter::jaeger::JaegerExporter(exporter_options));
-    auto processor = std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor>(new opentelemetry::sdk::trace::BatchSpanProcessor(std::move(jaeger_exporter), processor_options));
-    const auto provider = opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>(new opentelemetry::sdk::trace::TracerProvider(std::move(processor), jaeger_resource));
+
+    if (g_ceph_context->_conf->otlp_tracing_enable) {
+      // Select OTLP (OpenTelemetry Protocol) and configure for gRPC traces.
+      opentelemetry::exporter::otlp::OtlpGrpcExporterOptions otlp_exporter_options;
+      if (g_ceph_context) {
+        otlp_exporter_options.endpoint = g_ceph_context->_conf->otlp_endpoint_url;
+        otlp_exporter_options.use_ssl_credentials = false; // XXX !!!
+      }
+      const auto otlp_resource = opentelemetry::sdk::resource::Resource::Create(std::move(opentelemetry::sdk::resource::ResourceAttributes { { "service.name", service_name } }));
+      auto otlp_exporter = std::unique_ptr<opentelemetry::sdk::trace::SpanExporter>(new opentelemetry::exporter::otlp::OtlpGrpcExporter(otlp_exporter_options));
+
+      auto processor = std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor>(new opentelemetry::sdk::trace::BatchSpanProcessor(std::move(otlp_exporter), processor_options));
+      provider = opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>(new opentelemetry::sdk::trace::TracerProvider(std::move(processor), otlp_resource));
+
+    } else {
+      // Default is a Jaeger trace.
+      opentelemetry::exporter::jaeger::JaegerExporterOptions exporter_options;
+      if (g_ceph_context) {
+        exporter_options.endpoint = g_ceph_context->_conf.get_val<std::string>("jaeger_agent_host");
+        exporter_options.server_port = g_ceph_context->_conf.get_val<int64_t>("jaeger_agent_port");
+      }
+      const auto jaeger_resource = opentelemetry::sdk::resource::Resource::Create(std::move(opentelemetry::sdk::resource::ResourceAttributes { { "service.name", service_name } }));
+      auto jaeger_exporter = std::unique_ptr<opentelemetry::sdk::trace::SpanExporter>(new opentelemetry::exporter::jaeger::JaegerExporter(exporter_options));
+
+      auto processor = std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor>(new opentelemetry::sdk::trace::BatchSpanProcessor(std::move(jaeger_exporter), processor_options));
+      provider = opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>(new opentelemetry::sdk::trace::TracerProvider(std::move(processor), jaeger_resource));
+    }
+
     opentelemetry::trace::Provider::SetTracerProvider(provider);
     tracer = provider->GetTracer(service_name, OPENTELEMETRY_SDK_VERSION);
   }
@@ -107,7 +128,7 @@ jspan Tracer::add_span(opentelemetry::nostd::string_view span_name, const jspan_
 }
 
 bool Tracer::is_enabled() const {
-  return g_ceph_context->_conf->jaeger_tracing_enable;
+  return g_ceph_context->_conf->jaeger_tracing_enable || g_ceph_context->_conf->otlp_tracing_enable;
 }
 
 void encode(const jspan_context& span_ctx, bufferlist& bl, uint64_t f) {
