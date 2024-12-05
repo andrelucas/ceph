@@ -133,7 +133,13 @@ struct Tracer {
   jspan start_trace(std::string_view, bool enabled = true) { return {}; }
   jspan add_span(std::string_view, const jspan&) { return {}; }
   jspan add_span(std::string_view span_name, const jspan_context& parent_ctx) { return {}; }
-  jspan start_trace_with_req_state_parent(opentelemetry::nostd::string_view trace_name, bool trace_is_enabled, const std::string& traceparent_header, const std::string& tracestate_header) { return {}; };
+  jspan
+  start_trace_with_req_state_parent(std::string_view trace_name,
+                                    bool trace_is_enabled,
+                                    const std::string &traceparent_header,
+                                    const std::string &tracestate_header) {
+    return {};
+  };
   void init(std::string_view service_name) {}
 };
   inline void encode(const jspan_context& span, bufferlist& bl, uint64_t f=0) {}
