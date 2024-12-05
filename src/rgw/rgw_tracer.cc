@@ -4,7 +4,9 @@
 #include <string>
 #include "rgw_tracer.h"
 
+#ifdef HAVE_JAEGER
 #include "opentelemetry/trace/experimental_semantic_conventions.h"
+#endif // HAVE_JAEGER
 
 namespace tracing {
 namespace rgw {
@@ -61,6 +63,7 @@ std::optional<std::string> get_traceid_from_traceparent(DoutPrefixProvider* dpp,
  */
 void set_extra_trace_attributes(const req_state* s, jspan span)
 {
+#ifdef HAVE_JAEGER
   if (!s->trace_enabled) {
     return;
   }
@@ -72,4 +75,5 @@ void set_extra_trace_attributes(const req_state* s, jspan span)
   span->SetAttribute("akamai.rgw.host", s->info.host);
   span->SetAttribute("akamai.rgw.relative_uri", s->relative_uri);
   span->SetAttribute("akamai.rgw.request_uri", s->info.request_uri);
+#endif // HAVE_JAEGER
 }
