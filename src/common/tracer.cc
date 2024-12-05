@@ -4,8 +4,6 @@
 #include "tracer.h"
 #include "common/ceph_context.h"
 #include "global/global_context.h"
-#include <opentelemetry/trace/experimental_semantic_conventions.h>
-#include <opentelemetry/trace/span_startoptions.h>
 
 #ifdef HAVE_JAEGER
 #include "opentelemetry/context/propagation/global_propagator.h"
@@ -13,7 +11,9 @@
 #include "opentelemetry/exporters/otlp/otlp_grpc_exporter.h"
 #include "opentelemetry/sdk/trace/batch_span_processor.h"
 #include "opentelemetry/sdk/trace/tracer_provider.h"
+#include <opentelemetry/trace/experimental_semantic_conventions.h>
 #include "opentelemetry/trace/propagation/http_trace_context.h"
+#include <opentelemetry/trace/span_startoptions.h>
 
 namespace tracing {
 
