@@ -18,6 +18,12 @@
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/server_credentials.h>
 
+#include "acconfig.h"
+
+#ifdef HAVE_JAEGER
+#include "opentelemetry/context/propagation/text_map_propagator.h"
+#endif // HAVE_JAEGER
+
 #include <memory>
 #include <optional>
 #include <shared_mutex>
@@ -140,5 +146,40 @@ std::optional<::authorizer::v1::S3Opcode> iam_s3_to_grpc_opcode(uint64_t iam_s3)
  * otherwise std::nullopt.
  */
 std::optional<uint64_t> grpc_opcode_to_iam_s3(::authorizer::v1::S3Opcode grpc_opcode);
+
+#ifdef HAVE_JAEGER
+/**
+ * @brief Support class for injecting OpenTelemetry context into gRPC metadata.
+ *
+ * Copied with minor edits from the OpenTelemetry C++ SDK at:
+ *   https://github.com/open-telemetry/opentelemetry-cpp/blob/main/examples/grpc/tracer_common.h
+ */
+class HandoffGrpcClientCarrier
+    : public opentelemetry::context::propagation::TextMapCarrier {
+public:
+  HandoffGrpcClientCarrier(grpc::ClientContext *context) : context_(context) {}
+  HandoffGrpcClientCarrier() = default;
+  virtual opentelemetry::nostd::string_view
+  Get(opentelemetry::nostd::string_view /* key */) const noexcept override {
+    return "";
+  }
+
+  virtual void Set(opentelemetry::nostd::string_view key,
+                   opentelemetry::nostd::string_view value) noexcept override {
+    // std::cout << " Client ::: Adding " << key << " " << value << "\n";
+    context_->AddMetadata(std::string(key), std::string(value));
+  }
+
+  grpc::ClientContext *context_;
+};
+
+#endif // HAVE_JAEGER
+
+/**
+ * @brief Load the current tracer context into the gRPC client context.
+ *
+ * @param context pointer to a grpc::ClientContext object.
+ */
+void populate_trace_context(grpc::ClientContext *context);
 
 } // namespace rgw

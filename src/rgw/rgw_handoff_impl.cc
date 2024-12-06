@@ -241,6 +241,7 @@ HandoffAuthResult AuthServiceClient::Auth(const AuthenticateRESTRequest& req, co
   ::grpc::ClientContext context;
   AuthenticateRESTResponse resp;
 
+  populate_trace_context(&context);
   ::grpc::Status status = stub_->AuthenticateREST(&context, req, &resp);
 
   using namespace authenticator::v1;
@@ -299,6 +300,7 @@ AuthServiceClient::GetSigningKey(const GetSigningKeyRequest req)
   ::grpc::ClientContext context;
   GetSigningKeyResponse resp;
 
+  populate_trace_context(&context);
   ::grpc::Status status = stub_->GetSigningKey(&context, req, &resp);
   if (status.ok()) {
     auto key = resp.signing_key();
@@ -1240,6 +1242,7 @@ bool AuthorizerClient::Ping(const std::string& id)
   common->set_authorization_id(id);
   PingResponse resp;
 
+  populate_trace_context(&context);
   ::grpc::Status status = stub_->Ping(&context, req, &resp);
   if (!status.ok()) {
     return false;
@@ -1540,6 +1543,7 @@ AuthorizerClient::AuthorizeResult AuthorizerClient::AuthorizeV2(AuthorizeV2Reque
   ::grpc::ClientContext context;
   AuthorizeV2Response resp;
 
+  populate_trace_context(&context);
   ::grpc::Status status = stub_->AuthorizeV2(&context, req, &resp);
   if (status.ok()) {
     // Check the response structure. We need the right number of answers, and

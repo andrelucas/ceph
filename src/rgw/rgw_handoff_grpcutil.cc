@@ -14,6 +14,11 @@
 #include "common/dout.h"
 #include "rgw/rgw_iam_policy.h"
 
+#ifdef HAVE_JAEGER
+#include "opentelemetry/context/propagation/global_propagator.h"
+#include "opentelemetry/context/runtime_context.h"
+#endif // HAVE_JAEGER
+
 // #include "authorizer/v1/authorizer.grpc.pb.h"
 #include "authorizer/v1/authorizer.pb.h"
 
@@ -268,6 +273,17 @@ std::optional<uint64_t> grpc_opcode_to_iam_s3(::authorizer::v1::S3Opcode grpc_op
   } else {
     return std::nullopt;
   }
+}
+
+void populate_trace_context(grpc::ClientContext *context) {
+#ifdef HAVE_JAEGER
+  // inject current context to grpc metadata
+  auto current_ctx = opentelemetry::context::RuntimeContext::GetCurrent();
+  HandoffGrpcClientCarrier carrier(context);
+  auto prop = opentelemetry::context::propagation::GlobalTextMapPropagator::
+      GetGlobalPropagator();
+  prop->Inject(carrier, current_ctx);
+#endif // HAVE_JAEGER
 }
 
 } // namespace rgw
