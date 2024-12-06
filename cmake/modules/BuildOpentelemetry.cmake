@@ -89,7 +89,7 @@ function(build_opentelemetry)
   ExternalProject_Add(opentelemetry-cpp
     SOURCE_DIR ${opentelemetry_SOURCE_DIR}
     PREFIX "opentelemetry-cpp"
-    PATCH_COMMAND git apply ${CMAKE_SOURCE_DIR}/cmake/modules/jaegertracing_akamai_grpc_detect.cmakepatch
+    PATCH_COMMAND git reset --hard && git apply ${CMAKE_SOURCE_DIR}/cmake/modules/jaegertracing_akamai_grpc_detect.cmakepatch
     LIST_SEPARATOR |
     CMAKE_ARGS ${opentelemetry_CMAKE_ARGS} -DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH_ALT_SEP}
     BUILD_COMMAND ${make_cmd}
