@@ -19,6 +19,8 @@
 #include <grpcpp/security/server_credentials.h>
 
 #include "acconfig.h"
+#include "common/tracer.h"
+#include "rgw/rgw_common.h"
 
 #ifdef HAVE_JAEGER
 #include "opentelemetry/context/propagation/text_map_propagator.h"
@@ -29,7 +31,6 @@
 #include <shared_mutex>
 
 #include "authorizer/v1/authorizer.pb.h"
-#include "common/ceph_context.h"
 
 namespace rgw {
 
@@ -166,7 +167,6 @@ public:
 
   virtual void Set(opentelemetry::nostd::string_view key,
                    opentelemetry::nostd::string_view value) noexcept override {
-    // std::cout << " Client ::: Adding " << key << " " << value << "\n";
     context_->AddMetadata(std::string(key), std::string(value));
   }
 
@@ -176,10 +176,44 @@ public:
 #endif // HAVE_JAEGER
 
 /**
- * @brief Load the current tracer context into the gRPC client context.
+ * @brief Load a tracer Context into the provided gRPC client context.
+ *
+ * When tracing is enabled, we want to decorate the gRPC client context with
+ * information about the enclosing span. The OpenTelemetry library does this
+ * via its propagation interface, which is fiddly enough that we want it
+ * hidden behind a nice simple function.
  *
  * @param context pointer to a grpc::ClientContext object.
+ * @param jspan the current tracing span, typically found in \p
+ * req_state->trace.
  */
-void populate_trace_context(grpc::ClientContext *context);
+void populate_trace_context(grpc::ClientContext *context, jspan trace);
+
+/**
+ * @brief Return a current trace context if tracing is enabled, otherwise
+ * nullopt.
+ *
+ * std::optional<jspan> is commonly passed to gRPC client wrapper calls, so
+ * this makes those calls easy to read.
+ *
+ * E.g.
+ * ```
+ *   auto result = client.Auth(req, s->handoff_authz.get(), optional_trace(s));
+ * ```
+ *
+ * is far nicer than:
+ * ```
+ *   std::optional<jspan> trace;
+ *   if (s->trace_enabled) {
+ *     trace = s->trace;
+ *   }
+ *   auto result = client.Auth(req, s->handoff_authz.get(), trace);
+ * ```
+ *
+ * @param s The req_state.
+ * @return std::optional<jspan> Contents of \p s->trace if tracing is enabled,
+ * otherwise std::nullopt.
+ */
+std::optional<jspan> optional_trace(const req_state *s);
 
 } // namespace rgw

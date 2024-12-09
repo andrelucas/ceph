@@ -17,6 +17,9 @@
 #ifdef HAVE_JAEGER
 #include "opentelemetry/context/propagation/global_propagator.h"
 #include "opentelemetry/context/runtime_context.h"
+#include "opentelemetry/trace/propagation/http_trace_context.h"
+#include <opentelemetry/context/context.h>
+#include <opentelemetry/context/propagation/text_map_propagator.h>
 #endif // HAVE_JAEGER
 
 // #include "authorizer/v1/authorizer.grpc.pb.h"
@@ -275,15 +278,29 @@ std::optional<uint64_t> grpc_opcode_to_iam_s3(::authorizer::v1::S3Opcode grpc_op
   }
 }
 
-void populate_trace_context(grpc::ClientContext *context) {
+void populate_trace_context(grpc::ClientContext *context, jspan trace) {
 #ifdef HAVE_JAEGER
-  // inject current context to grpc metadata
+  if (!trace) {
+    return;
+  }
+  auto provider = opentelemetry::trace::Provider::GetTracerProvider();
+  auto tracer = provider->GetTracer("authn-client");
+  auto scope = tracer->WithActiveSpan(trace);
+
   auto current_ctx = opentelemetry::context::RuntimeContext::GetCurrent();
   HandoffGrpcClientCarrier carrier(context);
   auto prop = opentelemetry::context::propagation::GlobalTextMapPropagator::
       GetGlobalPropagator();
   prop->Inject(carrier, current_ctx);
 #endif // HAVE_JAEGER
+}
+
+std::optional<jspan> optional_trace(const req_state *s) {
+  if (s->trace_enabled) {
+    return s->trace;
+  } else {
+    return std::nullopt;
+  }
 }
 
 } // namespace rgw
