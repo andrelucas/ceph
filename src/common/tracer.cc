@@ -4,16 +4,18 @@
 #include "tracer.h"
 #include "common/ceph_context.h"
 #include "global/global_context.h"
+#include <opentelemetry/context/context.h>
 
 #ifdef HAVE_JAEGER
 #include "opentelemetry/context/propagation/global_propagator.h"
 #include "opentelemetry/exporters/jaeger/jaeger_exporter.h"
+#include "opentelemetry/exporters/ostream/span_exporter.h"
 #include "opentelemetry/exporters/otlp/otlp_grpc_exporter.h"
 #include "opentelemetry/sdk/trace/batch_span_processor.h"
 #include "opentelemetry/sdk/trace/tracer_provider.h"
-#include <opentelemetry/trace/experimental_semantic_conventions.h>
+#include "opentelemetry/trace/experimental_semantic_conventions.h"
 #include "opentelemetry/trace/propagation/http_trace_context.h"
-#include <opentelemetry/trace/span_startoptions.h>
+#include "opentelemetry/trace/span_startoptions.h"
 
 namespace tracing {
 
@@ -60,6 +62,13 @@ void Tracer::init(opentelemetry::nostd::string_view service_name) {
 
     opentelemetry::trace::Provider::SetTracerProvider(provider);
     tracer = provider->GetTracer(service_name, OPENTELEMETRY_SDK_VERSION);
+
+    // Set global propagator
+    opentelemetry::context::propagation::GlobalTextMapPropagator::
+        SetGlobalPropagator(
+            opentelemetry::nostd::shared_ptr<
+                opentelemetry::context::propagation::TextMapPropagator>(
+                new opentelemetry::trace::propagation::HttpTraceContext()));
   }
 }
 
@@ -86,11 +95,6 @@ jspan Tracer::start_trace_with_req_state_parent(opentelemetry::nostd::string_vie
   }
 
   using namespace opentelemetry;
-
-  // Set global propagator
-  opentelemetry::context::propagation::GlobalTextMapPropagator::SetGlobalPropagator(
-      nostd::shared_ptr<opentelemetry::context::propagation::TextMapPropagator>(
-          new opentelemetry::trace::propagation::HttpTraceContext()));
 
   // Get global propagator
   HttpTextMapCarrier<opentelemetry::ext::http::client::Headers> carrier;

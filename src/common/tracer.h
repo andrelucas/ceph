@@ -5,6 +5,7 @@
 
 #include "acconfig.h"
 #include "include/buffer.h"
+#include <opentelemetry/trace/span_context.h>
 
 #ifdef HAVE_JAEGER
 #include "opentelemetry/context/propagation/text_map_propagator.h"
