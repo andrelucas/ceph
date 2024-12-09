@@ -72,8 +72,8 @@ void set_extra_trace_attributes(const req_state* s, jspan span)
   if (s->info.method) { // _Should_ never be null, req_info::req_info() defaults it to "".
     span->SetAttribute(OTEL_GET_TRACE_ATTR(AttrHttpMethod), s->info.method);
   }
-  span->SetAttribute("akamai.rgw.host", s->info.host);
-  span->SetAttribute("akamai.rgw.relative_uri", s->relative_uri);
-  span->SetAttribute("akamai.rgw.request_uri", s->info.request_uri);
+  span->SetAttribute(tracing::akamai::HOST, s->info.host);
+  span->SetAttribute(tracing::akamai::RELATIVE_URI, s->relative_uri);
+  span->SetAttribute(tracing::akamai::REQUEST_URI, s->info.request_uri);
 #endif // HAVE_JAEGER
 }
