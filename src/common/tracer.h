@@ -5,12 +5,12 @@
 
 #include "acconfig.h"
 #include "include/buffer.h"
-#include <opentelemetry/trace/span_context.h>
 
 #ifdef HAVE_JAEGER
 #include "opentelemetry/context/propagation/text_map_propagator.h"
 #include "opentelemetry/trace/propagation/http_trace_context.h"
 #include "opentelemetry/trace/provider.h"
+#include <opentelemetry/trace/span_context.h>
 
 using jspan = opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>;
 using jspan_context = opentelemetry::trace::SpanContext;
@@ -113,6 +113,7 @@ struct span_stub {
   const jspan_context& GetContext() { return _ctx; }
   void UpdateName(std::string_view) {}
   bool IsRecording() { return false; }
+  void End() {}
 };
 
 class jspan {

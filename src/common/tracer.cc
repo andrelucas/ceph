@@ -4,8 +4,6 @@
 #include "tracer.h"
 #include "common/ceph_context.h"
 #include "global/global_context.h"
-#include <opentelemetry/context/context.h>
-#include <opentelemetry/sdk/trace/samplers/always_off.h>
 
 #ifdef HAVE_JAEGER
 #include "opentelemetry/context/propagation/global_propagator.h"
@@ -16,6 +14,8 @@
 #include "opentelemetry/sdk/trace/tracer_provider.h"
 #include "opentelemetry/trace/propagation/http_trace_context.h"
 #include "opentelemetry/trace/span_startoptions.h"
+#include <opentelemetry/context/context.h>
+#include <opentelemetry/sdk/trace/samplers/always_off.h>
 
 namespace tracing {
 
@@ -41,7 +41,8 @@ void Tracer::init(opentelemetry::nostd::string_view service_name) {
       opentelemetry::exporter::otlp::OtlpGrpcExporterOptions otlp_exporter_options;
       if (g_ceph_context) {
         otlp_exporter_options.endpoint = g_ceph_context->_conf->otlp_endpoint_url;
-        otlp_exporter_options.use_ssl_credentials = false; // XXX !!!
+        otlp_exporter_options.use_ssl_credentials =
+            otlp_exporter_options.endpoint.starts_with("https");
       }
       const auto otlp_resource = sdk::resource::Resource::Create(std::move(
           sdk::resource::ResourceAttributes{{"service.name", service_name}}));

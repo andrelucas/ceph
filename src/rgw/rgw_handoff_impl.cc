@@ -1547,18 +1547,6 @@ AuthorizerClient::AuthorizeV2(AuthorizeV2Request &req,
   ::grpc::ClientContext context;
   AuthorizeV2Response resp;
 
-  using namespace opentelemetry::trace;
-
-  // auto trace = tracing::rgw::tracer.start_trace("XXX authz", true);
-  // // auto current_ctx = opentelemetry::context::RuntimeContext::GetCurrent();
-
-  // auto provider = opentelemetry::trace::Provider::GetTracerProvider();
-  // auto tracer = provider->GetTracer("XXX");
-  // auto scope = tracer->WithActiveSpan(trace);
-
-  // SpanContext span_context = GetSpan(current_ctx)->GetContext();
-  // [[maybe_unused]] auto valid = span_context.IsValid();
-
   if (opt_span) {
     populate_trace_context(&context, *opt_span);
   }
