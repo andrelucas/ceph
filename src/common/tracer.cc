@@ -5,12 +5,14 @@
 #include "common/ceph_context.h"
 #include "global/global_context.h"
 #include <opentelemetry/context/context.h>
+#include <opentelemetry/sdk/trace/samplers/always_off.h>
 
 #ifdef HAVE_JAEGER
 #include "opentelemetry/context/propagation/global_propagator.h"
 #include "opentelemetry/exporters/jaeger/jaeger_exporter.h"
 #include "opentelemetry/exporters/otlp/otlp_grpc_exporter.h"
 #include "opentelemetry/sdk/trace/batch_span_processor.h"
+#include "opentelemetry/sdk/trace/samplers/parent.h"
 #include "opentelemetry/sdk/trace/tracer_provider.h"
 #include "opentelemetry/trace/propagation/http_trace_context.h"
 #include "opentelemetry/trace/span_startoptions.h"
@@ -31,42 +33,77 @@ void Tracer::init(opentelemetry::nostd::string_view service_name) {
     opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider> provider;
     const opentelemetry::sdk::trace::BatchSpanProcessorOptions processor_options;
 
+    using namespace opentelemetry;
+
     if (g_ceph_context->_conf->otlp_tracing_enable) {
+
       // Select OTLP (OpenTelemetry Protocol) and configure for gRPC traces.
       opentelemetry::exporter::otlp::OtlpGrpcExporterOptions otlp_exporter_options;
       if (g_ceph_context) {
         otlp_exporter_options.endpoint = g_ceph_context->_conf->otlp_endpoint_url;
         otlp_exporter_options.use_ssl_credentials = false; // XXX !!!
       }
-      const auto otlp_resource = opentelemetry::sdk::resource::Resource::Create(std::move(opentelemetry::sdk::resource::ResourceAttributes { { "service.name", service_name } }));
-      auto otlp_exporter = std::unique_ptr<opentelemetry::sdk::trace::SpanExporter>(new opentelemetry::exporter::otlp::OtlpGrpcExporter(otlp_exporter_options));
+      const auto otlp_resource = sdk::resource::Resource::Create(std::move(
+          sdk::resource::ResourceAttributes{{"service.name", service_name}}));
+      auto exporter = std::unique_ptr<sdk::trace::SpanExporter>(
+          new exporter::otlp::OtlpGrpcExporter(otlp_exporter_options));
 
-      auto processor = std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor>(new opentelemetry::sdk::trace::BatchSpanProcessor(std::move(otlp_exporter), processor_options));
-      provider = opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>(new opentelemetry::sdk::trace::TracerProvider(std::move(processor), otlp_resource));
+      namespace sdktrace = ::opentelemetry::sdk::trace;
+
+      std::unique_ptr<sdktrace::Sampler> sampler;
+      if (!g_ceph_context->_conf->otlp_sampler_parent_based) {
+        // The ParentBasedSampler delegate is not used.
+        sampler =
+            std::unique_ptr<sdktrace::Sampler>(new sdktrace::AlwaysOnSampler());
+      } else {
+        // The ParentBasedSampler delegate (fallback) is configured using option
+        // 'otlp_sampler_delegate_defaults_to_on'.
+        std::unique_ptr<sdktrace::Sampler> delegate_sampler;
+        if (g_ceph_context->_conf->otlp_sampler_delegate_defaults_to_on) {
+          delegate_sampler = std::unique_ptr<sdktrace::Sampler>(
+              new sdktrace::AlwaysOnSampler());
+        } else {
+          delegate_sampler = std::unique_ptr<sdktrace::Sampler>(
+              new sdktrace::AlwaysOffSampler());
+        }
+        sampler = std::unique_ptr<sdktrace::Sampler>(
+            new sdktrace::ParentBasedSampler(std::move(delegate_sampler)));
+      }
+
+      auto processor = std::unique_ptr<sdk::trace::SpanProcessor>(
+          new sdktrace::BatchSpanProcessor(std::move(exporter),
+                                           processor_options));
+      provider =
+          nostd::shared_ptr<trace::TracerProvider>(new sdktrace::TracerProvider(
+              std::move(processor), otlp_resource, std::move(sampler)));
 
     } else {
       // Default is a Jaeger trace.
-      opentelemetry::exporter::jaeger::JaegerExporterOptions exporter_options;
+      exporter::jaeger::JaegerExporterOptions exporter_options;
       if (g_ceph_context) {
         exporter_options.endpoint = g_ceph_context->_conf.get_val<std::string>("jaeger_agent_host");
         exporter_options.server_port = g_ceph_context->_conf.get_val<int64_t>("jaeger_agent_port");
       }
-      const auto jaeger_resource = opentelemetry::sdk::resource::Resource::Create(std::move(opentelemetry::sdk::resource::ResourceAttributes { { "service.name", service_name } }));
-      auto jaeger_exporter = std::unique_ptr<opentelemetry::sdk::trace::SpanExporter>(new opentelemetry::exporter::jaeger::JaegerExporter(exporter_options));
+      const auto jaeger_resource = sdk::resource::Resource::Create(std::move(
+          sdk::resource::ResourceAttributes{{"service.name", service_name}}));
+      auto exporter = std::unique_ptr<sdk::trace::SpanExporter>(
+          new exporter::jaeger::JaegerExporter(exporter_options));
 
-      auto processor = std::unique_ptr<opentelemetry::sdk::trace::SpanProcessor>(new opentelemetry::sdk::trace::BatchSpanProcessor(std::move(jaeger_exporter), processor_options));
-      provider = opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>(new opentelemetry::sdk::trace::TracerProvider(std::move(processor), jaeger_resource));
+      auto processor = std::unique_ptr<sdk::trace::SpanProcessor>(
+          new sdk::trace::BatchSpanProcessor(std::move(exporter),
+                                             processor_options));
+      provider = nostd::shared_ptr<trace::TracerProvider>(
+          new sdk::trace::TracerProvider(std::move(processor),
+                                         jaeger_resource));
     }
 
-    opentelemetry::trace::Provider::SetTracerProvider(provider);
+    trace::Provider::SetTracerProvider(provider);
     tracer = provider->GetTracer(service_name, OPENTELEMETRY_SDK_VERSION);
 
     // Set global propagator
-    opentelemetry::context::propagation::GlobalTextMapPropagator::
-        SetGlobalPropagator(
-            opentelemetry::nostd::shared_ptr<
-                opentelemetry::context::propagation::TextMapPropagator>(
-                new opentelemetry::trace::propagation::HttpTraceContext()));
+    context::propagation::GlobalTextMapPropagator::SetGlobalPropagator(
+        nostd::shared_ptr<context::propagation::TextMapPropagator>(
+            new trace::propagation::HttpTraceContext()));
   }
 }
 

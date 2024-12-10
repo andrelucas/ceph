@@ -6423,6 +6423,39 @@ options:
   - rgw
   - osd
   with_legacy: true
+- name: otlp_sampler_parent_based
+  type: bool
+  level: advanced
+  desc: OpenTelemetry tracer sampler mode
+  long_desc: If true, the OpenTelemetry tracer will use the parent span's sampling
+    decision. If false, the tracer will use the default (always on) sampler.
+  see_also:
+  - otlp_tracing_enable
+  - otlp_sampler_delegate_defaults_to_on
+  default: true
+  services:
+  - rgw
+  - osd
+  with_legacy: true
+- name: otlp_sampler_delegate_defaults_to_on
+  type: bool
+  level: advanced
+  desc: OpenTelemetry tracing behaviour in the absence of parent span
+    instructions.
+  long_desc: Usually we want to respect the tracing behaviour of the
+    propagated trace span. That is, if the parent span (originated by Envoy)
+    is set to sample, we should sample. This keeps the load on the tracing
+    infrastructure to a sensible level. In the absence of sampling data in the
+    parent span, this setting will determine whether we sample or not. If
+    true, we will sample by default. If false, we will not sample by default.
+  see_also:
+  - otlp_tracing_enable
+  - otlp_sampler_parent_based
+  default: true
+  services:
+  - rgw
+  - osd
+  with_legacy: true
 - name: mgr_ttl_cache_expire_seconds
   type: uint
   level: dev
