@@ -86,10 +86,12 @@ function(build_opentelemetry)
   # Create a list with an alternate separator e.g. pipe symbol
   string(REPLACE ";" "|" CMAKE_PREFIX_PATH_ALT_SEP "${CMAKE_PREFIX_PATH}")
   
+  set(OTEL_PATCH ${CMAKE_SOURCE_DIR}/cmake/modules/jaegertracing_akamai_grpc_detect.cmakepatch)
+  
   ExternalProject_Add(opentelemetry-cpp
     SOURCE_DIR ${opentelemetry_SOURCE_DIR}
     PREFIX "opentelemetry-cpp"
-    PATCH_COMMAND git reset --hard && git apply ${CMAKE_SOURCE_DIR}/cmake/modules/jaegertracing_akamai_grpc_detect.cmakepatch
+    PATCH_COMMAND ${CMAKE_SOURCE_DIR}/cmake/modules/forwardpatch.sh ${OTEL_PATCH}
     LIST_SEPARATOR |
     CMAKE_ARGS ${opentelemetry_CMAKE_ARGS} -DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH_ALT_SEP}
     BUILD_COMMAND ${make_cmd}
