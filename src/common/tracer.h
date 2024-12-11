@@ -15,6 +15,7 @@
 using jspan = opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>;
 using jspan_context = opentelemetry::trace::SpanContext;
 using jspan_attribute = opentelemetry::common::AttributeValue;
+using jscope = opentelemetry::trace::Scope;
 
 namespace tracing {
 
@@ -49,6 +50,8 @@ class Tracer {
   // the span is added to the trace which it's context is `parent_ctx`.
   // parent_ctx contains the required information of the trace.
   jspan add_span(opentelemetry::nostd::string_view span_name, const jspan_context& parent_ctx);
+
+  jscope WithActiveSpan(jspan span) { return tracer->WithActiveSpan(span); }
 };
 
 void encode(const jspan_context& span, ceph::buffer::list& bl, uint64_t f = 0);
