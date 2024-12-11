@@ -12,14 +12,17 @@
 #include "rgw/rgw_handoff_grpcutil.h"
 
 #include "common/dout.h"
+#include "common/tracer.h"
 #include "rgw/rgw_iam_policy.h"
+#include "rgw/rgw_tracer.h"
 
 #ifdef HAVE_JAEGER
+#include "opentelemetry/context/context.h"
 #include "opentelemetry/context/propagation/global_propagator.h"
+#include "opentelemetry/context/propagation/text_map_propagator.h"
 #include "opentelemetry/context/runtime_context.h"
+#include "opentelemetry/sdk/version/version.h"
 #include "opentelemetry/trace/propagation/http_trace_context.h"
-#include <opentelemetry/context/context.h>
-#include <opentelemetry/context/propagation/text_map_propagator.h>
 #endif // HAVE_JAEGER
 
 // #include "authorizer/v1/authorizer.grpc.pb.h"
@@ -283,9 +286,7 @@ void populate_trace_context(grpc::ClientContext *context, jspan trace) {
   if (!trace) {
     return;
   }
-  auto provider = opentelemetry::trace::Provider::GetTracerProvider();
-  auto tracer = provider->GetTracer("authn-client");
-  auto scope = tracer->WithActiveSpan(trace);
+  auto scope = tracing::rgw::tracer.WithActiveSpan(trace);
 
   auto current_ctx = opentelemetry::context::RuntimeContext::GetCurrent();
   HandoffGrpcClientCarrier carrier(context);
