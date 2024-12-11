@@ -444,10 +444,11 @@ int process_request(const RGWProcessEnv& penv,
 
   try {
     {
-      auto vrspan = tracing::rgw::tracer.add_span("verify_requester", s->trace);
       ldpp_dout(op, 2) << "verifying requester" << dendl;
+      auto span = tracing::rgw::tracer.add_span("verify_requester", s->trace);
+      std::swap(span, s->trace);
       ret = op->verify_requester(*penv.auth_registry, yield);
-      vrspan->End();
+      std::swap(span, s->trace);
       if (ret < 0) {
         dout(10) << "failed to authorize request" << dendl;
         abort_early(s, op, ret, handler, yield);
