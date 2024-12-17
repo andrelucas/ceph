@@ -183,6 +183,13 @@ public:
  * via its propagation interface, which is fiddly enough that we want it
  * hidden behind a nice simple function.
  *
+ * It is very important that this function not do anything involving the \p
+ * optional_yield token passed around inside the RGW frontend. We don't want
+ * to change coroutine context here. opentelemetry-cpp doesn't understand
+ * coroutines and we don't have a new enough version of opentelemetry-cpp to
+ * have the workarounds. This is briefly discussed here:
+ *   https://github.com/open-telemetry/opentelemetry-cpp/discussions/2588
+ *
  * @param context pointer to a grpc::ClientContext object.
  * @param jspan the current tracing span, typically found in \p
  * req_state->trace.
