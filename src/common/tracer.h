@@ -52,6 +52,11 @@ class Tracer {
   jspan add_span(opentelemetry::nostd::string_view span_name, const jspan_context& parent_ctx);
 
   jscope WithActiveSpan(jspan span) { return tracer->WithActiveSpan(span); }
+
+private:
+  // Initialise the OTLP Tracer, and configure opentelemetry library logging.
+  // Called from init() if configuration specifies OTLP tracing.
+  void init_otlp(opentelemetry::nostd::string_view service_name);
 };
 
 void encode(const jspan_context& span, ceph::buffer::list& bl, uint64_t f = 0);
