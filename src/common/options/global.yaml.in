@@ -6409,6 +6409,20 @@ options:
   - rgw
   - osd
   with_legacy: true
+- name: otlp_tracing_log_level_debug
+  type: bool
+  level: advanced
+  desc: Enable debug logging for the OpenTelemetry library
+  long_desc: If true, opentelemetry-cpp will log all debug messages including
+    level Debug. If false, the tracer will log only at levels error, warning
+    and info messages.
+  see_also:
+  - otlp_tracing_enable
+  default: false
+  services:
+  - rgw
+  - osd
+  with_legacy: true
 - name: otlp_endpoint_url
   type: str
   level: advanced
@@ -6419,6 +6433,22 @@ options:
   see_also:
   - otlp_tracing_enable
   default: http://127.0.0.1:4317
+  services:
+  - rgw
+  - osd
+  with_legacy: true
+- name: otlp_endpoint_ca_cert_file
+  type: str
+  level: advanced
+  desc: Path to a PEM file containing CA cert information for OpenTelemetry.
+  long_desc: The path to a PEM file containing the CA cert information for the
+    OpenTelemetry collector. This is used to verify the collector's
+    certificate. If empty, it's likely that an HTTPS URI in otlp_endpoint_url
+    will fail to connect.
+  see_also:
+  - otlp_tracing_enable
+  - otlp_endpoint_url
+  default:
   services:
   - rgw
   - osd

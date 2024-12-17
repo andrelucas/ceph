@@ -6,16 +6,24 @@
 #include "global/global_context.h"
 
 #ifdef HAVE_JAEGER
+
+#include "common/debug.h"
+#include "common/dout.h"
+#include <memory>
+
 #include "opentelemetry/context/propagation/global_propagator.h"
 #include "opentelemetry/exporters/jaeger/jaeger_exporter.h"
 #include "opentelemetry/exporters/otlp/otlp_grpc_exporter.h"
+#include "opentelemetry/sdk/common/global_log_handler.h"
 #include "opentelemetry/sdk/trace/batch_span_processor.h"
+#include "opentelemetry/sdk/trace/samplers/always_off.h"
 #include "opentelemetry/sdk/trace/samplers/parent.h"
 #include "opentelemetry/sdk/trace/tracer_provider.h"
 #include "opentelemetry/trace/propagation/http_trace_context.h"
 #include "opentelemetry/trace/span_startoptions.h"
-#include <opentelemetry/context/context.h>
-#include <opentelemetry/sdk/trace/samplers/always_off.h>
+
+#define dout_context g_ceph_context
+#define dout_subsys ceph_subsys_trace
 
 namespace tracing {
 
@@ -37,15 +45,30 @@ void Tracer::init(opentelemetry::nostd::string_view service_name) {
 
     if (g_ceph_context->_conf->otlp_tracing_enable) {
 
+      // Log via Ceph's logging system. The default just writes to stdout.
+      // This needs to be done before creating the provider, according to the
+      // source for SetLogHandler().
+      ilog::GlobalLogHandler::SetLogHandler(
+          nostd::shared_ptr<ilog::LogHandler>(new OtelLogHandler()));
+      ilog::LogLevel log_level = (g_ceph_context->_conf->otlp_tracing_log_level_debug)
+          ? ilog::LogLevel::Debug
+          : ilog::LogLevel::Info;
+      ilog::GlobalLogHandler::SetLogLevel(log_level); // XXX customize!
+
       // Select OTLP (OpenTelemetry Protocol) and configure for gRPC traces.
-      opentelemetry::exporter::otlp::OtlpGrpcExporterOptions otlp_exporter_options;
+      opentelemetry::exporter::otlp::OtlpGrpcExporterOptions
+          otlp_exporter_options;
       if (g_ceph_context) {
-        otlp_exporter_options.endpoint = g_ceph_context->_conf->otlp_endpoint_url;
-        otlp_exporter_options.use_ssl_credentials =
-            otlp_exporter_options.endpoint.starts_with("https");
+        auto endpoint = g_ceph_context->_conf->otlp_endpoint_url;
+        otlp_exporter_options.endpoint = endpoint;
+        if (endpoint.starts_with("https")) {
+          otlp_exporter_options.use_ssl_credentials = true;
+          std::string ca_cert_file = g_ceph_context->_conf->otlp_endpoint_ca_cert_file;
+          if (!ca_cert_file.empty()) {
+            otlp_exporter_options.ssl_credentials_cacert_path = ca_cert_file;
+          }
+        }
       }
-      const auto otlp_resource = sdk::resource::Resource::Create(std::move(
-          sdk::resource::ResourceAttributes{{"service.name", service_name}}));
       auto exporter = std::unique_ptr<sdk::trace::SpanExporter>(
           new exporter::otlp::OtlpGrpcExporter(otlp_exporter_options));
 
@@ -54,8 +77,7 @@ void Tracer::init(opentelemetry::nostd::string_view service_name) {
       std::unique_ptr<sdktrace::Sampler> sampler;
       if (!g_ceph_context->_conf->otlp_sampler_parent_based) {
         // The ParentBasedSampler delegate is not used.
-        sampler =
-            std::unique_ptr<sdktrace::Sampler>(new sdktrace::AlwaysOnSampler());
+        sampler = std::unique_ptr<sdktrace::Sampler>(new sdktrace::AlwaysOnSampler());
       } else {
         // The ParentBasedSampler delegate (fallback) is configured using option
         // 'otlp_sampler_delegate_defaults_to_on'.
@@ -73,10 +95,12 @@ void Tracer::init(opentelemetry::nostd::string_view service_name) {
 
       auto processor = std::unique_ptr<sdk::trace::SpanProcessor>(
           new sdktrace::BatchSpanProcessor(std::move(exporter),
-                                           processor_options));
-      provider =
-          nostd::shared_ptr<trace::TracerProvider>(new sdktrace::TracerProvider(
-              std::move(processor), otlp_resource, std::move(sampler)));
+              std::move(processor_options)));
+      const auto otlp_resource = sdk::resource::Resource::Create(std::move(
+          sdk::resource::ResourceAttributes { { "service.name", service_name } }));
+      provider = nostd::shared_ptr<trace::TracerProvider>(new sdktrace::TracerProvider(
+          std::move(processor), std::move(otlp_resource),
+          std::move(sampler)));
 
     } else {
       // Default is a Jaeger trace.
