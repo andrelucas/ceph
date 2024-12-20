@@ -1,8 +1,9 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
-#include <string>
 #include "rgw_tracer.h"
+#include "global/global_context.h"
+#include <string>
 
 #ifdef HAVE_JAEGER
 #include "opentelemetry/trace/experimental_semantic_conventions.h"
@@ -58,6 +59,11 @@ std::optional<std::string> get_traceid_from_traceparent(DoutPrefixProvider* dpp,
 /**
  * @brief Set additional attributes on a trace using request information.
  *
+ * Note that we try not to add stuff that might help attackers here, unless
+ * jaeger_tracing_verbose_attributes is set (indicating that we're trying to
+ * debug something). When adding attributes, consider whether or not it should
+ * be added by default.
+ *
  * @param s The req_state.
  * @param span A configured span.
  */
@@ -73,7 +79,14 @@ void set_extra_trace_attributes(const req_state* s, jspan span)
     span->SetAttribute(OTEL_GET_TRACE_ATTR(AttrHttpMethod), s->info.method);
   }
   span->SetAttribute(tracing::akamai::HOST, s->info.host);
-  span->SetAttribute(tracing::akamai::RELATIVE_URI, s->relative_uri);
-  span->SetAttribute(tracing::akamai::REQUEST_URI, s->info.request_uri);
+
+  bool verbose = g_ceph_context->_conf->jaeger_tracing_verbose_attributes;
+  span->SetAttribute(tracing::akamai::VERBOSE_ATTR, verbose);
+
+  if (verbose) {
+    // These attributes might help attackers, so they are disabled by default.
+    span->SetAttribute(tracing::akamai::RELATIVE_URI, s->relative_uri);
+    span->SetAttribute(tracing::akamai::REQUEST_URI, s->info.request_uri);
+  }
 #endif // HAVE_JAEGER
 }

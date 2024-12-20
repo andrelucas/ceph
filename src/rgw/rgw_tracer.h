@@ -32,6 +32,7 @@ const auto RELATIVE_URI = _PREFIX "relative_uri";
 const auto REQUEST_URI = _PREFIX "request_uri";
 const auto EARLY_ABORT = _PREFIX "early_abort";
 const auto REDIRECT = _PREFIX "redirect";
+const auto VERBOSE_ATTR = _PREFIX "verbose_attr";
 
 } // namespace akamai
 
