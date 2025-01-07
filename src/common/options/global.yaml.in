@@ -6379,6 +6379,18 @@ options:
   - rgw
   - osd
   with_legacy: true
+- name: jaeger_tracing_verbose_attributes
+  type: bool
+  level: advanced
+  desc: Enable verbose attributes in Jaeger traces that may help attackers
+  long_desc: If true, the Jaeger tracer will include more verbose attributes in
+    traces, which will help debugging but could conceivably make attacks
+    easier as well.
+  default: false
+  services:
+  - rgw
+  - osd
+  with_legacy: true
 - name: jaeger_agent_host
   type: str
   level: advanced
