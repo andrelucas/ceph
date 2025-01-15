@@ -6,6 +6,7 @@
 #include "rgw_rest_s3.h"
 #include <fmt/printf.h>
 #include <memory>
+#include <sys/types.h>
 #include <unistd.h>
 
 namespace rgw {
@@ -268,6 +269,12 @@ public:
    * @return int zero (success).
    */
   int verify_permission(optional_yield y) override { return 0; }
+
+  /**
+   * @brief StoreQuery commands are read-only.
+   *
+   * @return uint32_t the op type.
+   */
   uint32_t op_mask() override { return RGW_OP_TYPE_READ; }
 
   /**
@@ -337,11 +344,11 @@ protected:
  * Example response:
  * 200 OK
  *
- * With body (formatting added)
- *   <?xml version="1.0" encoding="UTF-8"?>
- *   <StoreQueryPingResult>
- *     <request_id>foo</request_id>
- *   </StoreQueryPingResult>
+ * With body (formatting may vary):
+ *
+ *   "StoreQueryPingResult": {
+ *     "request_id": "foo"
+ *   }
  * ```
  *
  * The request_id is blindly mirrored back to the caller.
@@ -410,22 +417,21 @@ public:
  * ...
  *
  * Example response:
- * 200 OK
+ *   200 OK
  *
- * With body (formatting added)
- *   <?xml version="1.0" encoding="UTF-8"?>
- *   <StoreQueryObjectStatusResult>
- *     <Object>
- *       <bucket>test</bucket>
- *       <key>foo</key>
- *       <deleted>false</deleted>
- *       <multipart_upload_in_progress>false</multipart_upload_in_progress>
- *       <version_id></version_id>
- *       <size>123</size>
- *     </Object>
- *   </StoreQueryObjectStatusResult>
+ * Response body:
+ *
+ *   "StoreQueryObjectStatusResult: {
+ *     "Object": {
+ *         "bucket": "test",
+ *         "key": "foo",
+ *         "deleted": false,
+ *         "multipart_upload_in_progress": false,
+ *         "version_id": "",
+ *         "size": 123
+ *     }
+ *   }
  * ```
- *
  */
 class RGWStoreQueryOp_ObjectStatus : public RGWStoreQueryOp_Base {
 private:
@@ -475,5 +481,72 @@ public:
   void send_response_json() override;
   const char* name() const override { return "storequery_objectstatus"; }
 };
+
+/**
+ * @brief StoreQuery ObjectList command implementation.
+ *
+ * Return a list of objects in the bucket, limited to a maximum number of
+ * records. Support pagination to allow the list to exceed the maximum number
+ * of records.
+ *
+ * Unlike ObjectStatus, this will not include multipart uploads. It is
+ * difficult to see how a single, paginated list across multiple RGWs could
+ * meaninfully encompass both types, so we're not going to try. It makes sense
+ * for ObjectStatus to combine the classes because the scope is limited. Here,
+ * we're querying an entire bucket which might have billions of objects.
+ *
+ * XXX Example
+ */
+class RGWStoreQueryOp_ObjectList : public RGWStoreQueryOp_Base {
+
+private:
+  uint64_t max_entries_;
+  std::optional<std::string> marker_;
+
+public:
+  RGWStoreQueryOp_ObjectList(uint64_t max_entries, std::optional<std::string> marker)
+      : max_entries_(max_entries)
+      , marker_(std::move(marker))
+  {
+  }
+
+  void execute(optional_yield y) override;
+
+  void send_response_json() override;
+  const char* name() const override { return "storequery_objectlist"; }
+
+}; // RGWStoreQueryOp_ObjectList
+
+/**
+ * @brief StoreQuery MPUploadList command implementation.
+ *
+ * Return a list of in-flight multipart uploads for the bucket, limited to a
+ * maximum number of records. Support pagination to allow the list to exceed
+ * the maximum number of records.
+ *
+ * This is a counterpart to the objectlist command.
+ *
+ * XXX Example
+ */
+class RGWStoreQueryOp_MPUploadList : public RGWStoreQueryOp_Base {
+
+private:
+  uint64_t max_entries_;
+  std::optional<std::string> marker_;
+
+public:
+  RGWStoreQueryOp_MPUploadList(uint64_t max_entries, std::optional<std::string> marker)
+      : max_entries_(max_entries)
+      , marker_(std::move(marker))
+  {
+  }
+
+  void execute(optional_yield y) override;
+
+  void send_response_json() override;
+
+  const char* name() const override { return "storequery_mpuploadlist"; }
+
+}; // RGWStoreQueryOp_MPUploadList
 
 } // namespace rgw

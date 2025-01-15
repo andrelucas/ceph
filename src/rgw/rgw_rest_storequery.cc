@@ -1,13 +1,16 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
+#include <absl/strings/numbers.h>
 #include <boost/algorithm/string.hpp>
 #include <boost/token_functions.hpp>
 #include <boost/tokenizer.hpp>
+#include <cstdint>
 #include <fmt/format.h>
 #include <string>
 
 #include "cls/rgw/cls_rgw_types.h"
+#include "common/async/yield_context.h"
 #include "common/dout.h"
 #include "rgw_common.h"
 #include "rgw_op.h"
@@ -17,6 +20,10 @@
 #define dout_subsys ceph_subsys_rgw
 
 namespace rgw {
+
+/***************************************************************************/
+
+// RGWStoreQueryOp_Base
 
 void RGWStoreQueryOp_Base::send_response_pre()
 {
@@ -45,6 +52,10 @@ void RGWStoreQueryOp_Base::send_response()
   send_response_post();
 }
 
+/***************************************************************************/
+
+// RGWStoreQueryOp_Ping
+
 void RGWStoreQueryOp_Ping::execute(optional_yield y)
 {
   ldpp_dout(this, 20) << fmt::format(FMT_STRING("{}: {}({})"), typeid(this).name(),
@@ -60,6 +71,10 @@ void RGWStoreQueryOp_Ping::send_response_json()
   s->formatter->dump_string("request_id", request_id_);
   s->formatter->close_section();
 }
+
+/***************************************************************************/
+
+// RGWStoreQueryOp_ObjectStatus
 
 /**
  * @brief Query already-existing objects, or delete markers.
@@ -291,6 +306,36 @@ void RGWStoreQueryOp_ObjectStatus::send_response_json()
   s->formatter->close_section();
 }
 
+/***************************************************************************/
+
+// RGWStoreQueryOp_ObjectList
+
+void RGWStoreQueryOp_ObjectList::execute(optional_yield y)
+{
+  // XXX !!!
+}
+
+void RGWStoreQueryOp_ObjectList::send_response_json()
+{
+  // XXX !!!
+}
+
+/***************************************************************************/
+
+// RGWStoreQueryOp_MPUploadList
+
+void RGWStoreQueryOp_MPUploadList::execute(optional_yield y)
+{
+  // XXX !!!
+}
+
+void RGWStoreQueryOp_MPUploadList::send_response_json()
+{
+  // XXX !!!
+}
+
+/***************************************************************************/
+
 namespace ba = boost::algorithm;
 
 static const char* SQ_HEADER = "HTTP_X_RGW_STOREQUERY";
@@ -365,9 +410,9 @@ bool RGWSQHeaderParser::parse(const DoutPrefixProvider* dpp,
                       << dendl;
     return false;
   }
-  // ObjectStatus command.
-  //
   if (command_ == "objectstatus") {
+    // ObjectStatus command.
+    //
     if (handler_type != RGWSQHandlerType::Obj) {
       ldpp_dout(dpp, 0)
           << fmt::format(FMT_STRING("{}: ObjectStatus only applies in an Object context"),
@@ -386,10 +431,78 @@ bool RGWSQHeaderParser::parse(const DoutPrefixProvider* dpp,
     // The naked new is part of the interface.
     op_ = new RGWStoreQueryOp_ObjectStatus();
     return true;
-  }
-  // Ping command.
-  //
-  else if (command_ == "ping") {
+
+  } else if (command_ == "objectlist") {
+    // ObjectList command.
+    //
+    if (handler_type != RGWSQHandlerType::Bucket) {
+      ldpp_dout(dpp, 0)
+          << fmt::format(FMT_STRING("{}: ObjectList only applies in an Bucket context"),
+                 HEADER_LC)
+          << dendl;
+      return false;
+    }
+    if (param_.size() < 1 || param_.size() > 2) {
+      ldpp_dout(dpp, 0)
+          << fmt::format(
+                 "{}: malformed ObjectList command (expected one or two args)",
+                 HEADER_LC)
+          << dendl;
+      return false;
+    }
+    uint64_t max_entries;
+    if (!absl::SimpleAtoi(param_[0], &max_entries)) {
+      ldpp_dout(dpp, 0)
+          << fmt::format(FMT_STRING("{}: malformed ObjectList command (expected integer in first parameter)"),
+                 HEADER_LC)
+          << dendl;
+      return false;
+    }
+    std::optional<std::string> marker;
+    if (param_.size() == 2) {
+      marker = param_[1];
+    }
+    // The naked new is part of the interface.
+    op_ = new RGWStoreQueryOp_ObjectList(max_entries, marker);
+    return true;
+
+  } else if (command_ == "mpuploadlist") {
+    // mpuploadlist command.
+    //
+    if (handler_type != RGWSQHandlerType::Bucket) {
+      ldpp_dout(dpp, 0)
+          << fmt::format(FMT_STRING("{}: mpuploadlist only applies in an Bucket context"),
+                 HEADER_LC)
+          << dendl;
+      return false;
+    }
+    if (param_.size() < 1 || param_.size() > 2) {
+      ldpp_dout(dpp, 0)
+          << fmt::format(
+                 "{}: malformed mpuploadlist command (expected one or two args)",
+                 HEADER_LC)
+          << dendl;
+      return false;
+    }
+    uint64_t max_entries;
+    if (!absl::SimpleAtoi(param_[0], &max_entries)) {
+      ldpp_dout(dpp, 0)
+          << fmt::format(FMT_STRING("{}: malformed mpuploadlist command (expected integer in first parameter)"),
+                 HEADER_LC)
+          << dendl;
+      return false;
+    }
+    std::optional<std::string> marker;
+    if (param_.size() == 2) {
+      marker = param_[1];
+    }
+    // The naked new is part of the interface.
+    op_ = new RGWStoreQueryOp_MPUploadList(max_entries, marker);
+    return true;
+
+  } else if (command_ == "ping") {
+    // Ping command.
+    //
     // Allow ping from any handler type - it doesn't matter!
     if (param_.size() != 1) {
       ldpp_dout(dpp, 0) << fmt::format(
