@@ -2,6 +2,7 @@
 // vim: ts=8 sw=2 smarttab
 
 #include <absl/strings/numbers.h>
+#include <algorithm>
 #include <boost/algorithm/string.hpp>
 #include <boost/token_functions.hpp>
 #include <boost/tokenizer.hpp>
@@ -12,6 +13,7 @@
 #include "cls/rgw/cls_rgw_types.h"
 #include "common/async/yield_context.h"
 #include "common/dout.h"
+#include "rgw_b64.h"
 #include "rgw_common.h"
 #include "rgw_op.h"
 #include "rgw_rest_storequery.h"
@@ -302,22 +304,169 @@ void RGWStoreQueryOp_ObjectStatus::send_response_json()
     s->formatter->dump_string("version_id", version_id_);
     s->formatter->dump_int("size", static_cast<int64_t>(object_size_));
   }
-  s->formatter->close_section();
-  s->formatter->close_section();
+  s->formatter->close_section(); // Object
+  s->formatter->close_section(); // StoreQueryObjectStatusResult
 }
 
 /***************************************************************************/
 
 // RGWStoreQueryOp_ObjectList
 
+bool RGWStoreQueryOp_ObjectList::execute_query(optional_yield y)
+{
+  // The ListParams persists across multiple requests.
+  rgw::sal::Bucket::ListParams params {};
+
+  // Fill in the contination token if we need to.
+  if (marker_.has_value()) {
+    try {
+      std::string init_marker = from_base64(*marker_);
+      params.marker = rgw_obj_key(init_marker);
+      ldpp_dout(this, 10) << fmt::format(FMT_STRING("continuation token '{}' decoded as {}"), *marker_, init_marker)
+                          << dendl;
+    } catch (std::exception& e) {
+      // We can't catch boost::archive::archive_exception specifically, it
+      // doesn't link and I'm not fixing the CMake just for one exception.
+      ldpp_dout(this, 0) << fmt::format(FMT_STRING("failed to decode continuation token: '{}'"), e.what())
+                         << dendl;
+      op_ret = -EINVAL;
+      return false;
+    }
+  }
+
+  // No prefix for a complete list of the bucket.
+  params.prefix = "";
+  // We want results even if the last object is a delete marker. In a bucket
+  // without versioning a query for a deleted or nonexistent object will
+  // return zero objects, for which we'll return ENOENT.
+  params.list_versions = true;
+  // It appears pagination works fine with unordered queries.
+  params.allow_unordered = true;
+
+  // Cap the number of entries we'll return to our LIST_QUERY_SIZE_HARD_LIMIT.
+  // We can experiment with this in a lab, but in production let's make sure
+  // we don't overtax the system.
+  uint64_t query_max = std::min(max_entries_, LIST_QUERY_SIZE_HARD_LIMIT);
+  if (query_max < max_entries_) {
+    ldpp_dout(this, 5) << fmt::format(FMT_STRING("max_entries {} is above the hard limit, restricting query_max to {}"), max_entries_, query_max)
+                       << dendl;
+  }
+
+  bool seen_eof = false;
+  std::string next_marker;
+
+  // Reserve space for the maximum number of entries we might return. This is
+  // a compromise - we could reallocate as we issue queries against the
+  // backend, but this will lead to heap churn and copies. This feels like the
+  // proper balance to me; reserve enough space for the maximum number of
+  // items we're going to return (which we don't in any case allow to be
+  // /insanely/ high), and reserve it exactly once.
+  items_.reserve(max_entries_);
+
+  // Loop until we've filled the user's requested number of entries, or we hit
+  // EOF.
+  while (items_.size() < max_entries_) {
+    rgw::sal::Bucket::ListResults results;
+
+    ldpp_dout(this, 20) << fmt::format(
+        FMT_STRING("issue bucket list() query query_max={} next_marker={}"),
+        query_max, params.marker.name)
+                        << dendl;
+    // NOTE: rgw::sal::RadosBucket::list() updates params.marker as it
+    // goes. This isn't how list_multiparts() works.
+    auto ret = s->bucket->list(this, params, query_max, results, y);
+
+    if (ret < 0) {
+      op_ret = ret;
+      ldpp_dout(this, 2) << "SAL bucket->list() query failed ret=" << ret
+                         << dendl;
+      break;
+    }
+
+    ldpp_dout(this, 20) << fmt::format(FMT_STRING("SAL bucket->list() returned {} items"), results.objs.size())
+                        << dendl;
+
+    if (results.objs.size() == 0) {
+      // EOF. Exit the loop.
+      ldpp_dout(this, 20) << fmt::format(FMT_STRING("SAL bucket->list() EOF items_.size()={}"), items_.size()) << dendl;
+      seen_eof = true;
+      break;
+    }
+
+    // Loop over the results of s->bucket->list().
+    for (size_t n = 0; n < results.objs.size(); n++) {
+      auto& obj = results.objs[n];
+
+      ldpp_dout(this, 20)
+          << fmt::format(FMT_STRING("obj {}/{}: key={} exists={} current={} delete_marker={}"),
+                 n + 1, results.objs.size(), obj.key.name, obj.exists, obj.is_current(),
+                 obj.is_delete_marker())
+          << dendl;
+
+      // We're only interested in the current (most recent) version of the
+      // object.
+      if (obj.exists && obj.is_current()) {
+        item_type item { obj.key.name };
+        item.set_deleted(obj.is_delete_marker());
+        if (!obj.is_delete_marker()) {
+          // Only non-deleted items should have a size.
+          item.set_size(obj.meta.size);
+        }
+        items_.push_back(item);
+      }
+
+      // Extra action if we've reached the caller's size limit.
+      if (items_.size() == max_entries_) {
+        // If we filled items_ and didn't get to EOF, we need to set the token
+        // for next time.
+        next_marker = results.objs[n].key.name;
+        ldpp_dout(this, 20) << fmt::format(FMT_STRING("max_entries reached, next={}"), next_marker) << dendl;
+        break;
+      }
+    }
+  }
+
+  // s->bucket->list() can fail. We rely on op_ret being properly set at the
+  // point of failure.
+  if (op_ret < 0) {
+    return false;
+  }
+
+  if (!seen_eof && !next_marker.empty()) {
+    std::string encoded_marker = to_base64(next_marker);
+    ldpp_dout(this, 20) << fmt::format(FMT_STRING("EOF not reached, next_marker {}"), params.marker.name)
+                        << dendl;
+    ldpp_dout(this, 5) << fmt::format(FMT_STRING("EOF not reached, continuation token {}"), encoded_marker)
+                       << dendl;
+    set_return_marker(encoded_marker);
+  }
+
+  return true;
+}
+
 void RGWStoreQueryOp_ObjectList::execute(optional_yield y)
 {
-  // XXX !!!
+  if (!execute_query(y)) {
+    // rely on execute_query() setting op_ret appropriately.
+    ldpp_dout(this, 1) << "execute_query() failed" << dendl;
+  }
 }
 
 void RGWStoreQueryOp_ObjectList::send_response_json()
 {
-  // XXX !!!
+  auto f = s->formatter;
+  f->open_object_section("StoreQueryObjectListResult");
+
+  f->open_array_section("Objects");
+  for (const auto& item : items_) {
+    item.dump(f);
+  }
+  f->close_section(); // Objects
+
+  if (return_marker_.has_value()) {
+    f->dump_string("NextToken", *return_marker_);
+  }
+  f->close_section(); // StoreQueryObjectListResult
 }
 
 /***************************************************************************/
@@ -326,12 +475,18 @@ void RGWStoreQueryOp_ObjectList::send_response_json()
 
 void RGWStoreQueryOp_MPUploadList::execute(optional_yield y)
 {
-  // XXX !!!
 }
 
 void RGWStoreQueryOp_MPUploadList::send_response_json()
 {
-  // XXX !!!
+  auto f = s->formatter;
+  f->open_object_section("StoreQueryMPUploadListResult");
+  f->open_array_section("Objects");
+  for (const auto& item : items_) {
+    item.dump(f);
+  }
+  f->close_section(); // Objects
+  f->close_section(); // StoreQueryMPUploadListResult
 }
 
 /***************************************************************************/

@@ -482,6 +482,44 @@ public:
   const char* name() const override { return "storequery_objectstatus"; }
 };
 
+class RGWStoreQueryListItem {
+private:
+  std::string key_;
+  std::optional<bool> is_deleted_;
+  std::optional<uint64_t> size_;
+
+public:
+  RGWStoreQueryListItem(const std::string& key)
+      : key_(key)
+  {
+  }
+  const std::string& key() const noexcept { return key_; }
+
+  void set_deleted(bool deleted) noexcept { is_deleted_ = deleted; }
+  void unset_deleted() noexcept { is_deleted_.reset(); }
+  std::optional<bool> is_deleted() const noexcept { return is_deleted_; }
+
+  void set_size(uint64_t size) noexcept { size_ = size; }
+  void unset_size() noexcept { size_.reset(); }
+  std::optional<uint64_t> size() const noexcept { return size_; }
+
+  void dump(Formatter* f) const
+  {
+    f->open_object_section("Object");
+    f->dump_string("key", key_);
+    // Only dump optional attributes if they've been given values.
+    if (is_deleted_.has_value() && *is_deleted_) {
+      // We only dump the attribute if it's set and true.
+      f->dump_bool("deleted", *is_deleted_);
+    }
+    if (size_.has_value()) {
+      // Size of zero is a value value.
+      f->dump_unsigned("size", *size_);
+    }
+    f->close_section();
+  }
+}; // RGWStoreQueryListItem
+
 /**
  * @brief StoreQuery ObjectList command implementation.
  *
@@ -500,20 +538,80 @@ public:
 class RGWStoreQueryOp_ObjectList : public RGWStoreQueryOp_Base {
 
 private:
+  using item_type = RGWStoreQueryListItem;
+
   uint64_t max_entries_;
   std::optional<std::string> marker_;
+  std::optional<std::string> return_marker_;
+  std::vector<item_type> items_;
 
 public:
   RGWStoreQueryOp_ObjectList(uint64_t max_entries, std::optional<std::string> marker)
       : max_entries_(max_entries)
-      , marker_(std::move(marker))
+      , marker_(marker)
   {
   }
+
+  static constexpr uint64_t LIST_QUERY_SIZE_HARD_LIMIT = 10000;
 
   void execute(optional_yield y) override;
 
   void send_response_json() override;
   const char* name() const override { return "storequery_objectlist"; }
+
+  /**
+   * @brief Fetch a subset of the list of object from the SAL.
+   *
+   * NOTE: The optional_yield is used here, so be careful if you're adding
+   * tracing. The list queries can take a long time and you could end up
+   * detaching traces from their parents.
+   *
+   * This method will populate \p items_ with a subset of the objects in the
+   * bucket. The query is not configurable; we want to do as little work as
+   * possible, and provide as few ways to break things as we can.
+   *
+   * If the query fails, \p op_ret will be set to the error code and \p items_
+   * must not be used. If the query succeeds, \p op_ret will be >= 0, and \p
+   * send_response_json() can return results to the user.
+   *
+   * It is highly likely that the query will not be able to return all objects
+   * in a single request. As a result, the JSON will include a NextToken field
+   * that will allow the user to request the next page of results. This is
+   * very similar to pagination in AWS. Pass the returned continuation token
+   * to the next query to get the next page of results.
+   *
+   * The page size is capped at LIST_QUERY_SIZE_HARD_LIMIT. This is a
+   * precaution to stop over-zealous microservices breaking the OSDs. We do
+   * not at the time of writing know the impact of gigantic list queries, so
+   * the value is capped at the largest value used by vanilla RGW as part of
+   * the SWIFT API. S3 usually limits responses to 1000 objects.
+   *
+   * Using very small page sizes is not helpful. The SAL queries will perform
+   * a readahead of (by default) 1000 objects anyway, so setting a page size
+   * less than this actively wastes time and does unnecessary work.
+   *
+   * XXX JSON details, examples.
+   *
+   * @param y optional yield.
+   * @return true Success. \p items_ is populated and can be used.
+   * @return false Failure. \p op_ret is set, and \p items_ should not be
+   * used.
+   */
+  bool execute_query(optional_yield y);
+
+  /**
+   * @brief Set the return marker (continuation token) for the next query.
+   *
+   * By default, the return marker is \p std::nullopt, indicating no value.
+   *
+   * @param marker The return marker (contination token) to set.
+   */
+  void set_return_marker(const std::string& marker) { return_marker_ = marker; }
+  /// Reset the return marker to its default no value state.
+  void unset_return_marker() { return_marker_.reset(); }
+  /// Fetch the return marker (continuation token) for the next query, or
+  /// std::nullopt if none is set.
+  std::optional<std::string> return_marker() const { return return_marker_; }
 
 }; // RGWStoreQueryOp_ObjectList
 
@@ -531,8 +629,11 @@ public:
 class RGWStoreQueryOp_MPUploadList : public RGWStoreQueryOp_Base {
 
 private:
+  using item_type = RGWStoreQueryListItem;
+
   uint64_t max_entries_;
   std::optional<std::string> marker_;
+  std::vector<item_type> items_;
 
 public:
   RGWStoreQueryOp_MPUploadList(uint64_t max_entries, std::optional<std::string> marker)
