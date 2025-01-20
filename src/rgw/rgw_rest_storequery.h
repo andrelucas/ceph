@@ -537,6 +537,34 @@ public:
  */
 class RGWStoreQueryOp_ObjectList : public RGWStoreQueryOp_Base {
 
+protected:
+  struct Stats {
+    /// The maximum number of entries requested by the user.
+    uint64_t entries_max = 0;
+    /// The number of entries actually returned to the user.
+    uint64_t entries_actual = 0;
+    /// The number of objects returned by querying the SAL.
+    uint64_t sal_seen = 0;
+    /// Out of \p sal_seen, the number of objects with the `exists` flag set.
+    uint64_t sal_exists = 0;
+    /// Out of \p sal_seen, the number of objects with the `current` flag set.
+    uint64_t sal_current = 0;
+    /// Out of \p sal_seen, the number of objects with the `current` /and/
+    /// `deleted` flag set.
+    uint64_t sal_deleted = 0;
+
+    /// Format stats to the given formatter object.
+    void dump(ceph::Formatter* f) const
+    {
+      f->dump_unsigned("entries_max", entries_max);
+      f->dump_unsigned("entries_actual", entries_actual);
+      f->dump_unsigned("sal_seen", sal_seen);
+      f->dump_unsigned("sal_exists", sal_exists);
+      f->dump_unsigned("sal_current", sal_current);
+      f->dump_unsigned("sal_deleted", sal_deleted);
+    }
+  }; // struct RGWStoreQueryOp_ObjectList::Stats
+
 private:
   using item_type = RGWStoreQueryListItem;
 
@@ -545,12 +573,20 @@ private:
   std::optional<std::string> return_marker_;
   std::vector<item_type> items_;
 
+  Stats stats_;
+
 public:
   RGWStoreQueryOp_ObjectList(uint64_t max_entries, std::optional<std::string> marker)
       : max_entries_(max_entries)
       , marker_(marker)
   {
   }
+
+  RGWStoreQueryOp_ObjectList() = delete;
+  RGWStoreQueryOp_ObjectList(const RGWStoreQueryOp_ObjectList&) = delete;
+  RGWStoreQueryOp_ObjectList& operator=(const RGWStoreQueryOp_ObjectList&) = delete;
+  RGWStoreQueryOp_ObjectList(RGWStoreQueryOp_ObjectList&&) = delete;
+  RGWStoreQueryOp_ObjectList& operator=(RGWStoreQueryOp_ObjectList&&) = delete;
 
   static constexpr uint64_t LIST_QUERY_SIZE_HARD_LIMIT = 10000;
 
@@ -590,7 +626,39 @@ public:
    * a readahead of (by default) 1000 objects anyway, so setting a page size
    * less than this actively wastes time and does unnecessary work.
    *
-   * XXX JSON details, examples.
+   * The pagination can return duplicate items across requests in versioned
+   * buckets. The client should deal with this gracefully.
+   *
+   * Here is an example JSON response, with the query size limited rather
+   * artifically to two objects:
+   *
+   * ```
+   *   {
+   *     "Objects": [
+   *       {
+   *         "key": "00000011",
+   *         "size": 16
+   *       },
+   *       {
+   *         "key": "00000022",
+   *         "deleted": true
+   *       }
+   *     ],
+   *     "Stats": {
+   *       "entries_max": 2,
+   *       "entries_actual": 2,
+   *       "sal_seen": 2,
+   *       "sal_exists": 1,
+   *       "sal_current": 2,
+   *       "sal_deleted": 1
+   *     },
+   *     "NextToken": "MDAwMDAwMjI="
+   *   }
+   * ```
+   *
+   * To retrieve the next page of results, the client issues an \p objectlist
+   * query specifying the continuation token specified in the \p NextToken
+   * field of the JSON response.
    *
    * @param y optional yield.
    * @return true Success. \p items_ is populated and can be used.
@@ -599,6 +667,13 @@ public:
    */
   bool execute_query(optional_yield y);
 
+protected:
+  virtual int _list_impl(rgw::sal::Bucket::ListParams& params, rgw::sal::Bucket::ListResults& results, uint64_t query_max, optional_yield y)
+  {
+    return s->bucket->list(this, params, query_max, results, y);
+  };
+
+public:
   /**
    * @brief Set the return marker (continuation token) for the next query.
    *

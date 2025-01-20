@@ -363,6 +363,8 @@ bool RGWStoreQueryOp_ObjectList::execute_query(optional_yield y)
   // /insanely/ high), and reserve it exactly once.
   items_.reserve(max_entries_);
 
+  stats_.entries_max = max_entries_;
+
   // Loop until we've filled the user's requested number of entries, or we hit
   // EOF.
   while (items_.size() < max_entries_) {
@@ -374,7 +376,7 @@ bool RGWStoreQueryOp_ObjectList::execute_query(optional_yield y)
                         << dendl;
     // NOTE: rgw::sal::RadosBucket::list() updates params.marker as it
     // goes. This isn't how list_multiparts() works.
-    auto ret = s->bucket->list(this, params, query_max, results, y);
+    auto ret = _list_impl(params, results, query_max, y);
 
     if (ret < 0) {
       op_ret = ret;
@@ -405,20 +407,30 @@ bool RGWStoreQueryOp_ObjectList::execute_query(optional_yield y)
 
       // We're only interested in the current (most recent) version of the
       // object.
-      if (obj.exists && obj.is_current()) {
+      stats_.sal_seen++;
+
+      if (obj.is_current()) {
+        stats_.sal_current++;
         item_type item { obj.key.name };
         item.set_deleted(obj.is_delete_marker());
-        if (!obj.is_delete_marker()) {
+        if (obj.is_delete_marker()) {
+          stats_.sal_deleted++;
+        } else {
           // Only non-deleted items should have a size.
           item.set_size(obj.meta.size);
         }
         items_.push_back(item);
+        stats_.entries_actual++;
+      }
+      if (obj.exists) {
+        stats_.sal_exists++;
       }
 
       // Extra action if we've reached the caller's size limit.
       if (items_.size() == max_entries_) {
-        // If we filled items_ and didn't get to EOF, we need to set the token
-        // for next time.
+        // If we filled items_ set the token for next time. It's ok if it's
+        // actually the end of the list - the next query will just have zero
+        // items.
         next_marker = results.objs[n].key.name;
         ldpp_dout(this, 20) << fmt::format(FMT_STRING("max_entries reached, next={}"), next_marker) << dendl;
         break;
@@ -462,6 +474,10 @@ void RGWStoreQueryOp_ObjectList::send_response_json()
     item.dump(f);
   }
   f->close_section(); // Objects
+
+  f->open_object_section("Stats");
+  stats_.dump(f);
+  f->close_section(); // Stats
 
   if (return_marker_.has_value()) {
     f->dump_string("NextToken", *return_marker_);
