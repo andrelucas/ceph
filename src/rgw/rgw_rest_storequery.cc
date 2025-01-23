@@ -8,6 +8,7 @@
 #include <boost/tokenizer.hpp>
 #include <cstdint>
 #include <fmt/format.h>
+#include <stdexcept>
 #include <string>
 
 #include "cls/rgw/cls_rgw_types.h"
@@ -374,8 +375,9 @@ bool RGWStoreQueryOp_ObjectList::execute_query(optional_yield y)
         FMT_STRING("issue bucket list() query query_max={} next_marker={}"),
         query_max, params.marker.name)
                         << dendl;
-    // NOTE: rgw::sal::RadosBucket::list() updates params.marker as it
-    // goes. This isn't how list_multiparts() works.
+    // Call our indirection for rgw::sal::Bucket::list(). Note that
+    // rgw::sal::RadosBucket::list() updates params.marker as it goes. This
+    // isn't how list_multiparts() works, don't get caught.
     auto ret = _list_impl(params, results, query_max, y);
 
     if (ret < 0) {
@@ -445,7 +447,22 @@ bool RGWStoreQueryOp_ObjectList::execute_query(optional_yield y)
   }
 
   if (!seen_eof && !next_marker.empty()) {
-    std::string encoded_marker = to_base64(next_marker);
+    // If there are more results, we need to safely encode the continuation
+    // marker and return it to the user. This is done by setting
+    // return_marker_, which will be dumped in send_response_json().
+    //
+    // Note that it's safe to use to_base64() here. Even though it looks like it
+    // will insert line breaks, it's actually a template and the default line
+    // wrap width is std::numeric_limits<int>::max().
+    std::string encoded_marker;
+    try {
+      encoded_marker = to_base64(next_marker);
+    } catch (std::runtime_error& e) {
+      ldpp_dout(this, 0) << fmt::format(FMT_STRING("failed to encode continuation token: '{}'"), e.what())
+                         << dendl;
+      op_ret = -EINVAL;
+      return false;
+    }
     ldpp_dout(this, 20) << fmt::format(FMT_STRING("EOF not reached, next_marker {}"), params.marker.name)
                         << dendl;
     ldpp_dout(this, 5) << fmt::format(FMT_STRING("EOF not reached, continuation token {}"), encoded_marker)
@@ -483,6 +500,22 @@ void RGWStoreQueryOp_ObjectList::send_response_json()
     f->dump_string("NextToken", *return_marker_);
   }
   f->close_section(); // StoreQueryObjectListResult
+}
+
+void RGWStoreQueryOp_ObjectList::Item::dump(Formatter* f) const
+{
+  f->open_object_section("Object");
+  f->dump_string("key", key_);
+  // Only dump optional attributes if they've been given values.
+  if (is_deleted_.has_value() && *is_deleted_) {
+    // We only dump the attribute if it's set and true.
+    f->dump_bool("deleted", *is_deleted_);
+  }
+  if (size_.has_value()) {
+    // Size of zero is a value value.
+    f->dump_unsigned("size", *size_);
+  }
+  f->close_section();
 }
 
 /***************************************************************************/
@@ -539,11 +572,20 @@ bool RGWStoreQueryOp_MPUploadList::execute_query(optional_yield y)
     ldpp_dout(this, 20) << fmt::format(
         FMT_STRING("issue list_multiparts() query marker='{}'"), marker)
                         << dendl;
-    // Note that 'marker' is an inout param that we'll need for subsequent
-    // queries.
-    auto ret = s->bucket->list_multiparts(this, "", marker,
-        "", query_max, uploads,
-        nullptr, &is_truncated);
+    ldpp_dout(this, 20) << fmt::format(
+        FMT_STRING("issue list_multiparts() query query_max={} marker={}"), query_max, marker)
+                        << dendl;
+
+    // Call our indirection for rgw::sal::Bucket::list_multiparts(). Few
+    // notes:
+    // - marker is an inout parameter that we need for pagination.
+    // - is_truncated must not be null (the standard indirection will assert
+    //   if it is, but the reason is that the underlying implementation
+    //   doesn't do a nullptr check before asserting).
+    // - Don't make any assumptions about how many records will be returned,
+    //   except that it will be <= query_max.
+    auto ret = _list_multiparts_impl("", marker, "", uploads, &is_truncated, query_max);
+
     if (ret < 0) {
       ldpp_dout(this, 2) << "list_multiparts() failed with code " << ret
                          << dendl;
@@ -584,7 +626,22 @@ bool RGWStoreQueryOp_MPUploadList::execute_query(optional_yield y)
   }
 
   if (!seen_eof && !next_marker.empty()) {
-    std::string encoded_marker = to_base64(next_marker);
+    // If there are more results, we need to safely encode the continuation
+    // marker and return it to the user. This is done by setting
+    // return_marker_, which will be dumped in send_response_json().
+    //
+    // Note that it's safe to use to_base64() here. Even though it looks like it
+    // will insert line breaks, it's actually a template and the default line
+    // wrap width is std::numeric_limits<int>::max().
+    std::string encoded_marker;
+    try {
+      encoded_marker = to_base64(next_marker);
+    } catch (std::exception& e) {
+      ldpp_dout(this, 0) << fmt::format(FMT_STRING("failed to encode continuation token: '{}'"), e.what())
+                         << dendl;
+      op_ret = -EINVAL;
+      return false;
+    }
     ldpp_dout(this, 20) << fmt::format(FMT_STRING("EOF not reached, next_marker {}"), marker)
                         << dendl;
     ldpp_dout(this, 5) << fmt::format(FMT_STRING("EOF not reached, continuation token {}"), encoded_marker)
@@ -616,6 +673,16 @@ void RGWStoreQueryOp_MPUploadList::send_response_json()
     f->dump_string("NextToken", *return_marker_);
   }
   f->close_section(); // StoreQueryMPUploadListResult
+}
+
+void RGWStoreQueryOp_MPUploadList::Item::dump(Formatter* f) const
+{
+  f->open_object_section("Object");
+  f->dump_string("key", key_);
+  if (num_parts_.has_value()) {
+    f->dump_unsigned("num_parts", *num_parts_);
+  }
+  f->close_section(); // Object
 }
 
 /***************************************************************************/

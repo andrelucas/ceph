@@ -589,21 +589,7 @@ protected:
     void unset_size() noexcept { size_.reset(); }
     std::optional<uint64_t> size() const noexcept { return size_; }
 
-    void dump(Formatter* f) const
-    {
-      f->open_object_section("Object");
-      f->dump_string("key", key_);
-      // Only dump optional attributes if they've been given values.
-      if (is_deleted_.has_value() && *is_deleted_) {
-        // We only dump the attribute if it's set and true.
-        f->dump_bool("deleted", *is_deleted_);
-      }
-      if (size_.has_value()) {
-        // Size of zero is a value value.
-        f->dump_unsigned("size", *size_);
-      }
-      f->close_section();
-    }
+    void dump(Formatter* f) const;
   }; // RGWStoreQueryListItem
 
 private:
@@ -655,7 +641,7 @@ public:
    * possible, and provide as few ways to break things as we can.
    *
    * If the query fails, \p op_ret will be set to the error code and \p items_
-   * must not be used. If the query succeeds, \p op_ret will be >= 0, and \p
+   * must not be used. If the query succeeds, \p op_ret will be >= 0, and \a
    * send_response_json() can return results to the user.
    *
    * It is highly likely that the query will not be able to return all objects
@@ -704,8 +690,8 @@ public:
    *   }
    * ```
    *
-   * To retrieve the next page of results, the client issues an \p objectlist
-   * query specifying the continuation token specified in the \p NextToken
+   * To retrieve the next page of results, the client issues an \a objectlist
+   * query specifying the continuation token specified in the \a NextToken
    * field of the JSON response.
    *
    * @param y optional yield.
@@ -716,6 +702,20 @@ public:
   bool execute_query(optional_yield y);
 
 protected:
+  /**
+   * @brief Hook for intercepting the SAL call, intended to make unit tests feasible.
+   *
+   * Add an indirection point so we can simulate the SAL operation and test
+   * our logic.
+   *
+   * @param params The rgw::sal::Bucket::ListParams struct passed to rgw:;sal::Bucket::list().
+   * @param results The rgw::sal::Bucket::ListResults to be returned by rgw::sal::Bucket::list().
+   * @param query_max The maximum number of results to return
+   * @param y optional yield token.
+   * @return int The return value from rgw::sal::Bucket::list(). Must be
+   * returned to the caller so a proper error can be raised. The value
+   * typically ends up in \a op_ret.
+   */
   virtual int _list_impl(rgw::sal::Bucket::ListParams& params, rgw::sal::Bucket::ListResults& results, uint64_t query_max, optional_yield y)
   {
     return s->bucket->list(this, params, query_max, results, y);
@@ -771,15 +771,7 @@ protected:
     void unset_num_parts() noexcept { num_parts_.reset(); }
     std::optional<size_t> num_parts() const noexcept { return num_parts_; }
 
-    void dump(Formatter* f) const
-    {
-      f->open_object_section("Object");
-      f->dump_string("key", key_);
-      if (num_parts_.has_value()) {
-        f->dump_unsigned("num_parts", *num_parts_);
-      }
-      f->close_section(); // Object
-    }
+    void dump(Formatter* f) const;
   }; // Item
 
 private:
@@ -805,10 +797,69 @@ public:
 
   static constexpr uint64_t LIST_MULTIPARTS_QUERY_SIZE_HARD_LIMIT = 10000;
 
+  void execute(optional_yield y) override;
+
+  void send_response_json() override;
+
+  const char* name() const override { return "storequery_mpuploadlist"; }
+
   /**
    * @brief Fetch a subset of the list of in-progress multipart uploads from
    * the SAL.
    *
+   * NOTE: The optional_yield is used here, so be careful if you're adding
+   * tracing. It turns out that the multipart_list call doesn't actually take
+   * the yield (I think it should) but don't assume this will always be the
+   * case.
+   *
+   * This method will populate \p items_ with a subset of the in-progress
+   * multipart uploads. The query is not configurable; we want to do as little
+   * work as possible, and provide as few ways to break things as we can.
+   *
+   * If the query fails, \p op_ret will be set to the error code and \p items_
+   * must not be used. If the query succeeds, \p op_ret will be >= 0, and \a
+   * send_response_json() can return results to the user.
+   *
+   * It will often be the case that the query will not be able to return all
+   * in-progress multipart uploads in one go. In that case, the JSON will
+   * include  a NextToken field that will allow the user to request the next
+   * page of results. This is very similar to pagination in AWS. Pass the
+   * returned contuation token to the next query to get the next page of
+   * results.
+   *
+   * The page size is capped at LIST_MULTIPARTS_QUERY_SIZE_HARD_LIMIT. This is
+   * a precaution to stop over-zealous microservices breaking the OSDs. We do
+   * not at the time of writing know the impact of gigantic list queries, so
+   * the value is capped at the largest value passed to
+   * rgw::sal::Bucket::list() (the underlying call used by
+   * rgw::sal::Bucket::list_multipart_uploads()) in RGW. This is the value
+   * used by the SWIFT API. S3 usually limits responses to 1000 objects.
+   *
+   * Using very small page sizes is not helpful. The SAL queries will perform
+   * a readahead of (by default) 1000 objects anyway, so setting a page size
+   * less than this actively wastes time and does unnecessary work.
+   *
+   * Here is an example JSON response with the query size limited rather
+   * artificially to two objects:
+   *
+   * ```
+   *   {
+   *     "Objects": [
+   *       {
+   *         "key": "mp00000001"
+   *       },
+   *       {
+   *         "key": "mp00000002"
+   *       }
+   *     ],
+   *     "NextToken": "bXAwMDAwMDAwMi4yfkZxejZ6cWlPS3ZtSWV5WWNjeWVIUnVvT1l4dlJaSEgubWV0YQ=="
+   *   }
+   * ```
+   *
+   * To retrieve the next page of results, the client issues an \a
+   * mpuploadlist query specifying the continuation token specified in the \a
+   * NextToken field of the JSON response.
+
    * @param y optional yield.
    * @return true Success. \p items_ is populated and can be used.
    * @return false Failure. \p op_ret is set, and \p items_ should not be
@@ -816,11 +867,33 @@ public:
    */
   bool execute_query(optional_yield y);
 
-  void execute(optional_yield y) override;
-
-  void send_response_json() override;
-
-  const char* name() const override { return "storequery_mpuploadlist"; }
+protected:
+  /**
+   * @brief Hook for intercepting the SAL call, intended to make unit tests
+   * feasible.
+   *
+   * Add an indirection point so we can simulate the SAL operation and test
+   * our logic.
+   *
+   * @param prefix The query prefix. Will usually be an empty string.
+   * @param marker INOUT The marker for the next query. You must use the
+   * result placed in this parameter for pagination.
+   * @param delim The delimiter. Usually an empty string.
+   * @param uploads Pointer to a vector of unique pointers to
+   * rgw::sal::MultipartUpload objects. This will be populated by the call.
+   * @param is_truncated INOUT Pointer to bool, set to true if the list is truncated, false
+   * otherwise. Must not be nullptr.
+   * @param query_max The maximum number of records to return.
+   * @return int the return value from rgw::sal::Bucket::list_multiparts(). >=
+   * 0 is success, < 0 is an error that should be returned so proper error
+   * messages can be sent. The value typically ends up in \a op_ret.
+   */
+  virtual int _list_multiparts_impl(const std::string& prefix, std::string& marker, const std::string& delim,
+      std::vector<std::unique_ptr<rgw::sal::MultipartUpload>>& uploads, bool* is_truncated, uint64_t query_max)
+  {
+    ceph_assert(is_truncated != nullptr); // I'd rather debug an assertion than a segfault.
+    return s->bucket->list_multiparts(this, prefix, marker, delim, query_max, uploads, nullptr, is_truncated);
+  };
 
 public:
   /**
