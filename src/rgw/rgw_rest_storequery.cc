@@ -489,8 +489,118 @@ void RGWStoreQueryOp_ObjectList::send_response_json()
 
 // RGWStoreQueryOp_MPUploadList
 
+bool RGWStoreQueryOp_MPUploadList::execute_query(optional_yield y)
+{
+  std::vector<std::unique_ptr<rgw::sal::MultipartUpload>> uploads {};
+
+  std::string marker;
+
+  if (marker_.has_value()) {
+    try {
+      marker = from_base64(*marker_);
+      ldpp_dout(this, 10) << fmt::format(FMT_STRING("continuation token '{}' decoded as {}"), *marker_, marker)
+                          << dendl;
+    } catch (std::exception& e) {
+      // We can't catch boost::archive::archive_exception specifically, it
+      // doesn't link and I'm not fixing the CMake just for one exception.
+      ldpp_dout(this, 0) << fmt::format(FMT_STRING("failed to decode continuation token: '{}'"), e.what())
+                         << dendl;
+      op_ret = -EINVAL;
+      return false;
+    }
+  }
+
+  bool is_truncated; // Must be present, pointer to this is unconditionally
+                     // written by list_multiparts().
+
+  uint64_t query_max = std::min(max_entries_, LIST_MULTIPARTS_QUERY_SIZE_HARD_LIMIT);
+  if (query_max < max_entries_) {
+    ldpp_dout(this, 5) << fmt::format(FMT_STRING("max_entries {} is above the hard limit, restricting query_max to {}"), max_entries_, query_max)
+                       << dendl;
+  }
+
+  bool seen_eof = false;
+  std::string next_marker;
+
+  // Reserve space for the maximum number of entries we might return. This is
+  // a compromise - we could reallocate as we issue queries against the
+  // backend, but this will lead to heap churn and copies. This feels like the
+  // proper balance to me; reserve enough space for the maximum number of
+  // items we're going to return (which we don't in any case allow to be
+  // /insanely/ high), and reserve it exactly once.
+  items_.reserve(max_entries_);
+
+  while (items_.size() < max_entries_) {
+    // Re-initialise this every run. We can only see if the query is complete
+    // across multiple list_multiparts() by checking if this is empty.
+    // However, nothing in list_multiparts() clears it.
+    uploads.clear();
+
+    ldpp_dout(this, 20) << fmt::format(
+        FMT_STRING("issue list_multiparts() query marker='{}'"), marker)
+                        << dendl;
+    // Note that 'marker' is an inout param that we'll need for subsequent
+    // queries.
+    auto ret = s->bucket->list_multiparts(this, "", marker,
+        "", query_max, uploads,
+        nullptr, &is_truncated);
+    if (ret < 0) {
+      ldpp_dout(this, 2) << "list_multiparts() failed with code " << ret
+                         << dendl;
+      op_ret = ret;
+      break;
+    }
+
+    if (uploads.size() == 0) {
+      ldpp_dout(this, 20) << fmt::format(FMT_STRING("SAL list_multiparts() EOF items_.size()={}"), items_.size())
+                          << dendl;
+      seen_eof = true;
+      break;
+    }
+
+    for (auto const& upload : uploads) {
+      auto& key = upload->get_key();
+      ldpp_dout(this, 20)
+          << fmt::format(FMT_STRING("obj: key={} upload_id={}"), key, upload->get_upload_id())
+          << dendl;
+
+      item_type item { key };
+      items_.push_back(item);
+
+      // Extra action if we've reached the caller's size limit.
+      if (items_.size() == max_entries_) {
+        // If we filled items_ set the token for next time. It's ok if it's
+        // actually the end of the list - the next query will just have zero
+        // items.
+        next_marker = marker;
+        ldpp_dout(this, 20) << fmt::format(FMT_STRING("max_entries reached, next={}"), next_marker) << dendl;
+        break;
+      }
+    }
+  }
+
+  if (op_ret < 0) {
+    return false;
+  }
+
+  if (!seen_eof && !next_marker.empty()) {
+    std::string encoded_marker = to_base64(next_marker);
+    ldpp_dout(this, 20) << fmt::format(FMT_STRING("EOF not reached, next_marker {}"), marker)
+                        << dendl;
+    ldpp_dout(this, 5) << fmt::format(FMT_STRING("EOF not reached, continuation token {}"), encoded_marker)
+                       << dendl;
+    set_return_marker(encoded_marker);
+  }
+
+  return true;
+}
+
 void RGWStoreQueryOp_MPUploadList::execute(optional_yield y)
 {
+  if (!execute_query(y)) {
+    // rely on execute_query() setting op_ret appropriately.
+    ldpp_dout(this, 1) << "execute_query() failed" << dendl;
+  }
 }
 
 void RGWStoreQueryOp_MPUploadList::send_response_json()
@@ -502,6 +612,9 @@ void RGWStoreQueryOp_MPUploadList::send_response_json()
     item.dump(f);
   }
   f->close_section(); // Objects
+  if (return_marker_.has_value()) {
+    f->dump_string("NextToken", *return_marker_);
+  }
   f->close_section(); // StoreQueryMPUploadListResult
 }
 

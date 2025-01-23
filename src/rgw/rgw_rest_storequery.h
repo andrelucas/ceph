@@ -565,8 +565,49 @@ protected:
     }
   }; // struct RGWStoreQueryOp_ObjectList::Stats
 
+  /**
+   * @brief A single item in the list of objects returned by the query.
+   */
+  class Item {
+  private:
+    std::string key_;
+    std::optional<bool> is_deleted_;
+    std::optional<uint64_t> size_;
+
+  public:
+    Item(const std::string& key)
+        : key_(key)
+    {
+    }
+    const std::string& key() const noexcept { return key_; }
+
+    void set_deleted(bool deleted) noexcept { is_deleted_ = deleted; }
+    void unset_deleted() noexcept { is_deleted_.reset(); }
+    std::optional<bool> is_deleted() const noexcept { return is_deleted_; }
+
+    void set_size(uint64_t size) noexcept { size_ = size; }
+    void unset_size() noexcept { size_.reset(); }
+    std::optional<uint64_t> size() const noexcept { return size_; }
+
+    void dump(Formatter* f) const
+    {
+      f->open_object_section("Object");
+      f->dump_string("key", key_);
+      // Only dump optional attributes if they've been given values.
+      if (is_deleted_.has_value() && *is_deleted_) {
+        // We only dump the attribute if it's set and true.
+        f->dump_bool("deleted", *is_deleted_);
+      }
+      if (size_.has_value()) {
+        // Size of zero is a value value.
+        f->dump_unsigned("size", *size_);
+      }
+      f->close_section();
+    }
+  }; // RGWStoreQueryListItem
+
 private:
-  using item_type = RGWStoreQueryListItem;
+  using item_type = Item;
 
   uint64_t max_entries_;
   std::optional<std::string> marker_;
@@ -590,6 +631,13 @@ public:
 
   static constexpr uint64_t LIST_QUERY_SIZE_HARD_LIMIT = 10000;
 
+  /**
+   * @brief execute() for RGWStoreQueryOp_ObjectList (StoreQuery objectlist).
+   *
+   * Simply calls execute_query() to perform the query.
+   *
+   * @param y optional yield.
+   */
   void execute(optional_yield y) override;
 
   void send_response_json() override;
@@ -703,11 +751,43 @@ public:
  */
 class RGWStoreQueryOp_MPUploadList : public RGWStoreQueryOp_Base {
 
+protected:
+  /**
+   * @brief A single item in the list of in-progress multipart uploads.
+   */
+  class Item {
+  private:
+    std::string key_;
+    std::optional<size_t> num_parts_;
+
+  public:
+    Item(const std::string& key)
+        : key_(key)
+    {
+    }
+    const std::string& key() const noexcept { return key_; }
+
+    void set_num_parts(size_t num_parts) noexcept { num_parts_ = num_parts; }
+    void unset_num_parts() noexcept { num_parts_.reset(); }
+    std::optional<size_t> num_parts() const noexcept { return num_parts_; }
+
+    void dump(Formatter* f) const
+    {
+      f->open_object_section("Object");
+      f->dump_string("key", key_);
+      if (num_parts_.has_value()) {
+        f->dump_unsigned("num_parts", *num_parts_);
+      }
+      f->close_section(); // Object
+    }
+  }; // Item
+
 private:
-  using item_type = RGWStoreQueryListItem;
+  using item_type = Item;
 
   uint64_t max_entries_;
   std::optional<std::string> marker_;
+  std::optional<std::string> return_marker_;
   std::vector<item_type> items_;
 
 public:
@@ -717,11 +797,45 @@ public:
   {
   }
 
+  RGWStoreQueryOp_MPUploadList() = delete;
+  RGWStoreQueryOp_MPUploadList(const RGWStoreQueryOp_MPUploadList&) = delete;
+  RGWStoreQueryOp_MPUploadList& operator=(const RGWStoreQueryOp_MPUploadList&) = delete;
+  RGWStoreQueryOp_MPUploadList(RGWStoreQueryOp_MPUploadList&&) = delete;
+  RGWStoreQueryOp_MPUploadList& operator=(RGWStoreQueryOp_MPUploadList&&) = delete;
+
+  static constexpr uint64_t LIST_MULTIPARTS_QUERY_SIZE_HARD_LIMIT = 10000;
+
+  /**
+   * @brief Fetch a subset of the list of in-progress multipart uploads from
+   * the SAL.
+   *
+   * @param y optional yield.
+   * @return true Success. \p items_ is populated and can be used.
+   * @return false Failure. \p op_ret is set, and \p items_ should not be
+   * used.
+   */
+  bool execute_query(optional_yield y);
+
   void execute(optional_yield y) override;
 
   void send_response_json() override;
 
   const char* name() const override { return "storequery_mpuploadlist"; }
+
+public:
+  /**
+   * @brief Set the return marker (continuation token) for the next query.
+   *
+   * By default, the return marker is \p std::nullopt, indicating no value.
+   *
+   * @param marker The return marker (contination token) to set.
+   */
+  void set_return_marker(const std::string& marker) { return_marker_ = marker; }
+  /// Reset the return marker to its default no value state.
+  void unset_return_marker() { return_marker_.reset(); }
+  /// Fetch the return marker (continuation token) for the next query, or
+  /// std::nullopt if none is set.
+  std::optional<std::string> return_marker() const { return return_marker_; }
 
 }; // RGWStoreQueryOp_MPUploadList
 
