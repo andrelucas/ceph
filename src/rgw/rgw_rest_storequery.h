@@ -546,11 +546,11 @@ public:
  *   {
  *     "Objects": [
  *       {
- *         "key": "00000011",
+ *         "base64key": "MDAwMDAwMTEK",
  *         "size": 16
  *       },
  *       {
- *         "key": "00000022",
+ *         "base64key": "MDAwMDAwMjIK",
  *         "deleted": true
  *       }
  *     ],
@@ -743,10 +743,10 @@ public:
  *   {
  *     "Objects": [
  *       {
- *         "key": "mp00000001"
+ *         "base64key": "bXAwMDAwMDAwMQo="
  *       },
  *       {
- *         "key": "mp00000002"
+ *         "base64key": "bXAwMDAwMDAwMQo="
  *       }
  *     ],
  *     "NextToken": "bXAwMDAwMDAwMi4yfkZxejZ6cWlPS3ZtSWV5WWNjeWVIUnVvT1l4dlJaSEgubWV0YQ=="
@@ -869,24 +869,6 @@ public:
   std::optional<std::string> return_marker() const { return return_marker_; }
 
 }; // RGWStoreQueryOp_MPUploadList
-
-/**
- * @brief Conservatively (and quickly) scan an object key name for 'unsafe'
- * characters and return true if anything bad is found.
- *
- * @param key The object key name as an arbitrary string.
- * @return true No characters deemed unsafe were found.
- * @return false at least one 'unsafe' character was found.
- */
-bool storequery_key_is_safe(const std::string& key);
-
-/**
- * @brief Dump an untrusted key safely to a formatter.
- *
- * @param f The formatter.
- * @param key The object key name.
- */
-void storequery_safe_dump_key(Formatter* f, const std::string& key, const std::string& safe_fieldname, const std::string& b64_fieldname);
 
 /**
  * @brief Unconditionally base64-encode the object key name to a formatter

@@ -991,60 +991,6 @@ int RGWHandler_REST_StoreQuery_S3::init_permissions(RGWOp* op, optional_yield y)
   return ret;
 }
 
-bool storequery_key_is_safe(const std::string& key)
-{
-  return std::all_of(key.cbegin(), key.cend(), [](auto c) {
-    switch (c) {
-    // S3 'special handling' characters.
-    case '&':
-    case '$':
-    case '@':
-    case '=':
-    case ';':
-    // Don't exclude '/', it's the path separator.
-    // case '/':
-    case ':':
-    case '+':
-    case ' ':
-    case ',':
-    case '?':
-    // S3 'avoid' characters.
-    case '\\':
-    case '{':
-    case '^':
-    case '}':
-    case '%':
-    case '`':
-    case ']':
-    case '\'':
-    case '"':
-    case '>':
-    case '[':
-    case '~':
-    case '<':
-    case '#':
-    case '|':
-      return false;
-    }
-    // Return true for printable ASCII-7 characters not excluded above.
-    // Otherwise, return false.
-    //
-    // Note that this *will* catch non-ASCII-7 UTF-8
-    // characters, as anything outside the single-byte encoding will have bit
-    // 7 set, and so be out of the range below.
-    return c > 0x20 && c <= 0x7e;
-  });
-}
-
-void storequery_safe_dump_key(Formatter* f, const std::string& key, const std::string& safe_fieldname, const std::string& b64_fieldname)
-{
-  if (storequery_key_is_safe(key)) {
-    f->dump_string(safe_fieldname, key);
-  } else {
-    f->dump_string(b64_fieldname, rgw::to_base64(key));
-  }
-}
-
 void storequery_encode_and_dump_key(Formatter* f, const std::string& key, const std::string& fieldname)
 {
   f->dump_string(fieldname, rgw::to_base64(key));
