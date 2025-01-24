@@ -539,7 +539,36 @@ public:
  * for ObjectStatus to combine the classes because the scope is limited. Here,
  * we're querying an entire bucket which might have billions of objects.
  *
- * XXX Example
+ * Here is an example JSON response, with the query size limited rather
+ * artifically to two objects:
+ *
+ * ```
+ *   {
+ *     "Objects": [
+ *       {
+ *         "key": "00000011",
+ *         "size": 16
+ *       },
+ *       {
+ *         "key": "00000022",
+ *         "deleted": true
+ *       }
+ *     ],
+ *     "Stats": {
+ *       "entries_max": 2,
+ *       "entries_actual": 2,
+ *       "sal_seen": 2,
+ *       "sal_exists": 1,
+ *       "sal_current": 2,
+ *       "sal_deleted": 1
+ *     },
+ *     "NextToken": "MDAwMDAwMjI="
+ *   }
+ * ```
+ *
+ * To retrieve the next page of results, the client issues an \a objectlist
+ * query specifying the continuation token specified in the \a NextToken field
+ * of the JSON response.
  */
 class RGWStoreQueryOp_ObjectList : public RGWStoreQueryOp_Base {
 
@@ -669,37 +698,6 @@ public:
    * The pagination can return duplicate items across requests in versioned
    * buckets. The client should deal with this gracefully.
    *
-   * Here is an example JSON response, with the query size limited rather
-   * artifically to two objects:
-   *
-   * ```
-   *   {
-   *     "Objects": [
-   *       {
-   *         "key": "00000011",
-   *         "size": 16
-   *       },
-   *       {
-   *         "key": "00000022",
-   *         "deleted": true
-   *       }
-   *     ],
-   *     "Stats": {
-   *       "entries_max": 2,
-   *       "entries_actual": 2,
-   *       "sal_seen": 2,
-   *       "sal_exists": 1,
-   *       "sal_current": 2,
-   *       "sal_deleted": 1
-   *     },
-   *     "NextToken": "MDAwMDAwMjI="
-   *   }
-   * ```
-   *
-   * To retrieve the next page of results, the client issues an \a objectlist
-   * query specifying the continuation token specified in the \a NextToken
-   * field of the JSON response.
-   *
    * @param y optional yield.
    * @return true Success. \p items_ is populated and can be used.
    * @return false Failure. \p op_ret is set, and \p items_ should not be
@@ -738,7 +736,26 @@ public:
  *
  * This is a counterpart to the objectlist command.
  *
- * XXX Example
+ * Here is an example JSON response with the query size limited rather
+ * artificially to two objects:
+ *
+ * ```
+ *   {
+ *     "Objects": [
+ *       {
+ *         "key": "mp00000001"
+ *       },
+ *       {
+ *         "key": "mp00000002"
+ *       }
+ *     ],
+ *     "NextToken": "bXAwMDAwMDAwMi4yfkZxejZ6cWlPS3ZtSWV5WWNjeWVIUnVvT1l4dlJaSEgubWV0YQ=="
+ *   }
+ * ```
+ *
+ * To retrieve the next page of results, the client issues an \a
+ * mpuploadlist query specifying the continuation token specified in the \a
+ * NextToken field of the JSON response.
  */
 class RGWStoreQueryOp_MPUploadList : public RGWStoreQueryOp_Base {
 
@@ -830,27 +847,6 @@ public:
    * a readahead of (by default) 1000 objects anyway, so setting a page size
    * less than this actively wastes time and does unnecessary work.
    *
-   * Here is an example JSON response with the query size limited rather
-   * artificially to two objects:
-   *
-   * ```
-   *   {
-   *     "Objects": [
-   *       {
-   *         "key": "mp00000001"
-   *       },
-   *       {
-   *         "key": "mp00000002"
-   *       }
-   *     ],
-   *     "NextToken": "bXAwMDAwMDAwMi4yfkZxejZ6cWlPS3ZtSWV5WWNjeWVIUnVvT1l4dlJaSEgubWV0YQ=="
-   *   }
-   * ```
-   *
-   * To retrieve the next page of results, the client issues an \a
-   * mpuploadlist query specifying the continuation token specified in the \a
-   * NextToken field of the JSON response.
-
    * @param y optional yield.
    * @return true Success. \p items_ is populated and can be used.
    * @return false Failure. \p op_ret is set, and \p items_ should not be
@@ -873,5 +869,33 @@ public:
   std::optional<std::string> return_marker() const { return return_marker_; }
 
 }; // RGWStoreQueryOp_MPUploadList
+
+/**
+ * @brief Conservatively (and quickly) scan an object key name for 'unsafe'
+ * characters and return true if anything bad is found.
+ *
+ * @param key The object key name as an arbitrary string.
+ * @return true No characters deemed unsafe were found.
+ * @return false at least one 'unsafe' character was found.
+ */
+bool storequery_key_is_safe(const std::string& key);
+
+/**
+ * @brief Dump an untrusted key safely to a formatter.
+ *
+ * @param f The formatter.
+ * @param key The object key name.
+ */
+void storequery_safe_dump_key(Formatter* f, const std::string& key, const std::string& safe_fieldname, const std::string& b64_fieldname);
+
+/**
+ * @brief Unconditionally base64-encode the object key name to a formatter
+ * using the given fieldname.
+ *
+ * @param f The formatter.
+ * @param key The object key name.
+ * @param fieldname The JSON object field name to use.
+ */
+void storequery_encode_and_dump_key(Formatter* f, const std::string& key, const std::string& fieldname);
 
 } // namespace rgw
