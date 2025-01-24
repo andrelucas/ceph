@@ -115,6 +115,14 @@ TEST_F(StoreQueryHeaderParserTest, ObjectListSuccess)
   ASSERT_EQ(p.param().size(), 1);
   ASSERT_TRUE(p.op() != nullptr);
   ASSERT_STREQ(p.op()->name(), "storequery_objectlist");
+
+  // Two-argument form. Second arg must be valid base64.
+  p.reset();
+  ASSERT_TRUE(p.parse(&dpp, "objectlist 666 012345678", RGWSQHandlerType::Bucket));
+  ASSERT_EQ(p.command(), "objectlist");
+  ASSERT_EQ(p.param().size(), 2);
+  ASSERT_TRUE(p.op() != nullptr);
+  ASSERT_STREQ(p.op()->name(), "storequery_objectlist");
 }
 
 TEST_F(StoreQueryHeaderParserTest, ObjectListFail)
@@ -134,6 +142,15 @@ TEST_F(StoreQueryHeaderParserTest, ObjectListFail)
   // Wrong handler type.
   ASSERT_FALSE(p.parse(&dpp, "objectlist 666", RGWSQHandlerType::Obj));
   p.reset();
+
+  // Fail parse (second argument not valid base64).
+  ASSERT_FALSE(p.parse(&dpp, "objectlist 666 xx!", RGWSQHandlerType::Bucket));
+  p.reset();
+  // Fail parse (second argument not valid base64).
+  ASSERT_FALSE(p.parse(&dpp, "objectlist 666 xx", RGWSQHandlerType::Bucket));
+  p.reset();
+  ASSERT_FALSE(p.parse(&dpp, "objectlist 666 x", RGWSQHandlerType::Bucket));
+  p.reset();
 }
 
 TEST_F(StoreQueryHeaderParserTest, MPUploadListSuccess)
@@ -141,6 +158,14 @@ TEST_F(StoreQueryHeaderParserTest, MPUploadListSuccess)
   ASSERT_TRUE(p.parse(&dpp, "mpuploadlist 666", RGWSQHandlerType::Bucket));
   ASSERT_EQ(p.command(), "mpuploadlist");
   ASSERT_EQ(p.param().size(), 1);
+  ASSERT_TRUE(p.op() != nullptr);
+  ASSERT_STREQ(p.op()->name(), "storequery_mpuploadlist");
+
+  // Two-argument form. Second arg must be valid base64.
+  p.reset();
+  ASSERT_TRUE(p.parse(&dpp, "mpuploadlist 666 012345678", RGWSQHandlerType::Bucket));
+  ASSERT_EQ(p.command(), "mpuploadlist");
+  ASSERT_EQ(p.param().size(), 2);
   ASSERT_TRUE(p.op() != nullptr);
   ASSERT_STREQ(p.op()->name(), "storequery_mpuploadlist");
 }
@@ -161,6 +186,15 @@ TEST_F(StoreQueryHeaderParserTest, MPUploadListFail)
   p.reset();
   // Wrong handler type.
   ASSERT_FALSE(p.parse(&dpp, "mpuploadlist 666", RGWSQHandlerType::Obj));
+  p.reset();
+
+  // Fail parse (second argument not valid base64).
+  ASSERT_FALSE(p.parse(&dpp, "mpuploadlist 666 xx!", RGWSQHandlerType::Bucket));
+  p.reset();
+  // Fail parse (second argument not valid base64).
+  ASSERT_FALSE(p.parse(&dpp, "mpuploadlist 666 xx", RGWSQHandlerType::Bucket));
+  p.reset();
+  ASSERT_FALSE(p.parse(&dpp, "mpuploadlist 666 x", RGWSQHandlerType::Bucket));
   p.reset();
 }
 

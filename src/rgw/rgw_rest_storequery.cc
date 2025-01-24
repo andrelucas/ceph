@@ -717,7 +717,7 @@ bool RGWSQHeaderParser::tokenize(const DoutPrefixProvider* dpp,
   // Enforce ASCII-7 non-control characters.
   if (!std::all_of(input.cbegin(), input.cend(),
           [](auto c) { return c >= ' '; })) {
-    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("Illegal character found in {}"), HEADER_LC)
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("illegal character found in {}"), HEADER_LC)
                       << dendl;
     return false;
   }
@@ -743,9 +743,28 @@ bool RGWSQHeaderParser::tokenize(const DoutPrefixProvider* dpp,
     }
     return true;
   } catch (const boost::escaped_list_error& e) {
-    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("Failed to parse storequery header: {}"), e.what()) << dendl;
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("failed to parse storequery header: {}"), e.what()) << dendl;
     return false;
   }
+}
+
+bool RGWSQHeaderParser::valid_base64(const DoutPrefixProvider* dpp, const std::string& input)
+{
+  if (input.size() % 3 != 0) {
+    ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("input length {} is not a multiple of 3"), input.size()) << dendl;
+    return false;
+  }
+  // Using std::all() would prevent us giving specific diagnostics.
+  for (size_t n = 0; n < input.size(); n++) {
+    char c = input[n];
+    if (!isalnum(c) && c != '+' && c != '/' && c != '=') {
+      // It's safe to output the invalid character, we've already filtered the
+      // input to printable ASCII-7.
+      ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("invalid base64 character '{}' at index {} of input='{}'"), c, n, input) << dendl;
+      return false;
+    }
+  }
+  return true;
 }
 
 bool RGWSQHeaderParser::parse(const DoutPrefixProvider* dpp,
@@ -766,7 +785,7 @@ bool RGWSQHeaderParser::parse(const DoutPrefixProvider* dpp,
     //
     if (handler_type != RGWSQHandlerType::Obj) {
       ldpp_dout(dpp, 0)
-          << fmt::format(FMT_STRING("{}: ObjectStatus only applies in an Object context"),
+          << fmt::format(FMT_STRING("{}: objectstatus only applies in an Object context"),
                  HEADER_LC)
           << dendl;
       return false;
@@ -774,7 +793,7 @@ bool RGWSQHeaderParser::parse(const DoutPrefixProvider* dpp,
     if (param_.size() != 0) {
       ldpp_dout(dpp, 0)
           << fmt::format(
-                 "{}: malformed ObjectStatus command (expected zero args)",
+                 "{}: malformed objectstatus command (expected zero args)",
                  HEADER_LC)
           << dendl;
       return false;
@@ -788,7 +807,7 @@ bool RGWSQHeaderParser::parse(const DoutPrefixProvider* dpp,
     //
     if (handler_type != RGWSQHandlerType::Bucket) {
       ldpp_dout(dpp, 0)
-          << fmt::format(FMT_STRING("{}: ObjectList only applies in an Bucket context"),
+          << fmt::format(FMT_STRING("{}: objectlist only applies in an Bucket context"),
                  HEADER_LC)
           << dendl;
       return false;
@@ -796,7 +815,7 @@ bool RGWSQHeaderParser::parse(const DoutPrefixProvider* dpp,
     if (param_.size() < 1 || param_.size() > 2) {
       ldpp_dout(dpp, 0)
           << fmt::format(
-                 "{}: malformed ObjectList command (expected one or two args)",
+                 "{}: malformed objectlist command (expected one or two args)",
                  HEADER_LC)
           << dendl;
       return false;
@@ -809,6 +828,14 @@ bool RGWSQHeaderParser::parse(const DoutPrefixProvider* dpp,
           << dendl;
       return false;
     }
+    if (param_.size() >= 2 && !valid_base64(dpp, param_[1])) {
+      ldpp_dout(dpp, 0)
+          << fmt::format(FMT_STRING("{}: malformed objectlist command (invalid base64 in second parameter)"),
+                 HEADER_LC)
+          << dendl;
+      return false;
+    }
+
     std::optional<std::string> marker;
     if (param_.size() == 2) {
       marker = param_[1];
@@ -843,6 +870,14 @@ bool RGWSQHeaderParser::parse(const DoutPrefixProvider* dpp,
           << dendl;
       return false;
     }
+    if (param_.size() >= 2 && !valid_base64(dpp, param_[1])) {
+      ldpp_dout(dpp, 0)
+          << fmt::format(FMT_STRING("{}: malformed mpuploadlist command (invalid base64 in second parameter)"),
+                 HEADER_LC)
+          << dendl;
+      return false;
+    }
+
     std::optional<std::string> marker;
     if (param_.size() == 2) {
       marker = param_[1];

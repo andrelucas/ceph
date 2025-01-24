@@ -2,12 +2,14 @@
 // vim: ts=8 sw=2 smarttab
 #pragma once
 
-#include "rgw_op.h"
-#include "rgw_rest_s3.h"
 #include <fmt/printf.h>
 #include <memory>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include "common/dout.h"
+#include "rgw_op.h"
+#include "rgw_rest_s3.h"
 
 namespace rgw {
 
@@ -218,6 +220,10 @@ public:
    */
   bool parse(const DoutPrefixProvider* dpp, const std::string& input,
       RGWSQHandlerType handler_type);
+
+  /// Quickly determine if the input is a valid base64 string.
+  bool valid_base64(const DoutPrefixProvider* dpp, const std::string& input);
+
   RGWOp* op() noexcept { return op_; }
   std::string command() noexcept { return command_; }
   std::vector<std::string> param() noexcept { return param_; }
