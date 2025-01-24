@@ -1,10 +1,18 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
+#include <fmt/format.h>
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
 #include "common/ceph_argparse.h"
+#include "common/dout.h"
 #include "global/global_context.h"
 #include "rgw/rgw_rest_storequery.h"
-#include <gtest/gtest.h>
+
+namespace {
+
+using namespace std::string_literals;
 
 using namespace rgw;
 
@@ -197,6 +205,8 @@ TEST_F(StoreQueryHeaderParserTest, MPUploadListFail)
   ASSERT_FALSE(p.parse(&dpp, "mpuploadlist 666 x", RGWSQHandlerType::Bucket));
   p.reset();
 }
+
+} // anonymous namespace
 
 int main(int argc, char** argv)
 {

@@ -375,10 +375,9 @@ bool RGWStoreQueryOp_ObjectList::execute_query(optional_yield y)
         FMT_STRING("issue bucket list() query query_max={} next_marker={}"),
         query_max, params.marker.name)
                         << dendl;
-    // Call our indirection for rgw::sal::Bucket::list(). Note that
-    // rgw::sal::RadosBucket::list() updates params.marker as it goes. This
-    // isn't how list_multiparts() works, don't get caught.
-    auto ret = _list_impl(params, results, query_max, y);
+    // Note that rgw::sal::RadosBucket::list() updates params.marker as it
+    // goes. This isn't how list_multiparts() works, don't get caught.
+    auto ret = s->bucket->list(this, params, query_max, results, y);
 
     if (ret < 0) {
       op_ret = ret;
@@ -576,15 +575,13 @@ bool RGWStoreQueryOp_MPUploadList::execute_query(optional_yield y)
         FMT_STRING("issue list_multiparts() query query_max={} marker={}"), query_max, marker)
                         << dendl;
 
-    // Call our indirection for rgw::sal::Bucket::list_multiparts(). Few
-    // notes:
+    // rgw::sal::Bucket::list_multiparts() notes:
     // - marker is an inout parameter that we need for pagination.
-    // - is_truncated must not be null (the standard indirection will assert
-    //   if it is, but the reason is that the underlying implementation
-    //   doesn't do a nullptr check before asserting).
+    // - is_truncated must not be null, the underlying implementation
+    //   doesn't do a nullptr check.
     // - Don't make any assumptions about how many records will be returned,
     //   except that it will be <= query_max.
-    auto ret = _list_multiparts_impl("", marker, "", uploads, &is_truncated, query_max);
+    auto ret = s->bucket->list_multiparts(this, "", marker, "", query_max, uploads, nullptr, &is_truncated);
 
     if (ret < 0) {
       ldpp_dout(this, 2) << "list_multiparts() failed with code " << ret

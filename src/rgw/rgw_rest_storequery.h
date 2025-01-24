@@ -707,27 +707,6 @@ public:
    */
   bool execute_query(optional_yield y);
 
-protected:
-  /**
-   * @brief Hook for intercepting the SAL call, intended to make unit tests feasible.
-   *
-   * Add an indirection point so we can simulate the SAL operation and test
-   * our logic.
-   *
-   * @param params The rgw::sal::Bucket::ListParams struct passed to rgw:;sal::Bucket::list().
-   * @param results The rgw::sal::Bucket::ListResults to be returned by rgw::sal::Bucket::list().
-   * @param query_max The maximum number of results to return
-   * @param y optional yield token.
-   * @return int The return value from rgw::sal::Bucket::list(). Must be
-   * returned to the caller so a proper error can be raised. The value
-   * typically ends up in \a op_ret.
-   */
-  virtual int _list_impl(rgw::sal::Bucket::ListParams& params, rgw::sal::Bucket::ListResults& results, uint64_t query_max, optional_yield y)
-  {
-    return s->bucket->list(this, params, query_max, results, y);
-  };
-
-public:
   /**
    * @brief Set the return marker (continuation token) for the next query.
    *
@@ -741,6 +720,12 @@ public:
   /// Fetch the return marker (continuation token) for the next query, or
   /// std::nullopt if none is set.
   std::optional<std::string> return_marker() const { return return_marker_; }
+
+  /// Fetch the maximum number of entries to return in this query.
+  uint64_t max_entries() const { return max_entries_; }
+  /// Fetch the continuation marker used when issuing this query. Contrast
+  /// with return_marker() which is the optional marker for the next query.
+  std::optional<std::string> marker() const { return marker_; }
 
 }; // RGWStoreQueryOp_ObjectList
 
@@ -873,35 +858,6 @@ public:
    */
   bool execute_query(optional_yield y);
 
-protected:
-  /**
-   * @brief Hook for intercepting the SAL call, intended to make unit tests
-   * feasible.
-   *
-   * Add an indirection point so we can simulate the SAL operation and test
-   * our logic.
-   *
-   * @param prefix The query prefix. Will usually be an empty string.
-   * @param marker INOUT The marker for the next query. You must use the
-   * result placed in this parameter for pagination.
-   * @param delim The delimiter. Usually an empty string.
-   * @param uploads Pointer to a vector of unique pointers to
-   * rgw::sal::MultipartUpload objects. This will be populated by the call.
-   * @param is_truncated INOUT Pointer to bool, set to true if the list is truncated, false
-   * otherwise. Must not be nullptr.
-   * @param query_max The maximum number of records to return.
-   * @return int the return value from rgw::sal::Bucket::list_multiparts(). >=
-   * 0 is success, < 0 is an error that should be returned so proper error
-   * messages can be sent. The value typically ends up in \a op_ret.
-   */
-  virtual int _list_multiparts_impl(const std::string& prefix, std::string& marker, const std::string& delim,
-      std::vector<std::unique_ptr<rgw::sal::MultipartUpload>>& uploads, bool* is_truncated, uint64_t query_max)
-  {
-    ceph_assert(is_truncated != nullptr); // I'd rather debug an assertion than a segfault.
-    return s->bucket->list_multiparts(this, prefix, marker, delim, query_max, uploads, nullptr, is_truncated);
-  };
-
-public:
   /**
    * @brief Set the return marker (continuation token) for the next query.
    *
