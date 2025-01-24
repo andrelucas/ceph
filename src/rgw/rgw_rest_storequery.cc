@@ -504,7 +504,7 @@ void RGWStoreQueryOp_ObjectList::send_response_json()
 void RGWStoreQueryOp_ObjectList::Item::dump(Formatter* f) const
 {
   f->open_object_section("Object");
-  storequery_encode_and_dump_key(f, key_, "base64key");
+  f->dump_string("key", to_base64(key_));
   // Only dump optional attributes if they've been given values.
   if (is_deleted_.has_value() && *is_deleted_) {
     // We only dump the attribute if it's set and true.
@@ -599,11 +599,12 @@ bool RGWStoreQueryOp_MPUploadList::execute_query(optional_yield y)
 
     for (auto const& upload : uploads) {
       auto& key = upload->get_key();
+      auto& id = upload->get_upload_id();
       ldpp_dout(this, 20)
-          << fmt::format(FMT_STRING("obj: key={} upload_id={}"), key, upload->get_upload_id())
+          << fmt::format(FMT_STRING("obj: key={} upload_id={}"), key, id)
           << dendl;
 
-      item_type item { key };
+      item_type item(key, id);
       items_.push_back(item);
 
       // Extra action if we've reached the caller's size limit.
@@ -675,10 +676,8 @@ void RGWStoreQueryOp_MPUploadList::send_response_json()
 void RGWStoreQueryOp_MPUploadList::Item::dump(Formatter* f) const
 {
   f->open_object_section("Object");
-  storequery_encode_and_dump_key(f, key_, "base64key");
-  if (num_parts_.has_value()) {
-    f->dump_unsigned("num_parts", *num_parts_);
-  }
+  f->dump_string("key", to_base64(key_));
+  f->dump_string("upload_id", to_base64(upload_id_));
   f->close_section(); // Object
 }
 

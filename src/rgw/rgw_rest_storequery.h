@@ -546,11 +546,11 @@ public:
  *   {
  *     "Objects": [
  *       {
- *         "base64key": "MDAwMDAwMTEK",
+ *         "key": "MDAwMDAwMTEK",
  *         "size": 16
  *       },
  *       {
- *         "base64key": "MDAwMDAwMjIK",
+ *         "key": "MDAwMDAwMjIK",
  *         "deleted": true
  *       }
  *     ],
@@ -565,6 +565,9 @@ public:
  *     "NextToken": "MDAwMDAwMjI="
  *   }
  * ```
+ *
+ * The object key names are base64-encoded as they can contain codepoints that
+ * might interfere with JSON encoding. Size is in bytes.
  *
  * To retrieve the next page of results, the client issues an \a objectlist
  * query specifying the continuation token specified in the \a NextToken field
@@ -740,22 +743,27 @@ public:
  * artificially to two objects:
  *
  * ```
- *   {
- *     "Objects": [
- *       {
- *         "base64key": "bXAwMDAwMDAwMQo="
- *       },
- *       {
- *         "base64key": "bXAwMDAwMDAwMQo="
- *       }
- *     ],
- *     "NextToken": "bXAwMDAwMDAwMi4yfkZxejZ6cWlPS3ZtSWV5WWNjeWVIUnVvT1l4dlJaSEgubWV0YQ=="
- *   }
+ *  {
+ *    "Objects": [
+ *      {
+ *        "key": "bXAwMDAwMDAwMQ==",
+ *        "upload_id": "Mn5hXzhtV2UtZGRaU1VPNF83WkJla0M2ZnNCV2VOOUpl"
+ *      },
+ *      {
+ *        "key": "bXAwMDAwMDAwMg==",
+ *        "upload_id": "Mn5GcXo2enFpT0t2bUlleVljY3llSFJ1b09ZeHZSWkhI"
+ *      }
+ *    ],
+ *    "NextToken": "bXAwMDAwMDAwMi4yfkZxejZ6cWlPS3ZtSWV5WWNjeWVIUnVvT1l4dlJaSEgubWV0YQ=="
+ *  }
  * ```
  *
- * To retrieve the next page of results, the client issues an \a
- * mpuploadlist query specifying the continuation token specified in the \a
- * NextToken field of the JSON response.
+ * The object key names and the upload IDs are base64-encoded, since both can
+ * contain codepoints that might not survive JSON encoding.
+ *
+ * To retrieve the next page of results, the client issues an \a mpuploadlist
+ * query specifying the continuation token specified in the \a NextToken field
+ * of the JSON response.
  */
 class RGWStoreQueryOp_MPUploadList : public RGWStoreQueryOp_Base {
 
@@ -766,18 +774,16 @@ protected:
   class Item {
   private:
     std::string key_;
-    std::optional<size_t> num_parts_;
+    std::string upload_id_;
 
   public:
-    Item(const std::string& key)
+    Item(const std::string& key, const std::string& upload_id)
         : key_(key)
+        , upload_id_(upload_id)
     {
     }
     const std::string& key() const noexcept { return key_; }
-
-    void set_num_parts(size_t num_parts) noexcept { num_parts_ = num_parts; }
-    void unset_num_parts() noexcept { num_parts_.reset(); }
-    std::optional<size_t> num_parts() const noexcept { return num_parts_; }
+    const std::string& upload_id() const noexcept { return upload_id_; }
 
     void dump(Formatter* f) const;
   }; // Item
@@ -869,15 +875,5 @@ public:
   std::optional<std::string> return_marker() const { return return_marker_; }
 
 }; // RGWStoreQueryOp_MPUploadList
-
-/**
- * @brief Unconditionally base64-encode the object key name to a formatter
- * using the given fieldname.
- *
- * @param f The formatter.
- * @param key The object key name.
- * @param fieldname The JSON object field name to use.
- */
-void storequery_encode_and_dump_key(Formatter* f, const std::string& key, const std::string& fieldname);
 
 } // namespace rgw
