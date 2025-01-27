@@ -805,7 +805,7 @@ bool RGWSQHeaderParser::parse(const DoutPrefixProvider* dpp,
     //
     if (handler_type != RGWSQHandlerType::Bucket) {
       ldpp_dout(dpp, 0)
-          << fmt::format(FMT_STRING("{}: objectlist only applies in an Bucket context"),
+          << fmt::format(FMT_STRING("{}: objectlist only applies in a Bucket context"),
                  HEADER_LC)
           << dendl;
       return false;
@@ -847,7 +847,7 @@ bool RGWSQHeaderParser::parse(const DoutPrefixProvider* dpp,
     //
     if (handler_type != RGWSQHandlerType::Bucket) {
       ldpp_dout(dpp, 0)
-          << fmt::format(FMT_STRING("{}: mpuploadlist only applies in an Bucket context"),
+          << fmt::format(FMT_STRING("{}: mpuploadlist only applies in a Bucket context"),
                  HEADER_LC)
           << dendl;
       return false;
