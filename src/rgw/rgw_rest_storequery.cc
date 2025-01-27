@@ -746,8 +746,10 @@ bool RGWSQHeaderParser::tokenize(const DoutPrefixProvider* dpp,
 
 bool RGWSQHeaderParser::valid_base64(const DoutPrefixProvider* dpp, const std::string& input)
 {
-  if (input.size() % 3 != 0) {
-    ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("input length {} is not a multiple of 3"), input.size()) << dendl;
+  // This is quite fussy, but we should always output valid base64 with proper
+  // padding, so it's not unreasonable to expect the same back.
+  if (input.size() % 4 != 0) {
+    ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("input length {} is not a multiple of 4"), input.size()) << dendl;
     return false;
   }
   // Using std::all() would prevent us giving specific diagnostics.
