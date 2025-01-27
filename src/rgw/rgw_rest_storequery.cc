@@ -378,6 +378,7 @@ bool RGWStoreQueryOp_ObjectList::execute_query(optional_yield y)
     // Note that rgw::sal::RadosBucket::list() updates params.marker as it
     // goes. This isn't how list_multiparts() works, don't get caught.
     auto ret = s->bucket->list(this, params, query_max, results, y);
+    stats_.sal_queries++;
 
     if (ret < 0) {
       op_ret = ret;
@@ -386,31 +387,33 @@ bool RGWStoreQueryOp_ObjectList::execute_query(optional_yield y)
       break;
     }
 
-    ldpp_dout(this, 20) << fmt::format(FMT_STRING("SAL bucket->list() returned {} items"), results.objs.size())
-                        << dendl;
-
     if (results.objs.size() == 0) {
-      // EOF. Exit the loop.
+      // We've reached the end of the bucket.
       ldpp_dout(this, 20) << fmt::format(FMT_STRING("SAL bucket->list() EOF items_.size()={}"), items_.size()) << dendl;
       seen_eof = true;
       break;
     }
 
+    ldpp_dout(this, 20) << fmt::format(FMT_STRING("SAL bucket->list() returned {} items"), results.objs.size())
+                        << dendl;
+
     // Loop over the results of s->bucket->list().
     for (size_t n = 0; n < results.objs.size(); n++) {
-      auto& obj = results.objs[n];
+      stats_.sal_seen++;
 
+      auto& obj = results.objs[n];
       ldpp_dout(this, 20)
           << fmt::format(FMT_STRING("obj {}/{}: key={} exists={} current={} delete_marker={}"),
                  n + 1, results.objs.size(), obj.key.name, obj.exists, obj.is_current(),
                  obj.is_delete_marker())
           << dendl;
 
-      // We're only interested in the current (most recent) version of the
-      // object.
-      stats_.sal_seen++;
+      // We're only really interested in the current (most recent) version of
+      // the object.
+      if (!obj.is_current()) {
+        stats_.sal_not_current++;
 
-      if (obj.is_current()) {
+      } else {
         stats_.sal_current++;
         item_type item { obj.key.name };
         item.set_deleted(obj.is_delete_marker());
@@ -429,15 +432,16 @@ bool RGWStoreQueryOp_ObjectList::execute_query(optional_yield y)
 
       // Extra action if we've reached the caller's size limit.
       if (items_.size() == max_entries_) {
-        // If we filled items_ set the token for next time. It's ok if it's
+        // If we filled items_, set the token for next time. It's ok if it's
         // actually the end of the list - the next query will just have zero
         // items.
         next_marker = results.objs[n].key.name;
         ldpp_dout(this, 20) << fmt::format(FMT_STRING("max_entries reached, next={}"), next_marker) << dendl;
         break;
       }
-    }
-  }
+
+    } // for each SAL object result
+  } // while items_.size() < max_entries_
 
   // s->bucket->list() can fail. We rely on op_ret being properly set at the
   // point of failure.

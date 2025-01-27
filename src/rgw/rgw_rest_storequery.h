@@ -581,13 +581,18 @@ protected:
     uint64_t entries_max = 0;
     /// The number of entries actually returned to the user.
     uint64_t entries_actual = 0;
+    /// The number of list() queries of size \a entries_max to the SAL.
+    uint64_t sal_queries = 0;
     /// The number of objects returned by querying the SAL.
     uint64_t sal_seen = 0;
-    /// Out of \p sal_seen, the number of objects with the `exists` flag set.
+    /// Out of \a sal_seen, the number of objects with the `exists` flag set.
     uint64_t sal_exists = 0;
-    /// Out of \p sal_seen, the number of objects with the `current` flag set.
+    /// Out of \a sal_seen, the number of objects with the `current` flag set.
     uint64_t sal_current = 0;
-    /// Out of \p sal_seen, the number of objects with the `current` /and/
+    /// Out of \a sal_seen, the number of objects with the `current` flag
+    /// cleared.
+    uint64_t sal_not_current = 0;
+    /// Out of \a sal_seen, the number of objects with the `current` /and/
     /// `deleted` flag set.
     uint64_t sal_deleted = 0;
 
@@ -596,9 +601,11 @@ protected:
     {
       f->dump_unsigned("entries_max", entries_max);
       f->dump_unsigned("entries_actual", entries_actual);
+      f->dump_unsigned("sal_queries", sal_queries);
       f->dump_unsigned("sal_seen", sal_seen);
       f->dump_unsigned("sal_exists", sal_exists);
       f->dump_unsigned("sal_current", sal_current);
+      f->dump_unsigned("sal_not_current", sal_not_current);
       f->dump_unsigned("sal_deleted", sal_deleted);
     }
   }; // struct RGWStoreQueryOp_ObjectList::Stats
