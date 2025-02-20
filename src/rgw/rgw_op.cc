@@ -568,7 +568,7 @@ int rgw_build_bucket_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* d
         return r;
       }
       s->bucket_owner = owner;
-      ldpp_dout(dpp, 20) << "handoff authz: set bucket_owner: " << owner.to_str() << dendl;
+      ldpp_dout(dpp, 20) << "handoff authz: rgw_build_bucket_policies(): set bucket_owner: " << owner.to_str() << dendl;
 
     } else {
       ret = read_bucket_policy(dpp, driver, s, s->bucket->get_info(),
