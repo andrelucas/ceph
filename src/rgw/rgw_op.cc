@@ -538,14 +538,17 @@ int rgw_build_bucket_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* d
       // HANDOFF: We can skip the policy read, but we *must* set the
       // s->bucket_owner as it's used by usage logging.
       //
-      // Conveniently, with Handoff Authn the request user is always set (as
-      // directed by the Authenticator) to the bucket owner and we don't need
-      // the policy to know the bucket owner.
+      // This call follows the chain of events that occurs when there's no
+      // policy available:
       //
-      // Play it safe (thanks vitaly@) and make sure it's a Handoff user by
-      // verifying the type. This way, if we're using builtin users e.g. for
-      // admin, we get the non-Handoff behaviour.
-      s->bucket_owner = s->user->get_id();
+      //   read_bucket_policy() -> rgw_op_get_bucket_policy_from_attr() ->
+      //     RGWAccessControlPolicy::create_default()
+      //
+      // IOW we just ask the bucket for its owner. The assignment works ok
+      // because class ACLOwner (s->bucket_owner) has a convenient constructor
+      // that takes an rgw_user, the type of RGWBucketInfo.owner.
+      //
+      s->bucket_owner = s->bucket->get_info().owner;
 
     } else {
       ret = read_bucket_policy(dpp, driver, s, s->bucket->get_info(),
