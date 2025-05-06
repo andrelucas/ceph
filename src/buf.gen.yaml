@@ -1,17 +1,11 @@
-version: v1
+version: v2
 managed:
   enabled: true
-  optimize_for: SPEED
+  override:
+    - file_option: optimize_for
+      value: SPEED
 plugins:
-  - plugin: cpp
+  - protoc_builtin: cpp
     out: bufgen
-  - plugin: grpc_cpp
-    # This is the binary that the gRPC C++ source builds into bin/.
-    path: grpc_cpp_plugin
+  - local: grpc_cpp_plugin
     out: bufgen
-  # - plugin: python
-  #   out: bufgen
-  # - plugin: grpc_python
-  #   # This is the binary that the gRPC C++ source builds into bin/.
-  #   path: grpc_python_plugin
-  #   out: bufgen
