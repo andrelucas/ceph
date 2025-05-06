@@ -384,9 +384,8 @@ if(WITH_RADOSGW_GRPC)
   # The static configuration files for buf. These are used to detect changes
   # that might require a rebuild of the generated sources.
   set(buf_config_files
-    ${CMAKE_SOURCE_DIR}/src/buf.work.yaml
     ${CMAKE_SOURCE_DIR}/src/buf.gen.yaml
-    ${CMAKE_SOURCE_DIR}/src/buf.yaml
+    ${CMAKE_SOURCE_DIR}/buf.yaml
   )
 
   # The tools buf will need to generate source code. If support for a target
