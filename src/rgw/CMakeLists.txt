@@ -140,6 +140,7 @@ set(librgw_common_srcs
   rgw_url.cc
   rgw_oidc_provider.cc
   rgw_log.cc
+  rgw_log_akamai.cc
   rgw_lua_request.cc
   rgw_lua_utils.cc
   rgw_lua.cc
@@ -338,6 +339,7 @@ set(rgw_a_srcs
   rgw_loadgen.cc
   rgw_loadgen_process.cc
   rgw_log.cc
+  rgw_log_akamai.cc
   rgw_lua_request.cc
   rgw_opa.cc
   rgw_os_lib.cc
