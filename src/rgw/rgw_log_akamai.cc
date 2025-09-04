@@ -29,26 +29,26 @@ namespace rgw::akamai {
 
 bool query_usage_bypass_for_egress(const struct req_state* s)
 {
-  assert(s != nullptr);
-  assert(s->info.env != nullptr);
-  auto hdr = fetch_bypass_header(s);
-  if (!hdr) {
-    return false;
-  }
-  auto flags = parse_bypass_header(s, *hdr);
-  return flags && (flags.value() & kUsageBypassEgressFlag);
+  auto flags = query_usage_bypass(s);
+  return (flags & kUsageBypassEgressFlag) != 0;
 }
 
 bool query_usage_bypass_for_ingress(const struct req_state* s)
+{
+  auto flags = query_usage_bypass(s);
+  return (flags & kUsageBypassIngressFlag) != 0;
+}
+
+bypass_flag_t query_usage_bypass(const struct req_state* s)
 {
   assert(s != nullptr);
   assert(s->info.env != nullptr);
   auto hdr = fetch_bypass_header(s);
   if (!hdr) {
-    return false;
+    return 0;
   }
   auto flags = parse_bypass_header(s, *hdr);
-  return flags && (flags.value() & kUsageBypassIngressFlag);
+  return flags.value_or(0);
 }
 
 /***************************************************************************/
@@ -73,8 +73,8 @@ struct bypass_option {
 };
 
 static std::unordered_map<std::string, bypass_option> bypass_options = {
-  { "no_egress", { kUsageBypassEgressFlag } },
-  { "no_ingress", { kUsageBypassIngressFlag } },
+  { "no-egress", { kUsageBypassEgressFlag } },
+  { "no-ingress", { kUsageBypassIngressFlag } },
 };
 
 std::optional<bypass_flag_t> parse_bypass_header(const struct req_state* s, std::string_view header_value)

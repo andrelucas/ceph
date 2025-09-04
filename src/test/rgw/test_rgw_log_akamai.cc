@@ -154,13 +154,13 @@ TEST_F(RGWLogAkamaiUsageTest, ParseBypassHeaderSingle)
   ASSERT_EQ(bypass_flags.value(), 0);
 
   // Set the header to a valid value and try again.
-  env.set(kUsageBypassHeader, "no_egress");
+  env.set(kUsageBypassHeader, "no-egress");
   bypass_flags = parse_bypass_header(&s, "");
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag);
 
   // Set the header to multiple valid values and try again.
-  env.set(kUsageBypassHeader, "no_ingress");
+  env.set(kUsageBypassHeader, "no-ingress");
   bypass_flags = parse_bypass_header(&s, "");
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassIngressFlag);
@@ -176,13 +176,13 @@ TEST_F(RGWLogAkamaiUsageTest, ParseBypassHeaderMultiple)
   std::optional<bypass_flag_t> bypass_flags;
 
   // Two valid flags.
-  env.set(kUsageBypassHeader, "no_egress,no_ingress");
+  env.set(kUsageBypassHeader, "no-egress,no-ingress");
   bypass_flags = parse_bypass_header(&s, "");
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag | kUsageBypassIngressFlag);
 
   // Two valid flags and an invalid flag (should ignore the invalid one).
-  env.set(kUsageBypassHeader, "no_egress,no_ingress,invalid_option");
+  env.set(kUsageBypassHeader, "no-egress,no-ingress,invalid_option");
   bypass_flags = parse_bypass_header(&s, "");
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag | kUsageBypassIngressFlag);
@@ -198,31 +198,31 @@ TEST_F(RGWLogAkamaiUsageTest, ParseBypassHeaderDegenerateSpacing)
   std::optional<bypass_flag_t> bypass_flags;
 
   // Comma-space.
-  env.set(kUsageBypassHeader, "no_egress, no_ingress");
+  env.set(kUsageBypassHeader, "no-egress, no-ingress");
   bypass_flags = parse_bypass_header(&s, "");
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag | kUsageBypassIngressFlag);
 
   // Leading space.
-  env.set(kUsageBypassHeader, " no_egress");
+  env.set(kUsageBypassHeader, " no-egress");
   bypass_flags = parse_bypass_header(&s, "");
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag);
 
   // Comma-space with an empty token in the middle.
-  env.set(kUsageBypassHeader, "no_egress, , no_ingress");
+  env.set(kUsageBypassHeader, "no-egress, , no-ingress");
   bypass_flags = parse_bypass_header(&s, "");
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag | kUsageBypassIngressFlag);
 
   // Repeated commas with an empty token in the middle.
-  env.set(kUsageBypassHeader, "no_egress,,no_ingress");
+  env.set(kUsageBypassHeader, "no-egress,,no-ingress");
   bypass_flags = parse_bypass_header(&s, "");
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag | kUsageBypassIngressFlag);
 
   // Leading comma then token
-  env.set(kUsageBypassHeader, ",no_egress");
+  env.set(kUsageBypassHeader, ",no-egress");
   bypass_flags = parse_bypass_header(&s, "");
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag);
@@ -250,13 +250,13 @@ TEST_F(RGWLogAkamaiUsageTest, ParseBypassHeaderInvalidChars)
   std::optional<bypass_flag_t> bypass_flags;
 
   // Invalid UTF-8 leading.
-  env.set(kUsageBypassHeader, "\u{00fe}no_egress");
+  env.set(kUsageBypassHeader, "\u{00fe}no-egress");
   bypass_flags = parse_bypass_header(&s, "");
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), 0);
 
   // Invalid UTF-8 trailing.
-  env.set(kUsageBypassHeader, "no_egress\u{00fe}");
+  env.set(kUsageBypassHeader, "no-egress\u{00fe}");
   bypass_flags = parse_bypass_header(&s, "");
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), 0);
@@ -283,15 +283,15 @@ TEST_F(RGWLogAkamaiUsageTest, QueryBypassEgress)
   ASSERT_FALSE(query_usage_bypass_for_egress(&s));
 
   // Set the header to a valid value and try again.
-  env.set(kUsageBypassHeader, "no_egress");
+  env.set(kUsageBypassHeader, "no-egress");
   ASSERT_TRUE(query_usage_bypass_for_egress(&s));
 
   // Set the header to multiple valid values and try again.
-  env.set(kUsageBypassHeader, "no_ingress");
+  env.set(kUsageBypassHeader, "no-ingress");
   ASSERT_FALSE(query_usage_bypass_for_egress(&s));
 
   // Two valid flags.
-  env.set(kUsageBypassHeader, "no_egress,no_ingress");
+  env.set(kUsageBypassHeader, "no-egress,no-ingress");
   ASSERT_TRUE(query_usage_bypass_for_egress(&s));
 }
 
@@ -310,16 +310,44 @@ TEST_F(RGWLogAkamaiUsageTest, QueryBypassIngress)
   ASSERT_FALSE(query_usage_bypass_for_ingress(&s));
 
   // Set the header to a valid value and try again.
-  env.set(kUsageBypassHeader, "no_ingress");
+  env.set(kUsageBypassHeader, "no-ingress");
   ASSERT_TRUE(query_usage_bypass_for_ingress(&s));
 
   // Set the header to multiple valid values and try again.
-  env.set(kUsageBypassHeader, "no_egress");
+  env.set(kUsageBypassHeader, "no-egress");
   ASSERT_FALSE(query_usage_bypass_for_ingress(&s));
 
   // Two valid flags.
-  env.set(kUsageBypassHeader, "no_egress,no_ingress");
+  env.set(kUsageBypassHeader, "no-egress,no-ingress");
   ASSERT_TRUE(query_usage_bypass_for_ingress(&s));
+}
+
+TEST_F(RGWLogAkamaiUsageTest, QueryBypass)
+{
+  DEFINE_REQ_STATE;
+
+  // Set up a get-object operation.
+  init_op<RGWGetObj_ObjStore_S3>(&s);
+
+  auto bypass_flags = query_usage_bypass(&s);
+  ASSERT_EQ(bypass_flags, 0);
+
+  // Set the header to an invalid value and try again.
+  env.set(kUsageBypassHeader, "invalid_option");
+  bypass_flags = query_usage_bypass(&s);
+  ASSERT_EQ(bypass_flags, 0);
+  // Set the header to a valid value and try again.
+  env.set(kUsageBypassHeader, "no-egress");
+  bypass_flags = query_usage_bypass(&s);
+  ASSERT_EQ(bypass_flags, kUsageBypassEgressFlag);
+  // Set the header to a different valid values and try again.
+  env.set(kUsageBypassHeader, "no-ingress");
+  bypass_flags = query_usage_bypass(&s);
+  ASSERT_EQ(bypass_flags, kUsageBypassIngressFlag);
+  // Two valid flags.
+  env.set(kUsageBypassHeader, "no-egress,no-ingress");
+  bypass_flags = query_usage_bypass(&s);
+  ASSERT_EQ(bypass_flags, kUsageBypassEgressFlag | kUsageBypassIngressFlag);
 }
 
 /***************************************************************************/

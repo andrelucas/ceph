@@ -17,7 +17,7 @@
 
 namespace rgw::akamai {
 
-static constexpr char kUsageBypassHeader[] = "x-rgw-akamai-internal-xfer";
+static constexpr char kUsageBypassHeader[] = "HTTP_X_RGW_AKAMAI_USAGE_STATS_BYPASS";
 
 using bypass_flag_t = uint64_t;
 static constexpr bypass_flag_t kUsageBypassEgressFlag = 1 << 0;
@@ -46,6 +46,15 @@ bool query_usage_bypass_for_egress(const struct req_state* s);
  * @return false Ingress logging should not be bypassed.
  */
 bool query_usage_bypass_for_ingress(const struct req_state* s);
+
+/**
+ * @brief Returns the usage bypass flags for the request. If no header is
+ * present or there was an problem parsing it, return 0.
+ *
+ * @param s The current request.
+ * @return bypass_flag_t The usage bypass flags.
+ */
+bypass_flag_t query_usage_bypass(const struct req_state* s);
 
 // These APIs are exposed for unit tests.
 
