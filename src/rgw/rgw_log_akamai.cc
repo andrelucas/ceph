@@ -43,6 +43,9 @@ bypass_flag_t query_usage_bypass(const struct req_state* s)
 {
   assert(s != nullptr);
   assert(s->info.env != nullptr);
+  if (s->cct->_conf->rgw_akamai_enable_usage_stats_bypass == false) {
+    return 0;
+  }
   auto hdr = fetch_bypass_header(s);
   if (!hdr) {
     return 0;

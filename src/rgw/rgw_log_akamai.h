@@ -28,8 +28,10 @@ static constexpr bypass_flag_t kUsageBypassAllFlags = kUsageBypassEgressFlag | k
 // This is the top-level API we're expecting to use in production code.
 
 /**
- * @brief Returns true if the request has an HTTP header indicating that
- * egress usage logging should be bypassed.
+ * @brief If the bypass feature is enabled, return true if the request has an
+ * HTTP header indicating that egress usage logging should be bypassed.
+ *
+ * Calls query_usage_bypass() internally, so follows the same rules.
  *
  * @param s The current request.
  * @return true Egress logging should be bypassed.
@@ -38,8 +40,10 @@ static constexpr bypass_flag_t kUsageBypassAllFlags = kUsageBypassEgressFlag | k
 bool query_usage_bypass_for_egress(const struct req_state* s);
 
 /**
- * @brief Returns true if the request has an HTTP header indicating that
- * ingress usage logging should be bypassed.
+ * @brief If the bypass feature is enabled, return true if the request has an
+ * HTTP header indicating that ingress usage logging should be bypassed.
+ *
+ * Calls query_usage_bypass() internally, so follows the same rules.
  *
  * @param s The current request.
  * @return true Ingress logging should be bypassed.
@@ -48,8 +52,13 @@ bool query_usage_bypass_for_egress(const struct req_state* s);
 bool query_usage_bypass_for_ingress(const struct req_state* s);
 
 /**
- * @brief Returns the usage bypass flags for the request. If no header is
- * present or there was an problem parsing it, return 0.
+ * @brief If the bypass feature is enabled, returns the usage bypass flags for
+ * the request. If no header is present or there was an problem parsing it,
+ * return
+ * 0.
+ *
+ * If the configuration option rgw_akamai_enable_usage_stats_bypass is false
+ * (the default), always return 0.
  *
  * @param s The current request.
  * @return bypass_flag_t The usage bypass flags.

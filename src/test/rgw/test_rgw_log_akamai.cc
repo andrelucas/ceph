@@ -74,6 +74,7 @@ protected:
     op_ = std::make_unique<T>();
     op_->init(nullptr, s_, nullptr);
     dpp_ = op_.get();
+    s->cct->_conf->rgw_akamai_enable_usage_stats_bypass = true;
   }
 }; // class RGWLogAkamaiUsageTest
 
@@ -348,6 +349,37 @@ TEST_F(RGWLogAkamaiUsageTest, QueryBypass)
   env.set(kUsageBypassHeader, "no-egress,no-ingress");
   bypass_flags = query_usage_bypass(&s);
   ASSERT_EQ(bypass_flags, kUsageBypassEgressFlag | kUsageBypassIngressFlag);
+}
+
+TEST_F(RGWLogAkamaiUsageTest, QueryBypassDoesNothingWhenDisabled)
+{
+  DEFINE_REQ_STATE;
+
+  // Set up a get-object operation.
+  init_op<RGWGetObj_ObjStore_S3>(&s);
+  // Turn the feature off. This is the default, the test harness turns it on
+  // in order to test it.
+  s.cct->_conf->rgw_akamai_enable_usage_stats_bypass = false;
+
+  auto bypass_flags = query_usage_bypass(&s);
+  ASSERT_EQ(bypass_flags, 0);
+
+  // Set the header to an invalid value and try again.
+  env.set(kUsageBypassHeader, "invalid_option");
+  bypass_flags = query_usage_bypass(&s);
+  ASSERT_EQ(bypass_flags, 0);
+  // Set the header to a valid value and try again.
+  env.set(kUsageBypassHeader, "no-egress");
+  bypass_flags = query_usage_bypass(&s);
+  ASSERT_EQ(bypass_flags, 0);
+  // Set the header to a different valid values and try again.
+  env.set(kUsageBypassHeader, "no-ingress");
+  bypass_flags = query_usage_bypass(&s);
+  ASSERT_EQ(bypass_flags, 0);
+  // Two valid flags.
+  env.set(kUsageBypassHeader, "no-egress,no-ingress");
+  bypass_flags = query_usage_bypass(&s);
+  ASSERT_EQ(bypass_flags, 0);
 }
 
 /***************************************************************************/
