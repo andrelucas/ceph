@@ -135,7 +135,7 @@ TEST_F(RGWLogAkamaiUsageTest, ParseBypassHeaderEmpty)
 
   // Call our function to parse the bypass header. We've not set it, so it
   // should return std::nullopt.
-  auto bypass_flags = parse_bypass_header(&s, "");
+  auto bypass_flags = parse_bypass_header(&s);
   ASSERT_FALSE(bypass_flags.has_value());
 }
 
@@ -150,19 +150,19 @@ TEST_F(RGWLogAkamaiUsageTest, ParseBypassHeaderSingle)
 
   // Set the header to an invalid value and try again.
   env.set(kUsageBypassHeader, "invalid_option");
-  bypass_flags = parse_bypass_header(&s, "");
+  bypass_flags = parse_bypass_header(&s);
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), 0);
 
   // Set the header to a valid value and try again.
   env.set(kUsageBypassHeader, "no-egress");
-  bypass_flags = parse_bypass_header(&s, "");
+  bypass_flags = parse_bypass_header(&s);
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag);
 
   // Set the header to multiple valid values and try again.
   env.set(kUsageBypassHeader, "no-ingress");
-  bypass_flags = parse_bypass_header(&s, "");
+  bypass_flags = parse_bypass_header(&s);
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassIngressFlag);
 }
@@ -178,13 +178,13 @@ TEST_F(RGWLogAkamaiUsageTest, ParseBypassHeaderMultiple)
 
   // Two valid flags.
   env.set(kUsageBypassHeader, "no-egress,no-ingress");
-  bypass_flags = parse_bypass_header(&s, "");
+  bypass_flags = parse_bypass_header(&s);
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag | kUsageBypassIngressFlag);
 
   // Two valid flags and an invalid flag (should ignore the invalid one).
   env.set(kUsageBypassHeader, "no-egress,no-ingress,invalid_option");
-  bypass_flags = parse_bypass_header(&s, "");
+  bypass_flags = parse_bypass_header(&s);
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag | kUsageBypassIngressFlag);
 }
@@ -200,43 +200,43 @@ TEST_F(RGWLogAkamaiUsageTest, ParseBypassHeaderDegenerateSpacing)
 
   // Comma-space.
   env.set(kUsageBypassHeader, "no-egress, no-ingress");
-  bypass_flags = parse_bypass_header(&s, "");
+  bypass_flags = parse_bypass_header(&s);
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag | kUsageBypassIngressFlag);
 
   // Leading space.
   env.set(kUsageBypassHeader, " no-egress");
-  bypass_flags = parse_bypass_header(&s, "");
+  bypass_flags = parse_bypass_header(&s);
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag);
 
   // Comma-space with an empty token in the middle.
   env.set(kUsageBypassHeader, "no-egress, , no-ingress");
-  bypass_flags = parse_bypass_header(&s, "");
+  bypass_flags = parse_bypass_header(&s);
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag | kUsageBypassIngressFlag);
 
   // Repeated commas with an empty token in the middle.
   env.set(kUsageBypassHeader, "no-egress,,no-ingress");
-  bypass_flags = parse_bypass_header(&s, "");
+  bypass_flags = parse_bypass_header(&s);
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag | kUsageBypassIngressFlag);
 
   // Leading comma then token
   env.set(kUsageBypassHeader, ",no-egress");
-  bypass_flags = parse_bypass_header(&s, "");
+  bypass_flags = parse_bypass_header(&s);
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), kUsageBypassEgressFlag);
 
   // Leading comma only.
   env.set(kUsageBypassHeader, ",");
-  bypass_flags = parse_bypass_header(&s, "");
+  bypass_flags = parse_bypass_header(&s);
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), 0);
 
   // Leading comma and invalid.
   env.set(kUsageBypassHeader, ",invalid_token");
-  bypass_flags = parse_bypass_header(&s, "");
+  bypass_flags = parse_bypass_header(&s);
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), 0);
 }
@@ -252,19 +252,19 @@ TEST_F(RGWLogAkamaiUsageTest, ParseBypassHeaderInvalidChars)
 
   // Invalid UTF-8 leading.
   env.set(kUsageBypassHeader, "\u{00fe}no-egress");
-  bypass_flags = parse_bypass_header(&s, "");
+  bypass_flags = parse_bypass_header(&s);
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), 0);
 
   // Invalid UTF-8 trailing.
   env.set(kUsageBypassHeader, "no-egress\u{00fe}");
-  bypass_flags = parse_bypass_header(&s, "");
+  bypass_flags = parse_bypass_header(&s);
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), 0);
 
   // Invalid UTF-8 inside.
   env.set(kUsageBypassHeader, "no_\u{00fe}egress");
-  bypass_flags = parse_bypass_header(&s, "");
+  bypass_flags = parse_bypass_header(&s);
   ASSERT_TRUE(bypass_flags.has_value());
   ASSERT_EQ(bypass_flags.value(), 0);
 }

@@ -78,17 +78,13 @@ bypass_flag_t query_usage_bypass(const struct req_state* s);
 std::optional<std::string_view> fetch_bypass_header(const struct req_state* s);
 
 /**
- * @brief Given request \p s and a header value, parse the header value and
- * return the corresponding bypass flags.
- *
- * \p s is just in the API for logging purposes, as it's a DoutPrefixProvider
- * a caller is likely to have. It's not currently used.
+ * @brief Given request \p s, fetch and parse the header value and return the
+ * corresponding bypass flags.
  *
  * @param s The current request.
- * @param header_value The value of the bypass header.
  * @return std::optional<bypass_flag_t> The parsed bypass flags, or
  * std::nullopt if the header value is invalid.
  */
-std::optional<bypass_flag_t> parse_bypass_header([[maybe_unused]] const struct req_state* s, std::string_view header_value);
+std::optional<bypass_flag_t> parse_bypass_header(const struct req_state* s);
 
 } // namespace rgw::akamai
