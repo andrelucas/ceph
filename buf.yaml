@@ -1,0 +1,8 @@
+version: v2
+modules:
+  - path: src/rgw/protos
+    lint:
+      disallow_comment_ignores: true
+  - path: src/test/rgw/protos
+    lint:
+      disallow_comment_ignores: true
