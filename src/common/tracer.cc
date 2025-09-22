@@ -4,8 +4,6 @@
 #include "tracer.h"
 #include "common/ceph_context.h"
 #include "global/global_context.h"
-#include <opentelemetry/context/context.h>
-#include <opentelemetry/sdk/trace/samplers/always_off.h>
 
 #ifdef HAVE_JAEGER
 
