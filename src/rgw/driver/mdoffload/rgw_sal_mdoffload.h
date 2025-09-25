@@ -4,10 +4,15 @@
  * @brief SAL Metadata Offload Driver - Header file
  * @version 0.1
  * @date 2025-09-23
- * 
+ *
  * @copyright Copyright (c) 2025
- * 
+ *
  */
 
 #pragma once
- 
+
+#include "rgw_sal.h"
+
+namespace rgw::sal {
+
+} // namespace rgw::sal

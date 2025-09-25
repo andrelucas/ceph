@@ -17,7 +17,11 @@ endif()
 
 include_directories(${CMAKE_INCLUDE_DIR})
 add_library(mdoffload_lib STATIC ${mdoffload_srcs})
-target_link_libraries(mdoffload_lib ${CMAKE_LINK_LIBRARIES})
+target_link_libraries(mdoffload_lib
+    ${CMAKE_LINK_LIBRARIES}
+    ${rgw_libs}
+    rgw_common
+)
 target_include_directories(mdoffload_lib
     PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw"
     PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw/driver/mdoffload"
