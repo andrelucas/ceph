@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <sstream>
 
+#include "common/dout.h"
 #include "common/errno.h"
 
 #include "rgw_sal.h"
@@ -52,6 +53,9 @@ extern rgw::sal::Driver* newMotrStore(CephContext *cct);
 #endif
 #ifdef WITH_RADOSGW_DAOS
 extern rgw::sal::Driver* newDaosStore(CephContext *cct);
+#endif
+#ifdef WITH_RADOSGW_MDOFFLOAD
+extern rgw::sal::Driver* newMDOffloadDriver(CephContext* cct, rgw::sal::Driver* next);
 #endif
 extern rgw::sal::Driver* newBaseFilter(rgw::sal::Driver* next);
 
@@ -91,45 +95,104 @@ RGWObjState::RGWObjState(const RGWObjState& rhs) : obj (rhs.obj) {
   compressed = rhs.compressed;
 }
 
-rgw::sal::Driver* DriverManager::init_storage_provider(const DoutPrefixProvider* dpp,
-						     CephContext* cct,
-						     const Config& cfg,
-						     bool use_gc_thread,
-						     bool use_lc_thread,
-						     bool quota_threads,
-						     bool run_sync_thread,
-						     bool run_reshard_thread,
-						     bool use_cache,
-						     bool use_gc)
+/**
+ * @brief Initialise the rados driver based on flags passed to
+ * DriverManager::init_storage_provider().
+ *
+ * This is factored out so that it can be reused by the mdoffload driver.
+ *
+ * @param dpp
+ * @param cct
+ * @param driver
+ * @param use_gc_thread
+ * @param use_lc_thread
+ * @param quota_threads
+ * @param run_sync_thread
+ * @param run_reshard_thread
+ * @param use_cache
+ * @param use_gc
+ * @return int 0 on success, -1 on failure.
+ */
+int rados_driver_init(const DoutPrefixProvider* dpp, CephContext* cct, rgw::sal::Driver* driver,
+    bool use_gc_thread,
+    bool use_lc_thread,
+    bool quota_threads,
+    bool run_sync_thread,
+    bool run_reshard_thread,
+    bool use_cache,
+    bool use_gc)
 {
-  rgw::sal::Driver* driver{nullptr};
+  RGWRados* rados = static_cast<rgw::sal::RadosStore*>(driver)->getRados();
+
+  // clang-format off
+  if ((*rados).set_use_cache(use_cache)
+              .set_use_datacache(false)
+              .set_use_gc(use_gc)
+              .set_run_gc_thread(use_gc_thread)
+              .set_run_lc_thread(use_lc_thread)
+              .set_run_quota_threads(quota_threads)
+              .set_run_sync_thread(run_sync_thread)
+              .set_run_reshard_thread(run_reshard_thread)
+              .init_begin(cct, dpp) < 0) {
+    // clang-format on
+    delete driver;
+    return -1;
+  }
+  if (driver->initialize(cct, dpp) < 0) {
+    delete driver;
+    return -1;
+  }
+  if (rados->init_complete(dpp) < 0) {
+    delete driver;
+    return -1;
+  }
+  return 0;
+}
+
+rgw::sal::Driver* DriverManager::init_storage_provider(const DoutPrefixProvider* dpp,
+    CephContext* cct,
+    const Config& cfg,
+    bool use_gc_thread,
+    bool use_lc_thread,
+    bool quota_threads,
+    bool run_sync_thread,
+    bool run_reshard_thread,
+    bool use_cache,
+    bool use_gc)
+{
+  rgw::sal::Driver* driver { nullptr };
 
   if (cfg.store_name.compare("rados") == 0) {
     driver = newRadosStore();
-    RGWRados* rados = static_cast<rgw::sal::RadosStore* >(driver)->getRados();
+    // RGWRados* rados = static_cast<rgw::sal::RadosStore* >(driver)->getRados();
 
-    if ((*rados).set_use_cache(use_cache)
-                .set_use_datacache(false)
-                .set_use_gc(use_gc)
-                .set_run_gc_thread(use_gc_thread)
-                .set_run_lc_thread(use_lc_thread)
-                .set_run_quota_threads(quota_threads)
-                .set_run_sync_thread(run_sync_thread)
-                .set_run_reshard_thread(run_reshard_thread)
-                .init_begin(cct, dpp) < 0) {
-      delete driver;
+    // if ((*rados).set_use_cache(use_cache)
+    //             .set_use_datacache(false)
+    //             .set_use_gc(use_gc)
+    //             .set_run_gc_thread(use_gc_thread)
+    //             .set_run_lc_thread(use_lc_thread)
+    //             .set_run_quota_threads(quota_threads)
+    //             .set_run_sync_thread(run_sync_thread)
+    //             .set_run_reshard_thread(run_reshard_thread)
+    //             .init_begin(cct, dpp) < 0) {
+    //   delete driver;
+    //   return nullptr;
+    // }
+    // if (driver->initialize(cct, dpp) < 0) {
+    //   delete driver;
+    //   return nullptr;
+    // }
+    // if (rados->init_complete(dpp) < 0) {
+    //   delete driver;
+    //   return nullptr;
+    // }
+    if (rados_driver_init(dpp, cct, driver, use_gc_thread, use_lc_thread,
+            quota_threads, run_sync_thread, run_reshard_thread,
+            use_cache, use_gc)
+        < 0) {
       return nullptr;
     }
-    if (driver->initialize(cct, dpp) < 0) {
-      delete driver;
-      return nullptr;
-    }
-    if (rados->init_complete(dpp) < 0) {
-      delete driver;
-      return nullptr;
-    }
-  }
-  else if (cfg.store_name.compare("d3n") == 0) {
+  } else if (cfg.store_name.compare("d3n") == 0) {
     driver = new rgw::sal::RadosStore();
     RGWRados* rados = new D3nRGWDataCache<RGWRados>;
     dynamic_cast<rgw::sal::RadosStore*>(driver)->setRados(rados);
@@ -198,6 +261,29 @@ rgw::sal::Driver* DriverManager::init_storage_provider(const DoutPrefixProvider*
     driver = newDaosStore(cct);
     if (driver == nullptr) {
       ldpp_dout(dpp, 0) << "newDaosStore() failed!" << dendl;
+      return driver;
+    }
+    int ret = driver->initialize(cct, dpp);
+    if (ret != 0) {
+      ldpp_dout(dpp, 20) << "ERROR: store->initialize() failed: " << ret << dendl;
+      delete driver;
+      return nullptr;
+    }
+  }
+#endif
+
+#ifdef WITH_RADOSGW_MDOFFLOAD
+  else if (cfg.store_name.compare("mdoffload") == 0) {
+    rgw::sal::Driver* base = newRadosStore();
+    if (rados_driver_init(dpp, cct, base, use_gc_thread, use_lc_thread,
+            quota_threads, run_sync_thread, run_reshard_thread,
+            use_cache, use_gc)
+        < 0) {
+      return nullptr;
+    }
+    driver = newMDOffloadDriver(cct, base);
+    if (driver == nullptr) {
+      ldpp_dout(dpp, 0) << "newMDOffloadDriver() failed!" << dendl;
       return driver;
     }
     int ret = driver->initialize(cct, dpp);
@@ -336,6 +422,11 @@ DriverManager::Config DriverManager::get_config(bool admin, CephContext* cct)
 #ifdef WITH_RADOSGW_DAOS
   else if (config_store == "daos") {
     cfg.store_name = "daos";
+  }
+#endif
+#ifdef WITH_RADOSGW_MDOFFLOAD
+  else if (config_store == "mdoffload") {
+    cfg.store_name = "mdoffload";
   }
 #endif
 

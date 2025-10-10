@@ -3573,7 +3573,8 @@ options:
   type: str
   level: advanced
   desc: experimental Option to set backend store type
-  long_desc: defaults to rados. Other valid values are dbstore, motr, and daos (All experimental).
+  long_desc: defaults to rados. Other valid values are dbstore, motr, daos and mdoffload
+    (All experimental).
   default: rados
   services:
   - rgw
@@ -3582,6 +3583,7 @@ options:
   - dbstore
   - motr
   - daos
+  - mdoffload
 - name: rgw_config_store
   type: str
   level: advanced
@@ -3744,10 +3746,10 @@ options:
   level: advanced
   desc: Allows sending secrets (e.g. passwords) over non encrypted HTTP messages.
   long_desc: When bucket notification endpoint require secrets (e.g. passwords),
-    we allow the topic creation only over HTTPS messages. 
+    we allow the topic creation only over HTTPS messages.
     This parameter can be set to "true" to bypass this check.
-    Use this only if radosgw is on a trusted private network, and the message 
-    broker cannot be configured without password authentication. Otherwise, this will 
+    Use this only if radosgw is on a trusted private network, and the message
+    broker cannot be configured without password authentication. Otherwise, this will
     leak the credentials of your message broker and compromise its security.
   default: false
   services:
@@ -3773,7 +3775,7 @@ options:
   services:
   - rgw
 - name: rgw_kafka_connection_idle
-  type: uint 
+  type: uint
   level: advanced
   desc: Time in seconds to delete idle kafka connections
   long_desc: A conection will be considered "idle" if no messages
@@ -3785,7 +3787,7 @@ options:
   - rgw
   with_legacy: true
 - name: rgw_kafka_message_timeout
-  type: uint 
+  type: uint
   level: advanced
   desc: This is the maximum time in milliseconds to deliver a message (including retries)
   long_desc: Delivery error occurs when the message timeout is exceeded.
