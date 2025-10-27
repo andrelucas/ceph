@@ -16,13 +16,13 @@
 
 namespace rgw::sal {
 
-class MDOffloadDriver : public FilterDriver {
+class MDOffloadFilter : public FilterDriver {
 public:
-  MDOffloadDriver(CephContext* cct, rgw::sal::Driver* next)
+  MDOffloadFilter(CephContext* cct, rgw::sal::Driver* next)
       : FilterDriver(next)
   {
   }
-  virtual ~MDOffloadDriver() = default;
+  virtual ~MDOffloadFilter() = default;
 
   /** Get a Bucket by info.  Does not query the driver, just uses the give bucket info. */
   virtual int get_bucket(User* u, const RGWBucketInfo& i, std::unique_ptr<Bucket>* bucket) override;
@@ -44,3 +44,5 @@ public:
 }; // class MDOffloadFilterBucket
 
 } // namespace rgw::sal
+
+extern "C" rgw::sal::Driver* newMDOffloadFilter(CephContext* cct, rgw::sal::Driver* next);

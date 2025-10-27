@@ -3573,7 +3573,7 @@ options:
   type: str
   level: advanced
   desc: experimental Option to set backend store type
-  long_desc: defaults to rados. Other valid values are dbstore, motr, daos and mdoffload
+  long_desc: defaults to rados. Other valid values are dbstore, motr and daos
     (All experimental).
   default: rados
   services:
@@ -3583,7 +3583,6 @@ options:
   - dbstore
   - motr
   - daos
-  - mdoffload
 - name: rgw_config_store
   type: str
   level: advanced
@@ -3599,13 +3598,15 @@ options:
   type: str
   level: advanced
   desc: experimental Option to set a filter
-  long_desc: defaults to none. Other valid values are base and trace (both experimental).
+  long_desc: defaults to none. Other valid values are base, trace and
+    mdoffload (all experimental).
   default: none
   services:
   - rgw
   enum_values:
   - none
   - base
+  - mdoffload
   - trace
 - name: dbstore_db_dir
   type: str

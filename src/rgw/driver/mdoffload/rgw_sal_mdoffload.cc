@@ -34,9 +34,9 @@ static inline User* nextUser(User* t)
 
 /****************************************************************************/
 
-// MDOffloadDriver
+// MDOffloadFilter
 
-int MDOffloadDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, const rgw_bucket& b, std::unique_ptr<Bucket>* bucket, optional_yield y)
+int MDOffloadFilter::get_bucket(const DoutPrefixProvider* dpp, User* u, const rgw_bucket& b, std::unique_ptr<Bucket>* bucket, optional_yield y)
 {
   std::unique_ptr<Bucket> nb;
   int ret;
@@ -51,7 +51,7 @@ int MDOffloadDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, const rg
   return 0;
 }
 
-int MDOffloadDriver::get_bucket(User* u, const RGWBucketInfo& i, std::unique_ptr<Bucket>* bucket)
+int MDOffloadFilter::get_bucket(User* u, const RGWBucketInfo& i, std::unique_ptr<Bucket>* bucket)
 {
   std::unique_ptr<Bucket> nb;
   int ret;
@@ -66,7 +66,7 @@ int MDOffloadDriver::get_bucket(User* u, const RGWBucketInfo& i, std::unique_ptr
   return 0;
 }
 
-int MDOffloadDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, const std::string& tenant, const std::string& name, std::unique_ptr<Bucket>* bucket, optional_yield y)
+int MDOffloadFilter::get_bucket(const DoutPrefixProvider* dpp, User* u, const std::string& tenant, const std::string& name, std::unique_ptr<Bucket>* bucket, optional_yield y)
 {
   std::unique_ptr<Bucket> nb;
   int ret;
@@ -85,9 +85,9 @@ int MDOffloadDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, const st
 } // namespace rgw::sal
 
 extern "C" {
-rgw::sal::Driver* newMDOffloadDriver(CephContext* cct, rgw::sal::Driver* next)
+rgw::sal::Driver* newMDOffloadFilter(CephContext* cct, rgw::sal::Driver* next)
 {
-  rgw::sal::MDOffloadDriver* driver = new rgw::sal::MDOffloadDriver(cct, next);
+  rgw::sal::MDOffloadFilter* driver = new rgw::sal::MDOffloadFilter(cct, next);
 
   return driver;
 }

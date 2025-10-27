@@ -328,6 +328,12 @@ if(WITH_RADOSGW_DAOS)
   link_directories( ${PC_DAOS_LIBRARY_DIRS} )
 endif()
 
+if (WITH_RADOSGW_MDOFFLOAD)
+  target_include_directories(rgw_common PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/rgw/driver/mdoffload
+  )
+endif()
+
 if(WITH_RADOSGW_GRPC)
   target_link_libraries(rgw_common PUBLIC absl::strings absl::time)
 
