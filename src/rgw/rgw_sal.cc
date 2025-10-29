@@ -373,6 +373,11 @@ DriverManager::Config DriverManager::get_config(bool admin, CephContext* cct)
   if (config_filter == "base") {
     cfg.filter_name = "base";
   }
+#ifdef WITH_RADOSGW_MDOFFLOAD
+  else if (config_filter == "mdoffload") {
+    cfg.filter_name = "mdoffload";
+  }
+#endif
 
   return cfg;
 }

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.14.0)
 project(mdoffload-tests)
 
-set (CMAKE_LINK_LIBRARIES ${CMAKE_LINK_LIBRARIES} gtest)
+set (CMAKE_LINK_LIBRARIES ${CMAKE_LINK_LIBRARIES} GMock::GMock GTest::GTest)
 
 set(mdoffload_tests_srcs
     test_mdoffload.cc)
@@ -9,5 +9,5 @@ set(mdoffload_tests_srcs
 include_directories(${CMAKE_INCLUDE_DIR})
 
 add_executable(unittest_rgw_mdoffload ${mdoffload_tests_srcs})
-target_link_libraries(unittest_rgw_mdoffload ${CMAKE_LINK_LIBRARIES} mdoffload_lib gtest_main)
+target_link_libraries(unittest_rgw_mdoffload ${CMAKE_LINK_LIBRARIES} mdoffload_lib GMock::Main)
 add_ceph_unittest(unittest_rgw_mdoffload)
