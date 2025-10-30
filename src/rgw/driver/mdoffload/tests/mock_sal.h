@@ -23,6 +23,9 @@
  * Further errors were due to incomplete types. To resolve these, necessary
  * headers were included (rgw_pubsub.h).
  *
+ * The namespace was changed from ::rgw::sal to akamai::mock as there's no
+ * need to pollute the rgw::sal namespace.
+ *
  */
 
 #pragma once
@@ -35,7 +38,10 @@
 // Needed to complete a type so the mocked classes can call sizeof().
 #include "rgw_pubsub.h"
 
-namespace rgw { namespace sal {
+namespace akamai::mock {
+
+using namespace ::rgw::sal;
+using rgw::bucket_index_layout_generation;
 
 // Minimal set of mocks commonly needed by filter driver tests. Extend as needed.
 
@@ -110,11 +116,11 @@ struct MultipartCompleteParams {
 class MockDriver : public Driver {
 public:
   MOCK_METHOD(int, initialize, (CephContext *cct, const DoutPrefixProvider *dpp), (override));
-//   MOCK_METHOD(const std::string, get_name, (), (const, override));
-  const std::string get_name() const override {
-    static const std::string name = "mockdriver";
-    return name;
-  }
+  MOCK_METHOD(const std::string, get_name, (), (const, override));
+  // const std::string get_name() const override {
+  //   static const std::string name = "mockdriver";
+  //   return name;
+  // }
   MOCK_METHOD(std::string, get_cluster_id, (const DoutPrefixProvider* dpp, optional_yield y), (override));
   MOCK_METHOD(std::unique_ptr<User>, get_user, (const rgw_user& u), (override));
   MOCK_METHOD(int, get_user_by_access_key, (const DoutPrefixProvider* dpp, const std::string& key, optional_yield y, std::unique_ptr<User>* user), (override));
@@ -294,8 +300,14 @@ public:
   MOCK_METHOD(rgw_bucket&, get_key, (), (override));
   MOCK_METHOD(RGWBucketInfo&, get_info, (), (override));
   MOCK_METHOD(void, print, (std::ostream& out), (const, override));
-//   MOCK_METHOD(bool, operator==, (const Bucket& b), (const, override));
-//   MOCK_METHOD(bool, operator!=, (const Bucket& b), (const, override));
+  //// We can't mock operator== and operator!= directly, so we mock an Equals
+  //// method instead.
+  //// See https://github.com/google/googletest/issues/558
+  // MOCK_METHOD(bool, operator==, (const Bucket& b), (const, override));
+  // MOCK_METHOD(bool, operator!=, (const Bucket& b), (const, override));
+  MOCK_METHOD(bool, Equals, (const Bucket& b), (const));
+  virtual bool operator==(const Bucket& b) const { return Equals(b); };
+  virtual bool operator!=(const Bucket& b) const { return !Equals(b); };
 };
 
 class MockObject : public Object {
@@ -442,4 +454,4 @@ public:
   MOCK_METHOD(void, print, (std::ostream& out), (const, override));
 };
 
-} } // namespace rgw::sal
+} // namespace akamai::mock
