@@ -24,9 +24,8 @@ namespace rgw::sal {
 /**
  * @brief Get the next user in the filter chain.
  *
- * Copied from rgw_sal_filter.cc. ATTOW we don't need to override the notion
- * of a user, so we can use the same dynamic_cast as the FilterDriver.
- *
+ * Copied from rgw_sal_filter.cc. We do have to override User because we need
+ * to deal with User::create_bucket(), where bucket attributes get stored.*
  * @param t
  * @return User*
  */
@@ -35,7 +34,7 @@ static inline User* nextUser(User* t)
   if (!t)
     return nullptr;
 
-  return dynamic_cast<FilterUser*>(t)->get_next();
+  return dynamic_cast<MDOffloadUser*>(t)->get_next();
 }
 
 /**
@@ -202,8 +201,8 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
              b.name, dump_attrs(attrs))
       << dendl;
 
+  // Pass an empty set of attributes to the next driver.
   rgw::sal::Attrs empty_attrs;
-
   ret = next->create_bucket(dpp, b, zonegroup_id, placement_rule, swift_ver_location, pquota_info, policy, empty_attrs, info, ep_objv, exclusive, obj_lock_enabled, existed, req_info, &nb, y);
   if (ret < 0)
     return ret;

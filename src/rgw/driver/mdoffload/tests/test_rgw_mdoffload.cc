@@ -15,11 +15,12 @@
 #include "common/async/yield_context.h"
 #include "common/ceph_argparse.h"
 #include "common/common_init.h"
-#include "common/dout.h"
 #include "common/subsys_types.h"
 #include "global/global_context.h"
 #include "global/global_init.h"
+#include "include/buffer_fwd.h"
 #include "rgw_common.h"
+#include "rgw_placement_types.h"
 #include "rgw_sal.h"
 #include "rgw_sal_mdoffload.h"
 
@@ -42,8 +43,8 @@ TEST(RGWMDOffloadFilterDriver, CreateNullptrNextThrows)
  *
  * Where possible we'll just use the mock (empty) implementations. However,
  * because of the way rgw::sal::Driver and its subsidiary classes work, there
- * are methods where we'll need to implement something (probably via WillOnce
- * or WithArg<>) that tweaks return values into the proper types.
+ * are methods where we'll need to implement something (via WithArg<> and
+ * Return) that tweaks return values into the proper types.
  */
 class RGWMDOffloadFilterDriverMockFixture : public ::testing::Test, public akamai::test::CephGtestLogAdapter {
 
@@ -54,7 +55,7 @@ protected:
 public:
   void SetUp() override
   {
-    ldpp_dout(this, 10) << "RGWMDOffloadFilterDriverMockFixture::SetUp" << dendl;
+    // ldpp_dout(this, 10) << "RGWMDOffloadFilterDriverMockFixture::SetUp" << dendl;
     auto ret = mock_base.initialize(g_ceph_context, this);
     ASSERT_GE(ret, 0);
   }
@@ -66,8 +67,15 @@ public:
     }
   }
 
-  // Helper to get a MDOffloadBucket via the filter. The underlying Bucket (in
-  // this->next) will be a MockBucket.
+  /**
+   * @brief Get a bucket object from the filter, using the mock base.
+   *
+   * Helper to get a MDOffloadBucket via the filter. The underlying Bucket (in
+   * this->next) will be a MockBucket, so we have to do some extra work with
+   * the MockDriver.
+   *
+   * @return std::unique_ptr<rgw::sal::MDOffloadBucket>
+   */
   std::unique_ptr<rgw::sal::MDOffloadBucket> get_bucket()
   {
     rgw_user u;
@@ -80,9 +88,13 @@ public:
 
     using namespace ::testing;
 
+    // We don't care about the user object here, so it can be a default from
+    // the mock.
     EXPECT_CALL(mock_base, get_user(u)) //
         .Times(1);
 
+    // We need mock_base.get_bucket() to return a valid MockBucket, as we'll
+    // be using its mock later.
     EXPECT_CALL(mock_base, get_bucket(_, _, _, _, _)) //
         .Times(1)
         .WillOnce(
@@ -94,8 +106,43 @@ public:
 
     user = filter->get_user(u);
     filter->get_bucket(this, user.get(), b, &bucket, y);
+
+    Mock::VerifyAndClearExpectations(&mock_base);
+
     return std::unique_ptr<rgw::sal::MDOffloadBucket>(
         dynamic_cast<rgw::sal::MDOffloadBucket*>(bucket.release()));
+  }
+
+  /**
+   * @brief Get a user object from the filter, using the mock base.
+   *
+   * Helper to get a MDOffloadUser via the filter. The underlying User (in
+   * this->next) will be a MockUser, so we have to do some extra work with
+   * the MockDriver.
+   *
+   * @return std::unique_ptr<rgw::sal::MDOffloadUser>
+   */
+  std::unique_ptr<rgw::sal::MDOffloadUser> get_user()
+  {
+    rgw_user u;
+    u.id = "test_user";
+    std::unique_ptr<rgw::sal::User> sal_user;
+
+    using namespace ::testing;
+
+    // We need <MockDriver>::get_user() to return a valid MockUser, as we'll
+    // be using its mock later.
+    EXPECT_CALL(mock_base, get_user(u)) //
+        .Times(1)
+        .WillOnce(
+            Return(ByMove(std::unique_ptr<rgw::sal::User>(new akamai::mock::MockUser()))));
+
+    sal_user = filter->get_user(u);
+
+    Mock::VerifyAndClearExpectations(&mock_base);
+
+    return std::unique_ptr<rgw::sal::MDOffloadUser>(
+        dynamic_cast<rgw::sal::MDOffloadUser*>(sal_user.release()));
   }
 };
 
@@ -224,7 +271,75 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_merge_and_store_attr
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_create_bucket_MustSendEmptyAttrsToParent)
 {
   EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
-  // XXX XXX
+  auto check_driver = dynamic_cast<MDOffloadFilterDriver*>(filter.get());
+  ASSERT_NE(check_driver, nullptr);
+
+  // Fetch a user with a 'real' MockUser as its ->next;
+  auto offload_user = get_user();
+  ASSERT_NE(offload_user, nullptr);
+  auto mock_user = dynamic_cast<akamai::mock::MockUser*>(offload_user->get_next());
+  ASSERT_NE(mock_user, nullptr);
+
+  using namespace ::testing;
+
+  // This expectation tests that the attrs passed to the parent MockUser
+  // object are empty, despite the fact that we explicitly set the attributes
+  // to the MDOffloadFilterUser::create_bucket() call to be nonempty. This
+  // implies strongly (but doesn't prove) that we are intercepting
+  // create_bucket() properly.
+  //
+  // This is made more confusing by the fact that create_bucket() takes so
+  // many parameters (16) that our mock is indirected via create_bucket_cb(),
+  // taking a single struct parameter. The testing::A<> matcher is magic that
+  // Copilot came up with, it allows for better type checking.
+  //
+  EXPECT_CALL(*mock_user, create_bucket_cb(testing::A<const akamai::mock::CreateBucketParams&>()))
+      .Times(1)
+      .WillOnce(
+          testing::DoAll(
+              testing::WithArg<0>([](const akamai::mock::CreateBucketParams& p) {
+                // The attrs passed to the parent must be empty.
+                ASSERT_NE(p.attrs, nullptr);
+                EXPECT_TRUE(p.attrs->empty());
+              }),
+              testing::Return(0)));
+
+  // A long and tiresome list of parameters to create_bucket().
+  rgw_bucket b;
+  b.name = "test_bucket";
+  rgw_placement_rule placement {};
+  std::string swift_ver_location {};
+  rgw::sal::Attrs nonempty_attrs;
+  nonempty_attrs["key1"] = ceph::bufferlist();
+  RGWBucketInfo binfo;
+  obj_version objv;
+  RGWEnv env;
+  req_info req(g_ceph_context, &env);
+  // This receives the created bucket.
+  std::unique_ptr<rgw::sal::Bucket> bucket_out;
+
+  // We're passing in nonempty attrs to the filter create_bucket().
+  ASSERT_FALSE(nonempty_attrs.empty());
+
+  offload_user->create_bucket(this,
+      b,
+      "",
+      placement,
+      swift_ver_location,
+      nullptr,
+      RGWAccessControlPolicy {},
+      nonempty_attrs,
+      binfo,
+      objv,
+      false,
+      false,
+      nullptr,
+      req,
+      &bucket_out,
+      null_yield);
+
+  ASSERT_NE(bucket_out, nullptr);
+
   filter->finalize();
 }
 

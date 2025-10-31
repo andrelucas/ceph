@@ -48,7 +48,7 @@ private:
 
 public:
   /// The maximum width for the test suite and test names.
-  static constexpr std::size_t W = 40;
+  static constexpr std::size_t W = 80;
 
 public:
   CephGtestLogAdapter()
@@ -58,15 +58,18 @@ public:
     ti_ = ::testing::UnitTest::GetInstance()->current_test_info();
     std::string suite = ellipsize(ti_->test_suite_name());
     std::string test = ellipsize(ti_->name());
+    std::stringstream ss;
     // There's no interface for both type_param and value_param being set, so
     // we can just switch.
     if (ti_->type_param()) {
-      prefix_ = fmt::format(FMT_STRING("{}::{}<{}>: "), suite, test, ti_->type_param());
+      ss << fmt::format(FMT_STRING("{}.{}/{}: "), suite, test, ti_->type_param());
     } else if (ti_->value_param()) {
-      prefix_ = fmt::format(FMT_STRING("{}::{}/{}: "), suite, test, ti_->value_param());
+      ss << fmt::format(FMT_STRING("{}.{}/{}: "), suite, test, ti_->value_param());
     } else {
-      prefix_ = fmt::format(FMT_STRING("{}::{}: "), suite, test);
+      ss << fmt::format(FMT_STRING("{}.{}: "), suite, test);
     }
+    ss << fmt::format(FMT_STRING("line {}: "), ti_->line());
+    prefix_ = ss.str();
   }
 
   static std::string ellipsize(const std::string& str)
@@ -74,13 +77,14 @@ public:
     if (str.size() <= W) {
       return str;
     } else {
-      return "..." + str.substr(str.size() - (W - 3), W - 3);
+      // Use Unicode ellipsis character instead of three dots
+      return "…" + str.substr(str.size() - (W - 1), W - 1);
     }
   }
 
   std::ostream& gen_prefix(std::ostream& out) const override
   {
-    return out << fmt::format(FMT_STRING("{}line {}: "), prefix_, ti_->line());
+    return out << prefix_;
   }
 
   CephContext* get_cct() const override
