@@ -12,6 +12,7 @@
 #include "rgw_sal_mdoffload.h"
 #include "common/dout.h"
 #include "global/global_context.h"
+#include "rgw_common.h"
 #include <cstddef>
 
 #define dout_subsys ceph_subsys_rgw
@@ -196,14 +197,21 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
   int ret;
 
   // XXX placeholder.
-  ldpp_dout(dpp, 20) << "MDOffloadUser::create_bucket: name=" << b.name << " attrs=" << dump_attrs(attrs) << dendl;
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: name={} attrs={}"),
+             b.name, dump_attrs(attrs))
+      << dendl;
 
-  ret = next->create_bucket(dpp, b, zonegroup_id, placement_rule, swift_ver_location, pquota_info, policy, attrs, info, ep_objv, exclusive, obj_lock_enabled, existed, req_info, &nb, y);
+  rgw::sal::Attrs empty_attrs;
+
+  ret = next->create_bucket(dpp, b, zonegroup_id, placement_rule, swift_ver_location, pquota_info, policy, empty_attrs, info, ep_objv, exclusive, obj_lock_enabled, existed, req_info, &nb, y);
   if (ret < 0)
     return ret;
 
   Bucket* fb = new MDOffloadBucket(std::move(nb), this);
+  fb->set_attrs(attrs);
   bucket_out->reset(fb);
+
   return 0;
 }
 
@@ -213,26 +221,48 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
 
 Attrs& MDOffloadBucket::get_attrs()
 {
-  auto& attrs = next->get_attrs();
   // XXX placeholder.
-  ldout(g_ceph_context, 20) << "MDOffloadBucket::get_attrs: attrs=" << dump_attrs(attrs) << dendl;
-  return attrs;
+  ldout(g_ceph_context, 20)
+      << fmt::format(FMT_STRING("MDOffloadBucket::get_attrs: attrs={}"),
+             dump_attrs(cached_attrs_))
+      << dendl;
+  return cached_attrs_;
 }
 
+/**
+ * @brief Set the attributes for the bucket.
+ *
+ * This isn't called by upstream RGW at all, but we may call it as we see fit.
+ * The reason it's not called by main RGW is that it always uses
+ * merge_and_store_attrs() except for bucket creation, where the initial
+ * attributes are set via create_bucket(). We have to override create_bucket()
+ * and it's logical to call set_attrs() from there.
+ *
+ * @param a The attributes to set.
+ * @return int 0 on success, negative error code on failure.
+ */
 int MDOffloadBucket::set_attrs(Attrs a)
 {
-  int ret = next->set_attrs(a);
   // XXX placeholder.
-  ldout(g_ceph_context, 20) << "MDOffloadBucket::set_attrs: attrs=" << dump_attrs(a) << dendl;
-  return ret;
+  cached_attrs_ = a;
+  ldout(g_ceph_context, 20)
+      << fmt::format(FMT_STRING("MDOffloadBucket::set_attrs: attrs={}"),
+             dump_attrs(cached_attrs_))
+      << dendl;
+  return 0;
 }
 
 int MDOffloadBucket::merge_and_store_attrs(const DoutPrefixProvider* dpp, Attrs& new_attrs, optional_yield y)
 {
-  int ret = next->merge_and_store_attrs(dpp, new_attrs, y);
   // XXX placeholder.
-  ldpp_dout(dpp, 20) << "MDOffloadBucket::merge_and_store_attrs: ret=" << ret << " new_attrs=" << dump_attrs(new_attrs) << dendl;
-  return ret;
+  for (auto& it : new_attrs) {
+    cached_attrs_[it.first] = it.second;
+  }
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadBucket::merge_and_store_attrs: new_attrs={} cached_attrs_={}"),
+             dump_attrs(new_attrs), dump_attrs(cached_attrs_))
+      << dendl;
+  return 0;
 }
 
 /****************************************************************************/

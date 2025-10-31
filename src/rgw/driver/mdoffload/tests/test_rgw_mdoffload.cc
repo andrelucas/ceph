@@ -23,6 +23,7 @@
 #include "rgw_sal.h"
 #include "rgw_sal_mdoffload.h"
 
+#include "test_rgw_mdoffload_util.h"
 #include "mock_sal.h"
 
 namespace {
@@ -44,24 +45,25 @@ TEST(RGWMDOffloadFilterDriver, CreateNullptrNextThrows)
  * are methods where we'll need to implement something (probably via WillOnce
  * or WithArg<>) that tweaks return values into the proper types.
  */
-class RGWMDOffloadFilterDriverMockFixture : public ::testing::Test {
-protected:
-  DoutPrefix dpp_ { g_ceph_context, ceph_subsys_test, "test_mdoffload" };
-  DoutPrefixProvider* dpp;
+class RGWMDOffloadFilterDriverMockFixture : public ::testing::Test, public akamai::test::CephGtestLogAdapter {
 
+protected:
   ::testing::NiceMock<akamai::mock::MockDriver> mock_base;
   std::unique_ptr<rgw::sal::Driver> filter;
 
 public:
   void SetUp() override
   {
-    dpp = &dpp_; // It's just easier to have 'dpp'.
-    auto ret = mock_base.initialize(g_ceph_context, &dpp_);
+    ldpp_dout(this, 10) << "RGWMDOffloadFilterDriverMockFixture::SetUp" << dendl;
+    auto ret = mock_base.initialize(g_ceph_context, this);
     ASSERT_GE(ret, 0);
   }
   void TearDown() override
   {
-    filter->finalize();
+    if (filter) {
+      filter->finalize();
+      filter.reset();
+    }
   }
 
   // Helper to get a MDOffloadBucket via the filter. The underlying Bucket (in
@@ -91,7 +93,7 @@ public:
                 Return(0)));
 
     user = filter->get_user(u);
-    filter->get_bucket(dpp, user.get(), b, &bucket, y);
+    filter->get_bucket(this, user.get(), b, &bucket, y);
     return std::unique_ptr<rgw::sal::MDOffloadBucket>(
         dynamic_cast<rgw::sal::MDOffloadBucket*>(bucket.release()));
   }
@@ -132,12 +134,12 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMockGetBucket)
 
   EXPECT_CALL(mock_base, get_user(u)) //
       .Times(1);
-  EXPECT_CALL(mock_base, get_bucket(dpp, testing::_, b, testing::_, y)) //
+  EXPECT_CALL(mock_base, get_bucket(this, testing::_, b, testing::_, y)) //
       .Times(1);
 
   user = filter->get_user(u);
   ASSERT_NE(user, nullptr);
-  filter->get_bucket(dpp, user.get(), b, &bucket, y);
+  filter->get_bucket(this, user.get(), b, &bucket, y);
   ASSERT_NE(bucket, nullptr);
 
   filter->finalize();
@@ -166,12 +168,11 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_get_attr_MustNotCall
   filter->finalize();
 }
 
-// merge_and_store_attrs() MUST NOT call next->merge_and_store_attrs(). It must handle it itself.
-TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_merge_and_store_attrs_MustNotCallParent)
+// set_attr() MUST NOT call next->set_attr(). It must handle it itself.
+TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_set_attr_MustNotCallParent)
 {
   EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
 
-  using ::testing::_;
   using ::testing::DefaultValue;
 
   // Set up a default return value for Attrs&.
@@ -183,10 +184,47 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_merge_and_store_attr
   ASSERT_NE(bucket, nullptr);
   auto mock_bucket = dynamic_cast<akamai::mock::MockBucket*>(bucket->get_next());
   ASSERT_NE(mock_bucket, nullptr);
+  EXPECT_CALL(*mock_bucket, set_attrs(testing::_)) //
+      .Times(0);
+  bucket->set_attrs(empty_attrs);
+
+  filter->finalize();
+}
+
+// merge_and_store_attrs() MUST NOT call next->merge_and_store_attrs(). It must handle it itself.
+TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_merge_and_store_attrs_MustNotCallParent)
+{
+  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
+  ASSERT_NE(filter, nullptr);
+
+  using ::testing::_;
+  using ::testing::DefaultValue;
+
+  // Set up a default return value for Attrs&.
+  rgw::sal::Attrs empty_attrs;
+  DefaultValue<::rgw::sal::Attrs&>::Set(empty_attrs);
+
+  auto bucket = get_bucket();
+  ASSERT_NE(bucket, nullptr);
+  auto mock_bucket = dynamic_cast<akamai::mock::MockBucket*>(bucket->get_next());
+  ASSERT_NE(mock_bucket, nullptr);
   EXPECT_CALL(*mock_bucket, merge_and_store_attrs) //
       .Times(0);
-  bucket->merge_and_store_attrs(dpp, empty_attrs, null_yield);
+  bucket->merge_and_store_attrs(this, empty_attrs, null_yield);
 
+  filter->finalize();
+}
+
+// Unfortunately we can't rely on <Bucket>->set_attr() interception, as
+// set_attr() is never called (in v18.2.7). Instead, merge_and_store_attrs()
+// is always used except for initial instantiation at
+// <Driver>->create_bucket() time. We have to satisfy ourselves that we're
+// intercepting create_bucket() properly and passing empty attrs to the
+// parent.
+TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_create_bucket_MustSendEmptyAttrsToParent)
+{
+  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
+  // XXX XXX
   filter->finalize();
 }
 
@@ -206,7 +244,10 @@ int main(int argc, char** argv)
     }
   }
 
+  g_ceph_context->_conf->log_flush_on_exit = true;
   common_init_finish(g_ceph_context);
   ::testing::InitGoogleMock(&argc, argv);
-  return RUN_ALL_TESTS();
+  int ret = RUN_ALL_TESTS();
+
+  return ret;
 }

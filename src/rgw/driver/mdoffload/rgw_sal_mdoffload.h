@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "rgw_common.h"
 #include "rgw_sal.h"
 #include "rgw_sal_filter.h"
 #include <stdexcept>
@@ -84,6 +85,20 @@ public:
 }; // class MDOffloadUser
 
 class MDOffloadBucket : public FilterBucket {
+
+private:
+  /**
+   * @brief Cached bucket attributes.
+   *
+   * It's very tempting to make this a more complicated data structure with
+   * locking etc., but the API is constructed around returning a reference to
+   * this field (via get_attrs()) so we need to keep it simple. If we do
+   * complicate things, we need a way to still return that simple reference so
+   * we're not having to change the API in multiple places, creating a
+   * maintenance problem over time.
+   */
+  rgw::sal::Attrs cached_attrs_;
+
 public:
   MDOffloadBucket(std::unique_ptr<Bucket> next, User* user)
       : FilterBucket(std::move(next), user)

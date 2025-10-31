@@ -4,7 +4,7 @@ project(mdoffload-tests)
 set (CMAKE_LINK_LIBRARIES ${CMAKE_LINK_LIBRARIES} GMock::GMock)
 
 set(mdoffload_tests_srcs
-    test_mdoffload.cc)
+    test_rgw_mdoffload.cc)
 
 include_directories(${CMAKE_INCLUDE_DIR})
 
