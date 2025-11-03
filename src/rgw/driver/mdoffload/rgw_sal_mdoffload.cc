@@ -13,7 +13,6 @@
 #include "common/dout.h"
 #include "global/global_context.h"
 #include "rgw_common.h"
-#include <cstddef>
 
 #define dout_subsys ceph_subsys_rgw
 

@@ -514,6 +514,78 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_delete_obj_attrs_Mus
   filter->finalize();
 }
 
+TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_get_attrs_MustNotCallParent)
+{
+  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
+  ASSERT_NE(filter, nullptr);
+
+  using ::testing::DefaultValue;
+
+  // Set up a default return value for rgw::sal::Attrs&.
+  rgw::sal::Attrs empty_attrs;
+  DefaultValue<rgw::sal::Attrs&>::Set(empty_attrs);
+
+  auto object = get_object();
+  ASSERT_NE(object, nullptr);
+  auto mock_object = dynamic_cast<akamai::mock::MockObject*>(object->get_next());
+  ASSERT_NE(mock_object, nullptr);
+
+  EXPECT_CALL(*mock_object, get_attrs()) //
+      .Times(0);
+
+  object->get_attrs();
+
+  filter->finalize();
+}
+
+TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_set_attrs_MustNotCallParent)
+{
+  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
+  ASSERT_NE(filter, nullptr);
+
+  using ::testing::DefaultValue;
+
+  // Set up a default return value for int.
+  DefaultValue<int>::Set(0);
+
+  auto object = get_object();
+  ASSERT_NE(object, nullptr);
+  auto mock_object = dynamic_cast<akamai::mock::MockObject*>(object->get_next());
+  ASSERT_NE(mock_object, nullptr);
+
+  EXPECT_CALL(*mock_object, set_attrs(testing::_)) //
+      .Times(0);
+
+  rgw::sal::Attrs attrs;
+  auto ret = object->set_attrs(attrs);
+  ASSERT_GE(ret, 0);
+
+  filter->finalize();
+}
+
+TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_has_attrs_MustNotCallParent)
+{
+  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
+  ASSERT_NE(filter, nullptr);
+
+  using ::testing::DefaultValue;
+
+  // Set up a default return value for bool.
+  DefaultValue<bool>::Set(false);
+
+  auto object = get_object();
+  ASSERT_NE(object, nullptr);
+  auto mock_object = dynamic_cast<akamai::mock::MockObject*>(object->get_next());
+  ASSERT_NE(mock_object, nullptr);
+
+  EXPECT_CALL(*mock_object, has_attrs()) //
+      .Times(0);
+
+  object->has_attrs();
+
+  filter->finalize();
+}
+
 /****************************************************************************/
 
 } // empty namespace
