@@ -119,11 +119,15 @@ class MDOffloadObject : public FilterObject {
   /**
    * @brief Cached object attributes.
    *
-   * We're not as constrained here as with MDOffloadBucket::cached_attrs_
-   * because the API doesn't require us to return a reference to this field.
-   * However, we keep it simple for consistency.
+   * As with MDOffloadBucket::cached_attrs_, it's tempting to make this more
+   * complicated, but the API is constructed around returning a reference to
+   * this field (via get_attrs()) so we need to keep it simple. If we do
+   * complicate things, we need a way to still return that simple reference so
+   * we're not having to change the API in multiple places, creating a
+   * maintenance problem over time.
    */
   rgw::sal::Attrs cached_attrs_;
+  bool has_attrs_ = false;
 
 public:
   MDOffloadObject(std::unique_ptr<Object> next, Bucket* bucket)
@@ -141,6 +145,15 @@ public:
   virtual int modify_obj_attrs(const char* attr_name, bufferlist& attr_val, optional_yield y, const DoutPrefixProvider* dpp) override;
   /** Delete attributes for this object */
   virtual int delete_obj_attrs(const DoutPrefixProvider* dpp, const char* attr_name, optional_yield y) override;
+
+  /** Get the cached attributes for this object */
+  virtual Attrs& get_attrs(void) override;
+  /** Get the (const) cached attributes for this object */
+  virtual const Attrs& get_attrs(void) const override;
+  /** Set the cached attributes for this object */
+  virtual int set_attrs(Attrs a) override;
+  /** Check to see if attributes are cached on this object */
+  virtual bool has_attrs(void) override;
 
 }; // class MDOffloadObject
 

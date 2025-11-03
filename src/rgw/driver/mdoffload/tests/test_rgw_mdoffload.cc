@@ -432,6 +432,85 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_set_obj_attrs_MustNo
   auto ret = object->set_obj_attrs(this, &setattrs, &delattrs, null_yield);
   ASSERT_GE(ret, 0);
 
+  // Bonus test: Need to set has_attrs_.
+  ASSERT_TRUE(object->has_attrs());
+
+  filter->finalize();
+}
+
+TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_get_obj_attrs_MustNotCallParent)
+{
+  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
+  ASSERT_NE(filter, nullptr);
+
+  using ::testing::DefaultValue;
+
+  // Set up a default return value for int.
+  DefaultValue<int>::Set(0);
+
+  auto object = get_object();
+  ASSERT_NE(object, nullptr);
+  auto mock_object = dynamic_cast<akamai::mock::MockObject*>(object->get_next());
+  ASSERT_NE(mock_object, nullptr);
+
+  // The mock object's get_obj_attrs() MUST NOT be called.
+  EXPECT_CALL(*mock_object, get_obj_attrs) //
+      .Times(0);
+
+  auto ret = object->get_obj_attrs(null_yield, this, nullptr);
+  ASSERT_GE(ret, 0);
+
+  filter->finalize();
+}
+
+TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_modify_obj_attrs_MustNotCallParent)
+{
+  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
+  ASSERT_NE(filter, nullptr);
+
+  using ::testing::DefaultValue;
+
+  // Set up a default return value for int.
+  DefaultValue<int>::Set(0);
+
+  auto object = get_object();
+  ASSERT_NE(object, nullptr);
+  auto mock_object = dynamic_cast<akamai::mock::MockObject*>(object->get_next());
+  ASSERT_NE(mock_object, nullptr);
+
+  // The mock object's modify_obj_attrs() MUST NOT be called.
+  EXPECT_CALL(*mock_object, modify_obj_attrs) //
+      .Times(0);
+
+  ceph::bufferlist attr_val;
+  auto ret = object->modify_obj_attrs("test_attr", attr_val, null_yield, this);
+  ASSERT_GE(ret, 0);
+
+  filter->finalize();
+}
+
+TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_delete_obj_attrs_MustNotCallParent)
+{
+  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
+  ASSERT_NE(filter, nullptr);
+
+  using ::testing::DefaultValue;
+
+  // Set up a default return value for int.
+  DefaultValue<int>::Set(0);
+
+  auto object = get_object();
+  ASSERT_NE(object, nullptr);
+  auto mock_object = dynamic_cast<akamai::mock::MockObject*>(object->get_next());
+  ASSERT_NE(mock_object, nullptr);
+
+  // The mock object's delete_obj_attrs() MUST NOT be called.
+  EXPECT_CALL(*mock_object, delete_obj_attrs) //
+      .Times(0);
+
+  auto ret = object->delete_obj_attrs(this, "test_attr", null_yield);
+  ASSERT_GE(ret, 0);
+
   filter->finalize();
 }
 

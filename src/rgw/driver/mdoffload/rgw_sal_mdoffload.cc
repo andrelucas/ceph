@@ -281,21 +281,121 @@ std::unique_ptr<Object> MDOffloadBucket::get_object(const rgw_obj_key& key)
 
 int MDOffloadObject::set_obj_attrs(const DoutPrefixProvider* dpp, Attrs* setattrs, Attrs* delattrs, optional_yield y)
 {
-  return -1; // XXX
+  // The Rados driver uses this to set attributes in the backing store.
+  //
+  // Note the Rados driver call modifies the attr mtime, here's the comment:
+  //
+  //// make a tiny adjustment to the existing mtime so that fetch_remote_obj()
+  //// won't return ERR_NOT_MODIFIED when syncing the modified object
+  //
+  // Rados increments the timestamp by 1 microsecond, and we should do the
+  // same if we're storing a specific mtime. Ideally we'd automatically store
+  // an mtime on the attributes and it wouldn't have to be a separate item.
+
+  // XXX placeholder.
+  Attrs new_attrs = cached_attrs_;
+  if (setattrs != nullptr) {
+    for (const auto& it : *setattrs) {
+      new_attrs[it.first] = it.second;
+    }
+  }
+  if (delattrs != nullptr) {
+    for (const auto& it : *delattrs) {
+      new_attrs.erase(it.first);
+    }
+  }
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: setattrs={} delattrs={} cached_attrs_={}"),
+             setattrs ? dump_attrs(*setattrs) : "null",
+             delattrs ? dump_attrs(*delattrs) : "null",
+             dump_attrs(cached_attrs_))
+      << dendl;
+  cached_attrs_ = new_attrs;
+  has_attrs_ = true;
+
+  return 0;
 }
 
 int MDOffloadObject::get_obj_attrs(optional_yield y, const DoutPrefixProvider* dpp, rgw_obj* target_obj)
 {
-  return -1; // XXX
+  // The Rados driver fetches the attributes from the backing store using this
+  // call.
+
+  // XXX placeholder.
+  cached_attrs_ = Attrs {}; // Since we're not actually storing anything XXX.
+  has_attrs_ = true;
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadObject::get_obj_attrs: cached_attrs_={}"),
+             dump_attrs(cached_attrs_))
+      << dendl;
+
+  return 0;
 }
 int MDOffloadObject::modify_obj_attrs(const char* attr_name, bufferlist& attr_val, optional_yield y, const DoutPrefixProvider* dpp)
 {
-  return -1; // XXX
+  // The Rados driver uses this to modify a single attribute.
+
+  // NOTE the Rados driver call to set_atomic() when modifying attributes. We
+  // need to be VERY CAREFUL to not modify the upstream object's invariants;
+  // changes are we may have to make that call here too, without the attr
+  // changes.
+
+  // XXX placeholder.
+  Attrs new_attrs = cached_attrs_;
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadObject::modify_obj_attrs: attr_name={} attr_val={}"),
+             attr_name, attr_val.to_str())
+      << dendl;
+  new_attrs[attr_name] = attr_val;
+  cached_attrs_ = new_attrs;
+
+  return 0;
 }
 
 int MDOffloadObject::delete_obj_attrs(const DoutPrefixProvider* dpp, const char* attr_name, optional_yield y)
 {
-  return -1; // XXX
+  // The Rados driver uses this to delete a single attribute. It does it via
+  // set_obj_attrs(), and we should do the same.
+
+  // NOTE the Rados driver call to set_atomic() when modifying attributes. We
+  // need to be VERY CAREFUL to not modify the upstream object's invariants;
+  // changes are we may have to make that call here too, without the attr
+  // changes.
+
+  // XXX placeholder.
+
+  Attrs rmattr;
+  rmattr[attr_name] = bufferlist();
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadObject::delete_obj_attrs: attr_name={}"),
+             attr_name)
+      << dendl;
+  return set_obj_attrs(dpp, nullptr, &rmattr, y);
+}
+
+Attrs& MDOffloadObject::get_attrs(void)
+{
+  // XXX placeholder (but probably not far wrong).
+  return cached_attrs_;
+}
+
+const Attrs& MDOffloadObject::get_attrs(void) const
+{
+  // XXX placeholder (but probably not far wrong).
+  return cached_attrs_;
+}
+
+int MDOffloadObject::set_attrs(Attrs a)
+{
+  // XXX placeholder (but probably not far wrong).
+  cached_attrs_ = a;
+  return 0;
+}
+
+bool MDOffloadObject::has_attrs(void)
+{
+  // XXX placeholder (but probably not far wrong).
+  return has_attrs_;
 }
 
 /****************************************************************************/
