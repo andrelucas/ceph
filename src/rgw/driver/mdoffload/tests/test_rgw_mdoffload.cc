@@ -144,6 +144,28 @@ public:
     return std::unique_ptr<rgw::sal::MDOffloadUser>(
         dynamic_cast<rgw::sal::MDOffloadUser*>(sal_user.release()));
   }
+
+  std::unique_ptr<rgw::sal::MDOffloadObject> get_object()
+  {
+    auto bucket = get_bucket();
+    auto mock_bucket = dynamic_cast<akamai::mock::MockBucket*>(bucket->get_next());
+
+    using namespace ::testing;
+
+    EXPECT_CALL(*mock_bucket, get_object)
+        .Times(1)
+        .WillOnce(
+            DoAll(
+                Return(ByMove(std::unique_ptr<rgw::sal::Object>(new akamai::mock::MockObject())))));
+
+    rgw_obj_key obj_key("test_object_key");
+    auto object = bucket->get_object(obj_key);
+
+    Mock::VerifyAndClearExpectations(&mock_bucket);
+
+    return std::unique_ptr<rgw::sal::MDOffloadObject>(
+        dynamic_cast<rgw::sal::MDOffloadObject*>(object.release()));
+  }
 };
 
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMockCreateValidNextSucceeds)
@@ -342,6 +364,78 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_create_bucket_MustSe
 
   filter->finalize();
 }
+
+// Manually exercise the <Bucket>->get_object() path.
+TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_get_object_PathManual)
+{
+  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
+  auto check_driver = dynamic_cast<MDOffloadFilterDriver*>(filter.get());
+  ASSERT_NE(check_driver, nullptr);
+
+  // The useful get_object() is a call on rgw::sal::Bucket. The get_object()
+  // on rgw::sal::Driver doesn't actually fetch anything.
+  auto bucket = get_bucket();
+  ASSERT_NE(bucket, nullptr);
+  auto mock_bucket = dynamic_cast<akamai::mock::MockBucket*>(bucket->get_next());
+  ASSERT_NE(mock_bucket, nullptr);
+
+  using namespace ::testing;
+
+  EXPECT_CALL(*mock_bucket, get_object)
+      .Times(1)
+      .WillOnce(
+          DoAll(
+              Return(ByMove(std::unique_ptr<rgw::sal::Object>(new akamai::mock::MockObject())))));
+
+  rgw_obj_key obj_key("test_object_key");
+  auto object = bucket->get_object(obj_key);
+  ASSERT_NE(object, nullptr);
+  auto mdo_object = dynamic_cast<rgw::sal::MDOffloadObject*>(object.release());
+  ASSERT_NE(mdo_object, nullptr);
+  auto mock_object = dynamic_cast<akamai::mock::MockObject*>(mdo_object->get_next());
+  ASSERT_NE(mock_object, nullptr);
+}
+
+TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_get_object_Method)
+{
+  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
+  auto check_driver = dynamic_cast<MDOffloadFilterDriver*>(filter.get());
+  ASSERT_NE(check_driver, nullptr);
+
+  auto object = get_object();
+  ASSERT_NE(object, nullptr);
+  auto mock_object = dynamic_cast<akamai::mock::MockObject*>(object->get_next());
+  ASSERT_NE(mock_object, nullptr);
+}
+
+TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_set_obj_attrs_MustNotCallParent)
+{
+  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
+  ASSERT_NE(filter, nullptr);
+
+  using ::testing::DefaultValue;
+
+  // Set up a default return value for int.
+  DefaultValue<int>::Set(0);
+
+  auto object = get_object();
+  ASSERT_NE(object, nullptr);
+  auto mock_object = dynamic_cast<akamai::mock::MockObject*>(object->get_next());
+  ASSERT_NE(mock_object, nullptr);
+
+  // The mock object's set_obj_attrs() MUST NOT be called.
+  EXPECT_CALL(*mock_object, set_obj_attrs(testing::_, testing::_, testing::_, testing::_)) //
+      .Times(0);
+
+  rgw::sal::Attrs setattrs;
+  rgw::sal::Attrs delattrs;
+  auto ret = object->set_obj_attrs(this, &setattrs, &delattrs, null_yield);
+  ASSERT_GE(ret, 0);
+
+  filter->finalize();
+}
+
+/****************************************************************************/
 
 } // empty namespace
 

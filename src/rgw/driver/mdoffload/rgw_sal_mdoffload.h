@@ -110,7 +110,39 @@ public:
   virtual int set_attrs(Attrs a) override;
   virtual int merge_and_store_attrs(const DoutPrefixProvider* dpp, Attrs& new_attrs, optional_yield y) override;
 
+  virtual std::unique_ptr<Object> get_object(const rgw_obj_key& key) override;
+
 }; // class MDOffloadFilterBucket
+
+class MDOffloadObject : public FilterObject {
+
+  /**
+   * @brief Cached object attributes.
+   *
+   * We're not as constrained here as with MDOffloadBucket::cached_attrs_
+   * because the API doesn't require us to return a reference to this field.
+   * However, we keep it simple for consistency.
+   */
+  rgw::sal::Attrs cached_attrs_;
+
+public:
+  MDOffloadObject(std::unique_ptr<Object> next, Bucket* bucket)
+      : FilterObject(std::move(next), bucket)
+  {
+  }
+  virtual ~MDOffloadObject() = default;
+
+  /** Set attributes for this object from the backing store.  Attrs can be set or
+   * deleted.  @note the attribute APIs may be revisited in the future. */
+  virtual int set_obj_attrs(const DoutPrefixProvider* dpp, Attrs* setattrs, Attrs* delattrs, optional_yield y) override;
+  /** Get attributes for this object */
+  virtual int get_obj_attrs(optional_yield y, const DoutPrefixProvider* dpp, rgw_obj* target_obj = NULL) override;
+  /** Modify attributes for this object. */
+  virtual int modify_obj_attrs(const char* attr_name, bufferlist& attr_val, optional_yield y, const DoutPrefixProvider* dpp) override;
+  /** Delete attributes for this object */
+  virtual int delete_obj_attrs(const DoutPrefixProvider* dpp, const char* attr_name, optional_yield y) override;
+
+}; // class MDOffloadObject
 
 } // namespace rgw::sal
 

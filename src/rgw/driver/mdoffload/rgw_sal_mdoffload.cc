@@ -173,7 +173,7 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
 
 /****************************************************************************/
 
-// rgw::sal::MDoffloadBucket
+// rgw::sal::MDoffloadUser
 
 int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
     const rgw_bucket& b,
@@ -262,6 +262,40 @@ int MDOffloadBucket::merge_and_store_attrs(const DoutPrefixProvider* dpp, Attrs&
              dump_attrs(new_attrs), dump_attrs(cached_attrs_))
       << dendl;
   return 0;
+}
+
+std::unique_ptr<Object> MDOffloadBucket::get_object(const rgw_obj_key& key)
+{
+  std::unique_ptr<Object> new_object = next->get_object(key);
+  if (!new_object)
+    return nullptr;
+
+  // Wrap the Object in an MDOffloadObject.
+  auto md_object = std::make_unique<MDOffloadObject>(std::move(new_object), this);
+  return md_object;
+}
+
+/****************************************************************************/
+
+// rgw::sal::MDoffloadObject
+
+int MDOffloadObject::set_obj_attrs(const DoutPrefixProvider* dpp, Attrs* setattrs, Attrs* delattrs, optional_yield y)
+{
+  return -1; // XXX
+}
+
+int MDOffloadObject::get_obj_attrs(optional_yield y, const DoutPrefixProvider* dpp, rgw_obj* target_obj)
+{
+  return -1; // XXX
+}
+int MDOffloadObject::modify_obj_attrs(const char* attr_name, bufferlist& attr_val, optional_yield y, const DoutPrefixProvider* dpp)
+{
+  return -1; // XXX
+}
+
+int MDOffloadObject::delete_obj_attrs(const DoutPrefixProvider* dpp, const char* attr_name, optional_yield y)
+{
+  return -1; // XXX
 }
 
 /****************************************************************************/
