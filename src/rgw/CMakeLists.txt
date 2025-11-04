@@ -348,6 +348,7 @@ if(WITH_RADOSGW_GRPC)
 
   # EDIT THIS to specify .proto source files. Omit the '.proto' suffix!
   set(grpc_source
+    mdoffload/v1/mdoffload
     # These are 'standard' protobufs for the 'Richer error model'
     # (https://grpc.io/docs/guides/error/). They're not installed anywhere by
     # default.

@@ -6,7 +6,7 @@ set (CMAKE_LINK_LIBRARIES ${CMAKE_LINK_LIBRARIES} GMock::GMock)
 set(mdoffload_tests_srcs
     test_rgw_mdoffload.cc)
 
-include_directories(${CMAKE_INCLUDE_DIR})
+include_directories(${CMAKE_INCLUDE_DIR} ${CMAKE_SOURCE_DIR}/src/test/rgw)
 
 add_executable(unittest_rgw_mdoffload ${mdoffload_tests_srcs})
 # No GMock::main, we define our own main().
