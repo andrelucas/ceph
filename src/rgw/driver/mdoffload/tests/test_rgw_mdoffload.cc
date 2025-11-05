@@ -20,6 +20,7 @@
 #include "global/global_context.h"
 #include "global/global_init.h"
 #include "include/buffer_fwd.h"
+#include "mdoffload/v1/mdoffload.pb.h"
 #include "rgw_common.h"
 #include "rgw_placement_types.h"
 #include "rgw_sal.h"
@@ -597,8 +598,6 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_has_attrs_MustNotCal
 
 /* #region Grpc */
 
-// (no additional headers required for the boilerplate service)
-
 namespace mdo = ::mdoffload::v1;
 class MDOffloadClient {
 
@@ -626,13 +625,6 @@ public:
     return stub_->SetBucketAttributes(&ctx, request, response);
   }
 
-  grpc::Status DeleteBucketAttributes(const mdo::DeleteBucketAttributesRequest& request,
-      mdo::DeleteBucketAttributesResponse* response)
-  {
-    grpc::ClientContext ctx;
-    return stub_->DeleteBucketAttributes(&ctx, request, response);
-  }
-
   // Object attribute RPCs
   grpc::Status GetObjectAttributes(const mdo::GetObjectAttributesRequest& request,
       mdo::GetObjectAttributesResponse* response)
@@ -646,13 +638,6 @@ public:
   {
     grpc::ClientContext ctx;
     return stub_->SetObjectAttributes(&ctx, request, response);
-  }
-
-  grpc::Status DeleteObjectAttributes(const mdo::DeleteObjectAttributesRequest& request,
-      mdo::DeleteObjectAttributesResponse* response)
-  {
-    grpc::ClientContext ctx;
-    return stub_->DeleteObjectAttributes(&ctx, request, response);
   }
 
 }; // class MDOffloadClient
@@ -677,6 +662,15 @@ public:
     bl.append(value);
     attrs_[key] = bl;
   }
+  void modify(const std::map<std::string, std::string>& to_add, const std::map<std::string, std::string>& to_del)
+  {
+    for (const auto& [key, value] : to_add) {
+      set(key, value);
+    }
+    for (const auto& [key, value] : to_del) {
+      del(key);
+    }
+  }
   std::optional<bufferlist> get(const std::string& key) const
   {
     auto it = attrs_.find(key);
@@ -695,13 +689,30 @@ public:
   }
 };
 
+// Unique key for an object: object key + instance ID. We'll need operator< to
+// use this as a map key.
+struct ObjectKey {
+  std::string object_key;
+  std::string instance_id;
+
+  ObjectKey(const std::string& key, const std::string& instance)
+      : object_key(key)
+      , instance_id(instance)
+  {
+  }
+  bool operator<(const ObjectKey& other) const
+  {
+    return std::tie(object_key, instance_id) < std::tie(other.object_key, other.instance_id);
+  }
+}; // ObjectKey
+
 class Object {
-  std::string id_;
+  ObjectKey key_;
   Attributes attributes_;
 
 public:
-  Object(const std::string& id)
-      : id_(id)
+  Object(const ObjectKey& key)
+      : key_(key)
   {
   }
   Attributes& attrs()
@@ -712,15 +723,16 @@ public:
 
 class Objects {
 private:
-  std::map<std::string, Object> objects_;
+  std::map<ObjectKey, Object> objects_;
 
 public:
-  std::optional<Object*> get(const std::string& object_id, bool create_if_missing = false)
+  std::optional<Object*> get(const std::string& object_key, const std::string& instance_id, bool create_if_missing = false)
   {
-    auto it = objects_.find(object_id);
+    ObjectKey key(object_key, instance_id);
+    auto it = objects_.find(key);
     if (it == objects_.end()) {
       if (create_if_missing) {
-        auto [new_it, inserted] = objects_.emplace(object_id, Object { object_id });
+        auto [new_it, inserted] = objects_.emplace(key, Object { key });
         return &new_it->second;
       } else {
         return std::nullopt;
@@ -728,13 +740,13 @@ public:
     }
     return &it->second;
   }
-  bool exists(const std::string& object_id) const
+  bool exists(const std::string& object_key, const std::string& instance_id) const
   {
-    return objects_.find(object_id) != objects_.end();
+    return objects_.find(ObjectKey(object_key, instance_id)) != objects_.end();
   }
-  void del(const std::string& object_id)
+  void del(const std::string& object_key, const std::string& instance_id)
   {
-    objects_.erase(object_id);
+    objects_.erase(ObjectKey(object_key, instance_id));
   }
 };
 
@@ -788,7 +800,7 @@ public:
   }
 };
 
-class MDOffloadServiceImpl final : public mdoffload::v1::MDOffloadService::Service {
+class MDOffloadServiceImpl final : public mdo::MDOffloadService::Service {
 
 private:
   Buckets buckets_;
@@ -803,7 +815,7 @@ public:
   {
     return buckets_;
   }
-  bool create_if_missing(bool val)
+  bool create_if_missing()
   {
     return create_if_missing_;
   }
@@ -813,28 +825,64 @@ public:
   }
 
 public:
-  grpc::Status GetBucketAttributes(grpc::ServerContext* /*context*/, const mdoffload::v1::GetBucketAttributesRequest* /*request*/, mdoffload::v1::GetBucketAttributesResponse* /*response*/) override
+  grpc::Status GetBucketAttributes(grpc::ServerContext* /*context*/, const mdoffload::v1::GetBucketAttributesRequest* req, mdoffload::v1::GetBucketAttributesResponse* resp) override
   {
+    auto bucket = buckets().get(req->bucket_id(), create_if_missing());
+    if (!bucket.has_value()) {
+      return grpc::Status(grpc::StatusCode::NOT_FOUND, "Bucket not found");
+    }
+    auto attr = resp->mutable_attributes();
+    for (const auto& [key, value] : (*bucket)->attrs().get_all()) {
+      // get_all() returns map<string, bufferlist>.
+      (*attr)[key] = value.to_str();
+    }
     return grpc::Status::OK;
   }
-  grpc::Status SetBucketAttributes(grpc::ServerContext* /*context*/, const mdoffload::v1::SetBucketAttributesRequest* /*request*/, mdoffload::v1::SetBucketAttributesResponse* /*response*/) override
+  grpc::Status SetBucketAttributes(grpc::ServerContext* /*context*/, const mdoffload::v1::SetBucketAttributesRequest* req, mdoffload::v1::SetBucketAttributesResponse* resp) override
   {
+    auto bucket = buckets().get(req->bucket_id(), create_if_missing());
+    if (!bucket.has_value()) {
+      return grpc::Status(grpc::StatusCode::NOT_FOUND, "Bucket not found");
+    }
+    for (auto& [key, value] : req->attributes_to_add()) {
+      (*bucket)->attrs().set(key, value);
+    }
+    for (auto& key : req->attributes_to_delete()) {
+      (*bucket)->attrs().del(key);
+    }
     return grpc::Status::OK;
   }
-  grpc::Status DeleteBucketAttributes(grpc::ServerContext* /*context*/, const mdoffload::v1::DeleteBucketAttributesRequest* /*request*/, mdoffload::v1::DeleteBucketAttributesResponse* /*response*/) override
+  grpc::Status GetObjectAttributes(grpc::ServerContext* /*context*/, const mdoffload::v1::GetObjectAttributesRequest* req, mdoffload::v1::GetObjectAttributesResponse* resp) override
   {
+    auto bucket = buckets().get(req->bucket_id(), create_if_missing());
+    if (!bucket.has_value()) {
+      return grpc::Status(grpc::StatusCode::NOT_FOUND, "Bucket not found");
+    }
+    auto object = (*bucket)->objects().get(req->object_key(), req->object_instance_id(), create_if_missing());
+    if (!object.has_value()) {
+      return grpc::Status(grpc::StatusCode::NOT_FOUND, "Object not found");
+    }
+    for (const auto& [key, value] : (*object)->attrs().get_all()) {
+      (*resp->mutable_attributes())[key] = value.to_str();
+    }
     return grpc::Status::OK;
   }
-  grpc::Status SetObjectAttributes(grpc::ServerContext* /*context*/, const mdoffload::v1::SetObjectAttributesRequest* /*request*/, mdoffload::v1::SetObjectAttributesResponse* /*response*/) override
+  grpc::Status SetObjectAttributes(grpc::ServerContext* /*context*/, const mdoffload::v1::SetObjectAttributesRequest* req, mdoffload::v1::SetObjectAttributesResponse* resp) override
   {
-    return grpc::Status::OK;
-  }
-  grpc::Status GetObjectAttributes(grpc::ServerContext* /*context*/, const mdoffload::v1::GetObjectAttributesRequest* /*request*/, mdoffload::v1::GetObjectAttributesResponse* /*response*/) override
-  {
-    return grpc::Status::OK;
-  }
-  grpc::Status DeleteObjectAttributes(grpc::ServerContext* /*context*/, const mdoffload::v1::DeleteObjectAttributesRequest* /*request*/, mdoffload::v1::DeleteObjectAttributesResponse* /*response*/) override
-  {
+    auto bucket = buckets().get(req->bucket_id(), create_if_missing());
+    if (!bucket.has_value()) {
+      return grpc::Status(grpc::StatusCode::NOT_FOUND, "Bucket not found");
+    }
+    auto object = (*bucket)->objects().get(req->object_key(), req->object_instance_id(), create_if_missing());
+    if (!object.has_value()) {
+      return grpc::Status(grpc::StatusCode::NOT_FOUND, "Object not found");
+    }
+    for (auto& [key, value] : req->attributes_to_add()) {
+      (*object)->attrs().set(key, value);
+    }
+    for (auto& key : req->attributes_to_delete()) {
+      (*object)->attrs().del(key);
+    }
     return grpc::Status::OK;
   }
 }; // class MDOffloadServiceImpl
@@ -882,6 +930,7 @@ TEST_F(MDOffloadGrpcMock, MetaRoundTrip)
   mdo::GetBucketAttributesRequest req;
   mdo::GetBucketAttributesResponse resp;
 
+  server().instance()->set_create_if_missing(true); // Without this, GetBucketAttributes will fail.
   req.set_bucket_id("test_bucket_id");
   auto s = client.GetBucketAttributes(req, &resp);
   ASSERT_TRUE(s.ok());
@@ -927,9 +976,9 @@ TEST_F(MDOffloadGrpcMock, MetaObjectContainer)
   auto bucket = opt_bucket.value();
 
   auto& objects = bucket->objects();
-  auto opt_object = objects.get("test_object", false);
+  auto opt_object = objects.get("test_object", "", false);
   ASSERT_FALSE(opt_object.has_value());
-  opt_object = objects.get("test_object", true);
+  opt_object = objects.get("test_object", "", true);
   ASSERT_TRUE(opt_object.has_value());
   auto object = opt_object.value();
 
@@ -942,8 +991,98 @@ TEST_F(MDOffloadGrpcMock, MetaObjectContainer)
   EXPECT_FALSE(object->attrs().exists("attr1"));
   EXPECT_TRUE(object->attrs().get_all().empty()) << "Object should have no attributes after deletion";
 
-  objects.del("test_object");
-  EXPECT_FALSE(objects.exists("test_object"));
+  objects.del("test_object", "");
+  EXPECT_FALSE(objects.exists("test_object", ""));
+
+  server().stop();
+}
+
+TEST_F(MDOffloadGrpcMock, TestServerGetSetBucketAttributesBasics)
+{
+  server().start();
+  auto instance = server().instance();
+  instance->set_create_if_missing(true);
+
+  auto channel = grpc::CreateChannel(server().address(), grpc::InsecureChannelCredentials());
+  MDOffloadClient client(channel);
+  auto req = mdo::GetBucketAttributesRequest {};
+  req.set_bucket_id("test_bucket_id");
+
+  mdo::GetBucketAttributesResponse resp;
+  auto s = client.GetBucketAttributes(req, &resp);
+  ASSERT_TRUE(s.ok());
+  EXPECT_TRUE(resp.attributes_size() == 0) << "New bucket should have no attributes";
+
+  mdo::SetBucketAttributesRequest set_req;
+  mdo::SetBucketAttributesResponse set_resp;
+  auto attr_add = set_req.mutable_attributes_to_add();
+  auto attr_del = set_req.mutable_attributes_to_delete();
+
+  set_req.set_bucket_id("test_bucket_id");
+  (*attr_add)["attr1"] = "value1";
+  s = client.SetBucketAttributes(set_req, &set_resp);
+  ASSERT_TRUE(s.ok());
+
+  s = client.GetBucketAttributes(req, &resp);
+  ASSERT_TRUE(s.ok());
+  EXPECT_TRUE(resp.attributes_size() == 1) << "Bucket should have one attribute after setting";
+  auto attr_get = resp.attributes();
+  EXPECT_EQ(attr_get["attr1"], "value1");
+
+  attr_add->clear();
+  attr_del->Add("attr1");
+  s = client.SetBucketAttributes(set_req, &set_resp);
+  ASSERT_TRUE(s.ok());
+  s = client.GetBucketAttributes(req, &resp);
+  ASSERT_TRUE(s.ok());
+  EXPECT_TRUE(resp.attributes_size() == 0) << "Bucket should have no attributes after deletion";
+
+  server().stop();
+}
+
+TEST_F(MDOffloadGrpcMock, TestServerGetSetObjectAttributesBasics)
+{
+  server().start();
+  auto instance = server().instance();
+  instance->set_create_if_missing(true);
+
+  auto channel = grpc::CreateChannel(server().address(), grpc::InsecureChannelCredentials());
+  MDOffloadClient client(channel);
+  auto req = mdo::GetObjectAttributesRequest {};
+  req.set_bucket_id("test_bucket_id");
+  req.set_object_key("test_object_key");
+  req.set_object_instance_id("");
+
+  mdo::GetObjectAttributesResponse resp;
+  auto s = client.GetObjectAttributes(req, &resp);
+  ASSERT_TRUE(s.ok());
+  EXPECT_TRUE(resp.attributes_size() == 0) << "New object should have no attributes";
+
+  mdo::SetObjectAttributesRequest set_req;
+  mdo::SetObjectAttributesResponse set_resp;
+  auto attr_add = set_req.mutable_attributes_to_add();
+  auto attr_del = set_req.mutable_attributes_to_delete();
+
+  set_req.set_bucket_id("test_bucket_id");
+  set_req.set_object_key("test_object_key");
+  set_req.set_object_instance_id("");
+  (*attr_add)["attr1"] = "value1";
+  s = client.SetObjectAttributes(set_req, &set_resp);
+  ASSERT_TRUE(s.ok());
+
+  s = client.GetObjectAttributes(req, &resp);
+  ASSERT_TRUE(s.ok());
+  EXPECT_TRUE(resp.attributes_size() == 1) << "Object should have one attribute after setting";
+  auto attr_get = resp.attributes();
+  EXPECT_EQ(attr_get["attr1"], "value1");
+
+  attr_add->clear();
+  attr_del->Add("attr1");
+  s = client.SetObjectAttributes(set_req, &set_resp);
+  ASSERT_TRUE(s.ok());
+  s = client.GetObjectAttributes(req, &resp);
+  ASSERT_TRUE(s.ok());
+  EXPECT_TRUE(resp.attributes_size() == 0) << "Object should have no attributes after deletion";
 
   server().stop();
 }

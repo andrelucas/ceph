@@ -1,34 +1,15 @@
 syntax = "proto3";
 
-import "google/protobuf/timestamp.proto";
-
 package mdoffload.v1;
 
 option go_package = "bits.linode.com/LinodeApi/obj-endpoint/gen/proto/mdoffload/v1";
 
-message ErrorDetails {
-  enum Type {
-    TYPE_UNSPECIFIED = 0;
-    TYPE_INTERNAL_ERROR = 1;
-    TYPE_INVALID_ARGUMENT = 2;
-    TYPE_ALREADY_EXISTS = 4;
-    TYPE_PERMISSION_DENIED = 5;
-    TYPE_NO_SUCH_BUCKET = 6;
-    TYPE_NO_SUCH_OBJECT = 7;
-  }
-  Type type = 1;
-  string message = 2;
-  google.protobuf.Timestamp timestamp = 3;
-}
-
 service MDOffloadService {
   rpc GetBucketAttributes(GetBucketAttributesRequest) returns (GetBucketAttributesResponse);
   rpc SetBucketAttributes(SetBucketAttributesRequest) returns (SetBucketAttributesResponse);
-  rpc DeleteBucketAttributes(DeleteBucketAttributesRequest) returns (DeleteBucketAttributesResponse);
 
   rpc SetObjectAttributes(SetObjectAttributesRequest) returns (SetObjectAttributesResponse);
   rpc GetObjectAttributes(GetObjectAttributesRequest) returns (GetObjectAttributesResponse);
-  rpc DeleteObjectAttributes(DeleteObjectAttributesRequest) returns (DeleteObjectAttributesResponse);
 }
 
 message GetBucketAttributesRequest {
@@ -43,28 +24,11 @@ message GetBucketAttributesResponse {
 message SetBucketAttributesRequest {
   string bucket_id = 1;
   // string bucket_name = 2;
-  map<string, string> attributes = 3;
+  map<string, string> attributes_to_add = 3;
+  repeated string attributes_to_delete = 4;
 }
 
 message SetBucketAttributesResponse {}
-
-message DeleteBucketAttributesRequest {
-  string bucket_id = 1;
-  // string bucket_name = 2;
-  repeated string attribute_keys = 3;
-}
-
-message DeleteBucketAttributesResponse {}
-
-message SetObjectAttributesRequest {
-  string bucket_id = 1;
-  // string bucket_name = 2;
-  string object_key = 3;
-  string object_instance_id = 4;
-  map<string, string> attributes = 5;
-}
-
-message SetObjectAttributesResponse {}
 
 message GetObjectAttributesRequest {
   string bucket_id = 1;
@@ -77,12 +41,14 @@ message GetObjectAttributesResponse {
   map<string, string> attributes = 1;
 }
 
-message DeleteObjectAttributesRequest {
+message SetObjectAttributesRequest {
   string bucket_id = 1;
-  string bucket_name = 2;
+  // string bucket_name = 2;
   string object_key = 3;
   string object_instance_id = 4;
-  repeated string attribute_keys = 5;
+  map<string, string> attributes_to_add = 5;
+  repeated string attributes_to_delete = 6;
 }
 
-message DeleteObjectAttributesResponse {}
+message SetObjectAttributesResponse {}
+
