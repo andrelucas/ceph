@@ -62,6 +62,24 @@ static std::string dump_attrs(const rgw::sal::Attrs& attrs)
 
 // MDOffloadFilterDriver
 
+int MDOffloadFilterDriver::initialize(CephContext* cct, const DoutPrefixProvider* dpp)
+{
+  // MUST call base class initialize().
+  int ret = FilterDriver::initialize(cct, dpp);
+  if (ret < 0)
+    return ret;
+
+  // XXX no mTLS, no channel parameters, no nothing.
+  auto uri = cct->_conf->rgw_mdoffload_grpc_uri;
+  if (uri.empty()) {
+    ldpp_dout(dpp, 0) << "MDOffloadFilterDriver::initialize: no gRPC URI configured" << dendl;
+    return -1;
+  }
+  channelwrapper_ = std::make_shared<gutil::GrpcChannelWrapper>(uri);
+
+  return 0;
+}
+
 const std::string MDOffloadFilterDriver::get_name() const
 {
   std::string name = "mdoffload<" + next->get_name() + ">";
@@ -71,7 +89,7 @@ const std::string MDOffloadFilterDriver::get_name() const
 std::unique_ptr<User> MDOffloadFilterDriver::get_user(const rgw_user& u)
 {
   std::unique_ptr<User> user = next->get_user(u);
-  return std::make_unique<MDOffloadUser>(std::move(user));
+  return std::make_unique<MDOffloadUser>(std::move(user), this);
 }
 
 int MDOffloadFilterDriver::get_user_by_access_key(const DoutPrefixProvider* dpp, const std::string& key, optional_yield y, std::unique_ptr<User>* user)
@@ -83,7 +101,7 @@ int MDOffloadFilterDriver::get_user_by_access_key(const DoutPrefixProvider* dpp,
   if (ret != 0)
     return ret;
 
-  User* u = new MDOffloadUser(std::move(nu));
+  User* u = new MDOffloadUser(std::move(nu), this);
   user->reset(u);
   return 0;
 }
@@ -97,7 +115,7 @@ int MDOffloadFilterDriver::get_user_by_email(const DoutPrefixProvider* dpp, cons
   if (ret != 0)
     return ret;
 
-  User* u = new MDOffloadUser(std::move(nu));
+  User* u = new MDOffloadUser(std::move(nu), this);
   user->reset(u);
   return 0;
 }
@@ -111,7 +129,7 @@ int MDOffloadFilterDriver::get_user_by_swift(const DoutPrefixProvider* dpp, cons
   if (ret != 0)
     return ret;
 
-  User* u = new MDOffloadUser(std::move(nu));
+  User* u = new MDOffloadUser(std::move(nu), this);
   user->reset(u);
   return 0;
 }
@@ -129,7 +147,7 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
   // Bucket exists. Need to preload the bucket attributes.
   // XXX
 
-  Bucket* fb = new MDOffloadBucket(std::move(nb), u);
+  Bucket* fb = new MDOffloadBucket(std::move(nb), u, this);
   bucket->reset(fb);
   return 0;
 }
@@ -147,7 +165,7 @@ int MDOffloadFilterDriver::get_bucket(User* u, const RGWBucketInfo& i, std::uniq
   // Bucket exists. Need to preload the bucket attributes.
   // XXX
 
-  Bucket* fb = new MDOffloadBucket(std::move(nb), u);
+  Bucket* fb = new MDOffloadBucket(std::move(nb), u, this);
   bucket->reset(fb);
   return 0;
 }
@@ -165,7 +183,7 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
   if (ret != 0)
     return ret;
 
-  Bucket* fb = new MDOffloadBucket(std::move(nb), u);
+  Bucket* fb = new MDOffloadBucket(std::move(nb), u, this);
   bucket->reset(fb);
   return 0;
 }
@@ -195,6 +213,7 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
   int ret;
 
   // XXX placeholder.
+
   ldpp_dout(dpp, 20)
       << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: name={} attrs={}"),
              b.name, dump_attrs(attrs))
@@ -206,7 +225,7 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
   if (ret < 0)
     return ret;
 
-  Bucket* fb = new MDOffloadBucket(std::move(nb), this);
+  Bucket* fb = new MDOffloadBucket(std::move(nb), this, driver_);
   fb->set_attrs(attrs);
   bucket_out->reset(fb);
 
@@ -220,6 +239,14 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
 Attrs& MDOffloadBucket::get_attrs()
 {
   // XXX placeholder.
+
+  // auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
+
+  // ::grpc::ClientContext context;
+  // mdoffload::v1::GetBucketAttributesRequest request;
+  // mdoffload::v1::GetBucketAttributesResponse response;
+  // auto status = client->stub()->GetBucketAttributes(&context, request, &response);
+
   ldout(g_ceph_context, 20)
       << fmt::format(FMT_STRING("MDOffloadBucket::get_attrs: attrs={}"),
              dump_attrs(cached_attrs_))
@@ -270,7 +297,7 @@ std::unique_ptr<Object> MDOffloadBucket::get_object(const rgw_obj_key& key)
     return nullptr;
 
   // Wrap the Object in an MDOffloadObject.
-  auto md_object = std::make_unique<MDOffloadObject>(std::move(new_object), this);
+  auto md_object = std::make_unique<MDOffloadObject>(std::move(new_object), this, driver_);
   return md_object;
 }
 

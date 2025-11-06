@@ -20,7 +20,6 @@
 #include "global/global_context.h"
 #include "global/global_init.h"
 #include "include/buffer_fwd.h"
-#include "mdoffload/v1/mdoffload.pb.h"
 #include "rgw_common.h"
 #include "rgw_placement_types.h"
 #include "rgw_sal.h"
@@ -54,14 +53,21 @@ TEST(RGWMDOffloadFilterDriver, CreateNullptrNextThrows)
  */
 class RGWMDOffloadFilterDriverMockFixture : public ::testing::Test, public akamai::test::CephGtestLogAdapter {
 
+public:
+  // Note there are more tests for the test server MDOffloadServiceImpl in
+  // test_rgw_mdoffload_grpcservice.cc.
+  using server_type = GRPCTestServer<akamai::test::MDOffloadServiceImpl>;
+
 protected:
   ::testing::NiceMock<akamai::mock::MockDriver> mock_base;
   std::unique_ptr<rgw::sal::Driver> filter;
 
-public:
+  server_type server_;
+
+protected:
   void SetUp() override
   {
-    // ldpp_dout(this, 10) << "RGWMDOffloadFilterDriverMockFixture::SetUp" << dendl;
+    // The base (next) driver must be initialized before the filter.
     auto ret = mock_base.initialize(g_ceph_context, this);
     ASSERT_GE(ret, 0);
   }
@@ -71,7 +77,11 @@ public:
       filter->finalize();
       filter.reset();
     }
+    mock_base.finalize();
+    server_.stop();
   }
+
+  server_type& server() { return server_; }
 
   /**
    * @brief Get a bucket object from the filter, using the mock base.
@@ -593,44 +603,12 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_has_attrs_MustNotCal
 }
 
 /* #endregion Mock */
+
 /****************************************************************************/
 
 /* #region Grpc */
 
-class MDOffloadGrpcTestServer : public ::testing::Test, public akamai::test::CephGtestLogAdapter {
-public:
-  // Note there are more tests for the test server MDOffloadServiceImpl in
-  // test_rgw_mdoffload_grpcservice.cc.
-  using server_type = GRPCTestServer<akamai::test::MDOffloadServiceImpl>;
-
-protected:
-  server_type server_;
-
-  void TearDown() override { server_.stop(); }
-  server_type& server() { return server_; }
-}; // class MDOffloadGrpcMock
-
-// Make sure the server objects are properly created and destroyed.
-TEST_F(MDOffloadGrpcTestServer, Null)
-{
-}
-
-TEST_F(MDOffloadGrpcTestServer, MetaStart)
-{
-  server().start();
-  for (int n = 0; n < 1000; n++) {
-    server().start();
-  }
-  server().stop();
-}
-
-TEST_F(MDOffloadGrpcTestServer, MetaStop)
-{
-  server().start();
-  for (int n = 0; n < 1000; n++) {
-    server().stop();
-  }
-}
+// XXX
 
 /* #endregion Grpc */
 

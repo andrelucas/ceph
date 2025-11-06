@@ -11,20 +11,132 @@
 
 #pragma once
 
+#include <memory>
+#include <stdexcept>
+#include <string>
+
+#include <mutex>
+
+#include <grpc/grpc.h>
+#include <grpcpp/channel.h>
+#include <grpcpp/create_channel.h>
+
+#include "mdoffload/v1/mdoffload.grpc.pb.h"
 #include "rgw_common.h"
 #include "rgw_sal.h"
 #include "rgw_sal_filter.h"
-#include <stdexcept>
+
+namespace akamai::grpcutil {
+
+class MDOffloadGrpcClient {
+private:
+  std::shared_ptr<mdoffload::v1::MDOffloadService::Stub> stub_;
+
+public:
+  explicit MDOffloadGrpcClient(std::shared_ptr<grpc::Channel> channel)
+      : stub_(mdoffload::v1::MDOffloadService::NewStub(channel))
+  {
+  }
+
+  ~MDOffloadGrpcClient() = default;
+
+  std::shared_ptr<mdoffload::v1::MDOffloadService::Stub> stub()
+  {
+    return stub_;
+  }
+}; // class MDOffloadGrpcClient
+
+/**
+ * @brief gRPC Channel Wrapper
+ *
+ * This class provides a thread-safe wrapper around a gRPC channel.
+ *
+ * Currently very, very simple. We will add support for channel parameters
+ * and mTLS as we go. This is intended for reuse.
+ */
+class GrpcChannelWrapper {
+private:
+  using mutex_type = std::mutex;
+
+  mutable mutex_type mutex_;
+  std::shared_ptr<::grpc::Channel> channel_;
+  std::string uri_;
+
+public:
+  GrpcChannelWrapper(const std::string& uri)
+      : uri_(uri)
+  {
+    _set_channel();
+  }
+  ~GrpcChannelWrapper() { }
+
+  /// Return a shared_ptr to the gRPC channel.
+  std::shared_ptr<::grpc::Channel> channel()
+  {
+    std::lock_guard<mutex_type> lock(mutex_);
+    return channel_;
+  }
+
+  /// Return a new client instance for the wrapped channel. All the client
+  /// type needs is a constructor taking a shared_ptr<grpc::Channel>.
+  template <typename T>
+  std::unique_ptr<T> create_client()
+  {
+    return std::make_unique<T>(channel());
+  }
+
+  /// Return the configured channel uri.
+  const std::string& channel_uri() const
+  {
+    std::lock_guard<mutex_type> lock(mutex_);
+    return uri_;
+  }
+
+  /** @brief Set a new channel URI, recreating the channel.
+   *
+   * grpc::CreateChannel() is lazy, it doesn't actually connect until the
+   * first RPC is made, so this operation can't (currently) fail.
+   *
+   * @param uri New URI
+   * @return true The operation succeeded, false otherwise.
+   */
+  bool set_channel_uri(const std::string& uri)
+  {
+    std::lock_guard<mutex_type> lock(mutex_);
+    uri_ = uri;
+    _set_channel();
+    return true;
+  }
+
+  // Internal: create the channel. Assumes we're constructing or holding the
+  // mutex, don't take the lock here.
+  bool _set_channel()
+  {
+    channel_ = ::grpc::CreateChannel(uri_, ::grpc::InsecureChannelCredentials()); // XXX mTLS
+    return true;
+  }
+
+}; // class GrpcChannelWrapper
+
+}; // namespace akamai::grpcutil
 
 namespace rgw::sal {
 
+namespace gutil = akamai::grpcutil;
+
 class MDOffloadFilterDriver : public FilterDriver {
+
+private:
+  std::shared_ptr<gutil::GrpcChannelWrapper> channelwrapper_;
+
 public:
   MDOffloadFilterDriver(CephContext* cct, rgw::sal::Driver* next)
       : FilterDriver(next)
   {
   }
   virtual ~MDOffloadFilterDriver() = default;
+
+  virtual int initialize(CephContext* cct, const DoutPrefixProvider* dpp) override;
 
   virtual const std::string get_name() const override;
 
@@ -47,6 +159,9 @@ public:
   /** Lookup a Bucket by name.  Queries driver for bucket info. */
   virtual int get_bucket(const DoutPrefixProvider* dpp, User* u, const std::string& tenant, const std::string& name, std::unique_ptr<Bucket>* bucket, optional_yield y) override;
 
+  // Non-inherited methods.
+  std::shared_ptr<gutil::GrpcChannelWrapper> channel() { return channelwrapper_; }
+
 public:
   class BadNextDriver : public std::runtime_error {
     using std::runtime_error::runtime_error; // Inherit constructors.
@@ -55,9 +170,13 @@ public:
 }; // class MDOffloadDriver
 
 class MDOffloadUser : public FilterUser {
+private:
+  MDOffloadFilterDriver* driver_ = nullptr;
+
 public:
-  MDOffloadUser(std::unique_ptr<User> next)
+  MDOffloadUser(std::unique_ptr<User> next, MDOffloadFilterDriver* driver)
       : FilterUser(std::move(next))
+      , driver_(driver)
   {
   }
   virtual ~MDOffloadUser() = default;
@@ -87,6 +206,8 @@ public:
 class MDOffloadBucket : public FilterBucket {
 
 private:
+  MDOffloadFilterDriver* driver_ = nullptr;
+
   /**
    * @brief Cached bucket attributes.
    *
@@ -100,8 +221,9 @@ private:
   rgw::sal::Attrs cached_attrs_;
 
 public:
-  MDOffloadBucket(std::unique_ptr<Bucket> next, User* user)
+  MDOffloadBucket(std::unique_ptr<Bucket> next, User* user, MDOffloadFilterDriver* driver)
       : FilterBucket(std::move(next), user)
+      , driver_(driver)
   {
   }
   virtual ~MDOffloadBucket() = default;
@@ -115,6 +237,9 @@ public:
 }; // class MDOffloadFilterBucket
 
 class MDOffloadObject : public FilterObject {
+
+private:
+  MDOffloadFilterDriver* driver_ = nullptr;
 
   /**
    * @brief Cached object attributes.
@@ -130,8 +255,9 @@ class MDOffloadObject : public FilterObject {
   bool has_attrs_ = false;
 
 public:
-  MDOffloadObject(std::unique_ptr<Object> next, Bucket* bucket)
+  MDOffloadObject(std::unique_ptr<Object> next, Bucket* bucket, MDOffloadFilterDriver* driver)
       : FilterObject(std::move(next), bucket)
+      , driver_(driver)
   {
   }
   virtual ~MDOffloadObject() = default;
