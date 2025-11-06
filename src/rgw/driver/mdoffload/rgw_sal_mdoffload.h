@@ -12,10 +12,13 @@
 #pragma once
 
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
 #include <mutex>
+
+#include <fmt/format.h>
 
 #include <grpc/grpc.h>
 #include <grpcpp/channel.h>
@@ -25,6 +28,130 @@
 #include "rgw_common.h"
 #include "rgw_sal.h"
 #include "rgw_sal_filter.h"
+
+// fmtlib formatters for Ceph types. Some of these have to_str() and their own
+// operator<<, but this way keeps things consistent.
+
+template <>
+struct fmt::formatter<rgw_user> {
+  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
+
+  template <typename FormatContext>
+  auto format(const rgw_user& u, FormatContext& ctx) const -> typename FormatContext::iterator
+  {
+    return fmt::format_to(ctx.out(), "rgw_user{{tenant='{}',id='{}',ns='{}'}}",
+        u.tenant, u.id, u.ns);
+  }
+};
+
+template <>
+struct fmt::formatter<rgw_bucket> {
+  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
+
+  template <typename FormatContext>
+  auto format(const rgw_bucket& b, FormatContext& ctx) const -> typename FormatContext::iterator
+  {
+    return fmt::format_to(ctx.out(), "rgw_bucket{{tenant='{}',name='{}',id='{}'}}",
+        b.tenant, b.name, b.bucket_id);
+  }
+};
+
+template <>
+struct fmt::formatter<rgw::sal::User> {
+  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
+
+  // Annoyingly we can't use const rgw::sal::User& as some of the accessors
+  // aren't marked as const.
+  template <typename FormatContext>
+  auto format(rgw::sal::User& u, FormatContext& ctx) const -> typename FormatContext::iterator
+  {
+    // No point showing the id, it's just a composite of the fields we're
+    // already showing.
+    return fmt::format_to(ctx.out(), FMT_STRING("rgw::sal::User{{tenant='{}',name='{}',ns='{}'}}"),
+        u.get_tenant(), u.get_display_name(), u.get_ns());
+  }
+};
+
+template <>
+struct fmt::formatter<RGWBucketInfo> {
+  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
+
+  template <typename FormatContext>
+  auto format(const RGWBucketInfo& info, FormatContext& ctx) const -> typename FormatContext::iterator
+  {
+    const auto placement = info.placement_rule.empty() ? std::string { "<unset>" } : info.placement_rule.to_str();
+    const auto sync_state = info.sync_policy ? "set" : "unset";
+
+    return fmt::format_to(
+        ctx.out(),
+        FMT_STRING("RGWBucketInfo{{bucket={},owner={},zonegroup='{}',placement='{}',flags=0x{:x},versioned={},swift_versioning={},obj_lock_enabled={},requester_pays={},has_website={},mdsearch_fields={},sync_policy={}}}"),
+        info.bucket,
+        info.owner,
+        info.zonegroup,
+        placement,
+        info.flags,
+        info.versioned(),
+        info.has_swift_versioning(),
+        info.obj_lock_enabled(),
+        info.requester_pays,
+        info.has_website,
+        info.mdsearch_config.size(),
+        sync_state);
+  }
+};
+
+template <>
+struct fmt::formatter<rgw::sal::Attrs> {
+  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
+
+  template <typename FormatContext>
+  auto format(const rgw::sal::Attrs& attrs, FormatContext& ctx) const -> typename FormatContext::iterator
+  {
+    auto out = ctx.out();
+    out = fmt::format_to(out, "rgw::sal::Attrs{{");
+
+    bool first = true;
+    for (const auto& [key, value] : attrs) {
+      if (!first) {
+        out = fmt::format_to(out, ", ");
+      }
+      first = false;
+
+      // XXX TO BE CONTINUED: We should read the key name and decode the
+      // values accordingly, for the keys we care about. For now, just use
+      // to_str() and accept the carnage.
+      out = fmt::format_to(out, FMT_STRING("'{}':{}"), key, value.to_str());
+    }
+
+    out = fmt::format_to(out, "}}");
+    return out;
+  }
+};
+
+/**
+ * @brief Safely format a type at the end of a potentially-null pointer.
+ *
+ * Utility function for logging using fmtlib. Relies on type \p T having a
+ * formatter.
+ *
+ * ```C++
+ * // Safely format a potentially-null pointer to rgw_user.
+ * rgw_user* u = ...;
+ * ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("User u={}"), fmt_maybe(u)) << dendl;
+ * ```
+ *
+ * @tparam T
+ * @param t
+ * @return std::string
+ */
+template <typename T>
+std::string fmt_maybe(T* t)
+{
+  if (t)
+    return fmt::format(FMT_STRING("{}"), *t);
+  else
+    return "NULL";
+}
 
 namespace akamai::grpcutil {
 

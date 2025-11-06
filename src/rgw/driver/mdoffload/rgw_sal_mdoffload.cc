@@ -36,28 +36,6 @@ static inline User* nextUser(User* t)
   return dynamic_cast<MDOffloadUser*>(t)->get_next();
 }
 
-/**
- * @brief Dump attributes in a way meaningful to us.
- *
- * @param attrs
- * @return std::string a string representation of the attributes.
- */
-static std::string dump_attrs(const rgw::sal::Attrs& attrs)
-{
-  std::ostringstream oss;
-  oss << "{";
-  bool first = true;
-  for (const auto& [key, val] : attrs) {
-    if (!first) {
-      oss << ", ";
-    }
-    first = false;
-    oss << key << ": " << val;
-  }
-  oss << "}";
-  return oss.str();
-}
-
 /****************************************************************************/
 
 // MDOffloadFilterDriver
@@ -140,6 +118,11 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
   int ret;
   User* nu = nextUser(u);
 
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 1) rgw_bucket b={} nu={}"), b,
+             fmt_maybe(nu))
+      << dendl;
+
   ret = next->get_bucket(dpp, nu, b, &nb, y);
   if (ret != 0)
     return ret;
@@ -157,6 +140,11 @@ int MDOffloadFilterDriver::get_bucket(User* u, const RGWBucketInfo& i, std::uniq
   std::unique_ptr<Bucket> nb;
   int ret;
   User* nu = nextUser(u);
+
+  ldout(g_ceph_context, 20)
+      << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 2) RGWBucketInfo i={} nu={}"), i,
+             fmt_maybe(nu))
+      << dendl;
 
   ret = next->get_bucket(nu, i, &nb);
   if (ret != 0)
@@ -178,6 +166,11 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
 
   // Bucket exists. Need to preload the bucket attributes.
   // XXX
+
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 3) tenant={} name={} nu={}"), tenant, name,
+             fmt_maybe(nu))
+      << dendl;
 
   ret = next->get_bucket(dpp, nu, tenant, name, &nb, y);
   if (ret != 0)
@@ -214,14 +207,25 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
 
   // XXX placeholder.
 
+  // // Fetch attributes for this bucket.
+  // auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
+
+  // ::grpc::ClientContext context;
+  // mdoffload::v1::GetBucketAttributesRequest request;
+  // mdoffload::v1::GetBucketAttributesResponse response;
+  // auto status = client->stub()->GetBucketAttributes(&context, request, &response);
+
   ldpp_dout(dpp, 20)
       << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: name={} attrs={}"),
-             b.name, dump_attrs(attrs))
+             b.name, attrs)
       << dendl;
 
   // Pass an empty set of attributes to the next driver.
   rgw::sal::Attrs empty_attrs;
-  ret = next->create_bucket(dpp, b, zonegroup_id, placement_rule, swift_ver_location, pquota_info, policy, empty_attrs, info, ep_objv, exclusive, obj_lock_enabled, existed, req_info, &nb, y);
+  ret = next->create_bucket(dpp, b, zonegroup_id, placement_rule,
+      swift_ver_location, pquota_info, policy, empty_attrs,
+      info, ep_objv, exclusive, obj_lock_enabled, existed,
+      req_info, &nb, y);
   if (ret < 0)
     return ret;
 
@@ -248,8 +252,8 @@ Attrs& MDOffloadBucket::get_attrs()
   // auto status = client->stub()->GetBucketAttributes(&context, request, &response);
 
   ldout(g_ceph_context, 20)
-      << fmt::format(FMT_STRING("MDOffloadBucket::get_attrs: attrs={}"),
-             dump_attrs(cached_attrs_))
+      << fmt::format(FMT_STRING("MDOffloadBucket::get_attrs: cached_attrs_={}"),
+             cached_attrs_)
       << dendl;
   return cached_attrs_;
 }
@@ -272,7 +276,7 @@ int MDOffloadBucket::set_attrs(Attrs a)
   cached_attrs_ = a;
   ldout(g_ceph_context, 20)
       << fmt::format(FMT_STRING("MDOffloadBucket::set_attrs: attrs={}"),
-             dump_attrs(cached_attrs_))
+             cached_attrs_)
       << dendl;
   return 0;
 }
@@ -285,7 +289,7 @@ int MDOffloadBucket::merge_and_store_attrs(const DoutPrefixProvider* dpp, Attrs&
   }
   ldpp_dout(dpp, 20)
       << fmt::format(FMT_STRING("MDOffloadBucket::merge_and_store_attrs: new_attrs={} cached_attrs_={}"),
-             dump_attrs(new_attrs), dump_attrs(cached_attrs_))
+             new_attrs, cached_attrs_)
       << dendl;
   return 0;
 }
@@ -332,9 +336,9 @@ int MDOffloadObject::set_obj_attrs(const DoutPrefixProvider* dpp, Attrs* setattr
   }
   ldpp_dout(dpp, 20)
       << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: setattrs={} delattrs={} cached_attrs_={}"),
-             setattrs ? dump_attrs(*setattrs) : "null",
-             delattrs ? dump_attrs(*delattrs) : "null",
-             dump_attrs(cached_attrs_))
+             fmt_maybe(setattrs),
+             fmt_maybe(delattrs),
+             cached_attrs_)
       << dendl;
   cached_attrs_ = new_attrs;
   has_attrs_ = true;
@@ -352,7 +356,7 @@ int MDOffloadObject::get_obj_attrs(optional_yield y, const DoutPrefixProvider* d
   has_attrs_ = true;
   ldpp_dout(dpp, 20)
       << fmt::format(FMT_STRING("MDOffloadObject::get_obj_attrs: cached_attrs_={}"),
-             dump_attrs(cached_attrs_))
+             cached_attrs_)
       << dendl;
 
   return 0;
