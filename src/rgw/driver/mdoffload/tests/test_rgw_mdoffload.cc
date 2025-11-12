@@ -59,7 +59,7 @@ public:
   using server_type = GRPCTestServer<akamai::test::MDOffloadServiceImpl>;
 
 protected:
-  ::testing::NiceMock<akamai::mock::MockDriver> mock_base;
+  ::testing::StrictMock<akamai::mock::MockDriver> mock_base;
   std::unique_ptr<rgw::sal::Driver> filter;
 
   server_type server_;
@@ -67,21 +67,64 @@ protected:
 protected:
   void SetUp() override
   {
+    // Start a gRPC server that automatically instantiates buckets and objects
+    // as needed. This allows us to test the filter driver on its mock base
+    // without needing all sorts of test-only special cases in the driver
+    // itself.
+    server_.start();
+    auto uri = server_.address();
+    server_.instance()->set_create_if_missing(true);
+    // Point the filter driver at our test server.
+    g_ceph_context->_conf->rgw_mdoffload_grpc_uri = uri;
+
     // The base (next) driver must be initialized before the filter.
+    EXPECT_CALL(mock_base, initialize) //
+        .Times(1);
     auto ret = mock_base.initialize(g_ceph_context, this);
     ASSERT_GE(ret, 0);
+
+    // Initialise the filter driver. This will set up the gRPC client channel
+    // wrapper, among other things.
+    std::unique_ptr<rgw::sal::MDOffloadFilterDriver> mdo_filter;
+    EXPECT_TRUE(get_and_initialize_filter_driver(&mdo_filter));
+    filter = std::move(mdo_filter);
   }
+
   void TearDown() override
   {
     if (filter) {
+      // Expect the filter to call finalize() on the base driver.
+      EXPECT_CALL(mock_base, finalize) //
+          .Times(1);
       filter->finalize();
+      ::testing::Mock::VerifyAndClearExpectations(&mock_base);
       filter.reset();
     }
+    // We'll call finalize() ourselves, the underlying driver has to do the
+    // right thing with a double-finalize() call.
+    EXPECT_CALL(mock_base, finalize) //
+        .Times(1);
     mock_base.finalize();
+    ::testing::Mock::VerifyAndClearExpectations(&mock_base);
     server_.stop();
   }
 
   server_type& server() { return server_; }
+
+  bool get_and_initialize_filter_driver(std::unique_ptr<rgw::sal::MDOffloadFilterDriver>* filter)
+  {
+    std::unique_ptr<rgw::sal::MDOffloadFilterDriver> new_filter(dynamic_cast<rgw::sal::MDOffloadFilterDriver*>(newMDOffloadFilter(g_ceph_context, &mock_base)));
+
+    EXPECT_CALL(mock_base, get_zone) //
+        .Times(1);
+    auto ret = new_filter->initialize(g_ceph_context, this);
+    if (ret < 0) {
+      delete filter;
+      return false;
+    }
+    *filter = std::move(new_filter);
+    return true;
+  }
 
   /**
    * @brief Get a bucket object from the filter, using the mock base.
@@ -186,9 +229,6 @@ protected:
 
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMockCreateValidNextSucceeds)
 {
-
-  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
-
   ASSERT_NE(filter, nullptr);
 
   EXPECT_CALL(mock_base, get_name()) //
@@ -201,9 +241,6 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMockCreateValidNextSucceeds)
 
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMockGetBucket)
 {
-
-  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
-
   ASSERT_NE(filter, nullptr);
 
   rgw_user u;
@@ -226,16 +263,12 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMockGetBucket)
   ASSERT_NE(user, nullptr);
   filter->get_bucket(this, user.get(), b, &bucket, y);
   ASSERT_NE(bucket, nullptr);
-
-  filter->finalize();
 }
 
 // get_attr() MUST NOT call next->get_attr(). It must handle it itself.
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_get_attr_MustNotCallParent)
 {
-  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
-
-  using ::testing::DefaultValue;
+  using namespace ::testing;
 
   // Set up a default return value for Attrs&.
   rgw::sal::Attrs empty_attrs;
@@ -249,16 +282,12 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_get_attr_MustNotCall
   EXPECT_CALL(*mock_bucket, get_attrs()) //
       .Times(0);
   bucket->get_attrs();
-
-  filter->finalize();
 }
 
 // set_attr() MUST NOT call next->set_attr(). It must handle it itself.
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_set_attr_MustNotCallParent)
 {
-  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
-
-  using ::testing::DefaultValue;
+  using namespace ::testing;
 
   // Set up a default return value for Attrs&.
   rgw::sal::Attrs empty_attrs;
@@ -272,18 +301,12 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_set_attr_MustNotCall
   EXPECT_CALL(*mock_bucket, set_attrs(testing::_)) //
       .Times(0);
   bucket->set_attrs(empty_attrs);
-
-  filter->finalize();
 }
 
 // merge_and_store_attrs() MUST NOT call next->merge_and_store_attrs(). It must handle it itself.
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_merge_and_store_attrs_MustNotCallParent)
 {
-  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
-  ASSERT_NE(filter, nullptr);
-
-  using ::testing::_;
-  using ::testing::DefaultValue;
+  using namespace ::testing;
 
   // Set up a default return value for Attrs&.
   rgw::sal::Attrs empty_attrs;
@@ -295,9 +318,11 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_merge_and_store_attr
   ASSERT_NE(mock_bucket, nullptr);
   EXPECT_CALL(*mock_bucket, merge_and_store_attrs) //
       .Times(0);
+  // When setting up the gRPC client request, we need the bucket name.
+  EXPECT_CALL(*mock_bucket, get_name) //
+      .Times(1)
+      .WillOnce(ReturnRef("test_bucket"));
   bucket->merge_and_store_attrs(this, empty_attrs, null_yield);
-
-  filter->finalize();
 }
 
 // Unfortunately we can't rely on <Bucket>->set_attr() interception, as
@@ -308,7 +333,6 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_merge_and_store_attr
 // parent.
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_create_bucket_MustSendEmptyAttrsToParent)
 {
-  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
   auto check_driver = dynamic_cast<MDOffloadFilterDriver*>(filter.get());
   ASSERT_NE(check_driver, nullptr);
 
@@ -359,6 +383,12 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_create_bucket_MustSe
   // We're passing in nonempty attrs to the filter create_bucket().
   ASSERT_FALSE(nonempty_attrs.empty());
 
+  // When setting up the gRPC client request, we need the user ID.
+  std::string user_id = "testid";
+  EXPECT_CALL(*mock_user, get_display_name) //
+      .Times(1)
+      .WillOnce(ReturnRef(user_id));
+
   offload_user->create_bucket(this,
       b,
       "",
@@ -378,13 +408,12 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_create_bucket_MustSe
 
   ASSERT_NE(bucket_out, nullptr);
 
-  filter->finalize();
+  // filter->finalize();
 }
 
 // Manually exercise the <Bucket>->get_object() path.
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_get_object_PathManual)
 {
-  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
   auto check_driver = dynamic_cast<MDOffloadFilterDriver*>(filter.get());
   ASSERT_NE(check_driver, nullptr);
 
@@ -414,7 +443,6 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_get_object_PathManua
 
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_get_object_Method)
 {
-  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
   auto check_driver = dynamic_cast<MDOffloadFilterDriver*>(filter.get());
   ASSERT_NE(check_driver, nullptr);
 
@@ -426,10 +454,9 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Bucket_get_object_Method)
 
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_set_obj_attrs_MustNotCallParent)
 {
-  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
   ASSERT_NE(filter, nullptr);
 
-  using ::testing::DefaultValue;
+  using namespace ::testing;
 
   // Set up a default return value for int.
   DefaultValue<int>::Set(0);
@@ -450,13 +477,10 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_set_obj_attrs_MustNo
 
   // Bonus test: Need to set has_attrs_.
   ASSERT_TRUE(object->has_attrs());
-
-  filter->finalize();
 }
 
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_get_obj_attrs_MustNotCallParent)
 {
-  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
   ASSERT_NE(filter, nullptr);
 
   using ::testing::DefaultValue;
@@ -475,16 +499,13 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_get_obj_attrs_MustNo
 
   auto ret = object->get_obj_attrs(null_yield, this, nullptr);
   ASSERT_GE(ret, 0);
-
-  filter->finalize();
 }
 
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_modify_obj_attrs_MustNotCallParent)
 {
-  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
   ASSERT_NE(filter, nullptr);
 
-  using ::testing::DefaultValue;
+  using namespace ::testing;
 
   // Set up a default return value for int.
   DefaultValue<int>::Set(0);
@@ -501,16 +522,13 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_modify_obj_attrs_Mus
   ceph::bufferlist attr_val;
   auto ret = object->modify_obj_attrs("test_attr", attr_val, null_yield, this);
   ASSERT_GE(ret, 0);
-
-  filter->finalize();
 }
 
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_delete_obj_attrs_MustNotCallParent)
 {
-  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
   ASSERT_NE(filter, nullptr);
 
-  using ::testing::DefaultValue;
+  using namespace ::testing;
 
   // Set up a default return value for int.
   DefaultValue<int>::Set(0);
@@ -526,16 +544,13 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_delete_obj_attrs_Mus
 
   auto ret = object->delete_obj_attrs(this, "test_attr", null_yield);
   ASSERT_GE(ret, 0);
-
-  filter->finalize();
 }
 
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_get_attrs_MustNotCallParent)
 {
-  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
   ASSERT_NE(filter, nullptr);
 
-  using ::testing::DefaultValue;
+  using namespace ::testing;
 
   // Set up a default return value for rgw::sal::Attrs&.
   rgw::sal::Attrs empty_attrs;
@@ -550,16 +565,13 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_get_attrs_MustNotCal
       .Times(0);
 
   object->get_attrs();
-
-  filter->finalize();
 }
 
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_set_attrs_MustNotCallParent)
 {
-  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
   ASSERT_NE(filter, nullptr);
 
-  using ::testing::DefaultValue;
+  using namespace ::testing;
 
   // Set up a default return value for int.
   DefaultValue<int>::Set(0);
@@ -575,16 +587,13 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_set_attrs_MustNotCal
   rgw::sal::Attrs attrs;
   auto ret = object->set_attrs(attrs);
   ASSERT_GE(ret, 0);
-
-  filter->finalize();
 }
 
 TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_has_attrs_MustNotCallParent)
 {
-  EXPECT_NO_THROW({ filter.reset(newMDOffloadFilter(g_ceph_context, &mock_base)); });
   ASSERT_NE(filter, nullptr);
 
-  using ::testing::DefaultValue;
+  using namespace ::testing;
 
   // Set up a default return value for bool.
   DefaultValue<bool>::Set(false);
@@ -598,19 +607,9 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMock_Object_has_attrs_MustNotCal
       .Times(0);
 
   object->has_attrs();
-
-  filter->finalize();
 }
 
 /* #endregion Mock */
-
-/****************************************************************************/
-
-/* #region Grpc */
-
-// XXX
-
-/* #endregion Grpc */
 
 /****************************************************************************/
 
