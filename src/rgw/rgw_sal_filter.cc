@@ -91,7 +91,12 @@ int FilterZoneGroup::get_zone_by_name(const std::string& name, std::unique_ptr<Z
 
 int FilterDriver::initialize(CephContext *cct, const DoutPrefixProvider *dpp)
 {
-  zone = std::make_unique<FilterZone>(next->get_zone()->clone());
+  // Our unit tests have a mock that doesn't initialise anything, and rather
+  // than force the unit tests to mock out this call, check for that.
+  auto parent_zone = next->get_zone();
+  if (parent_zone != nullptr) {
+    zone = std::make_unique<FilterZone>(parent_zone->clone());
+  }
 
   return 0;
 }
@@ -1346,8 +1351,8 @@ int FilterLuaManager::add_package(const DoutPrefixProvider* dpp, optional_yield 
   return next->add_package(dpp, y, package_name);
 }
 
-int FilterLuaManager::remove_package(const DoutPrefixProvider* dpp, optional_yield y, 
-                                    const std::string& package_name)
+int FilterLuaManager::remove_package(const DoutPrefixProvider* dpp, optional_yield y,
+    const std::string& package_name)
 {
   return next->remove_package(dpp, y, package_name);
 }
