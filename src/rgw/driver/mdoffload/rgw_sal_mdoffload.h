@@ -277,6 +277,13 @@ public:
   virtual int get_user_by_swift(const DoutPrefixProvider* dpp, const std::string& user_str, optional_yield y,
       std::unique_ptr<User>* user) override;
 
+  // This is called by RGWHandler_REST_S3::init_from_header() to initialise an
+  // object with no bucket reference. It still needs to return the right type
+  // of object, but we need to be careful as there's no bucket so we can't do
+  // any lookups on it. I think it's really just a container for the key info
+  // tbh.
+  virtual std::unique_ptr<Object> get_object(const rgw_obj_key& k) override;
+
   // We have to override get_bucket(*) to return our MDOffloadBucket instead of FilterBucket.
 
   /** Get a Bucket by info.  Does not query the driver, just uses the give bucket info. */

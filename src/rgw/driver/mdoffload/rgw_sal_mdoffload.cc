@@ -112,6 +112,16 @@ int MDOffloadFilterDriver::get_user_by_swift(const DoutPrefixProvider* dpp, cons
   return 0;
 }
 
+std::unique_ptr<Object> MDOffloadFilterDriver::get_object(const rgw_obj_key& k)
+{
+  ldout(g_ceph_context, 20)
+      << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_object: rgw_obj_key k={}"), k)
+      << dendl;
+  std::unique_ptr<Object> o = next->get_object(k);
+  return std::make_unique<MDOffloadObject>(std::move(o), this);
+}
+
+// get_bucket() type 1.
 int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, const rgw_bucket& b, std::unique_ptr<Bucket>* bucket, optional_yield y)
 {
   std::unique_ptr<Bucket> nb;
