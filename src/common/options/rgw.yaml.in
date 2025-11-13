@@ -3815,7 +3815,7 @@ options:
   long_desc: The gRPC server address to use for the metadata offload service.
     Passed unchanged to grpc::CreateCustomChannel() so must be in a format
     valid for the C++ gRPC library.
-  default: dns:///localhost:8004
+  default: dns:///127.0.0.1:8004
   services:
   - rgw
   with_legacy: true
