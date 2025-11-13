@@ -12,10 +12,24 @@
 #include "rgw_sal_mdoffload.h"
 #include "common/dout.h"
 #include "global/global_context.h"
+#include "mdoffload/v1/mdoffload.pb.h"
 #include "rgw_common.h"
 
 #define dout_subsys ceph_subsys_rgw
 
+namespace akamai::grpcutil {
+static rgw::sal::Attrs attrs_from_proto(const ::google::protobuf::Map<std::string, std::string>& proto_attrs)
+{
+  rgw::sal::Attrs attrs;
+  for (const auto& kv : proto_attrs) {
+    bufferlist bl;
+    bl.append(kv.second);
+    attrs.emplace(kv.first, std::move(bl));
+  }
+  return attrs;
+}
+
+}
 namespace rgw::sal {
 
 /****************************************************************************/
@@ -138,13 +152,33 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
     return ret;
 
   // Bucket exists. Need to preload the bucket attributes.
-  // XXX
+
+  // Fetch attributes for this bucket.
+  auto client = channel()->create_client<gutil::MDOffloadGrpcClient>();
+
+  ::grpc::ClientContext context;
+  mdoffload::v1::GetBucketAttributesRequest request;
+  mdoffload::v1::GetBucketAttributesResponse response;
+
+  request.set_user_id(u->get_display_name());
+  request.set_bucket_name(b.name);
+  request.set_bucket_id(b.bucket_id);
+
+  auto status = client->stub()->GetBucketAttributes(&context, request, &response);
+  if (!status.ok()) {
+    ldpp_dout(dpp, 0)
+        << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 3) gRPC GetBucketAttributes failed: {}"), status.error_message())
+        << dendl;
+    return -1;
+  }
 
   Bucket* fb = new MDOffloadBucket(std::move(nb), u, this);
+  fb->set_attrs(akamai::grpcutil::attrs_from_proto(response.attributes()));
   bucket->reset(fb);
   return 0;
 }
 
+// get_bucket() type 2,
 int MDOffloadFilterDriver::get_bucket(User* u, const RGWBucketInfo& i, std::unique_ptr<Bucket>* bucket)
 {
   std::unique_ptr<Bucket> nb;
@@ -168,6 +202,7 @@ int MDOffloadFilterDriver::get_bucket(User* u, const RGWBucketInfo& i, std::uniq
   return 0;
 }
 
+// get_bucket() type 3. Called by create_bucket().
 int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, const std::string& tenant, const std::string& name, std::unique_ptr<Bucket>* bucket, optional_yield y)
 {
   std::unique_ptr<Bucket> nb;
@@ -175,7 +210,26 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
   User* nu = nextUser(u);
 
   // Bucket exists. Need to preload the bucket attributes.
-  // XXX
+
+  // Fetch attributes for this bucket.
+  auto client = channel()->create_client<gutil::MDOffloadGrpcClient>();
+
+  ::grpc::ClientContext context;
+  mdoffload::v1::GetBucketAttributesRequest request;
+  mdoffload::v1::GetBucketAttributesResponse response;
+
+  request.set_user_id(u->get_display_name());
+  request.set_bucket_name(name);
+
+  auto status = client->stub()->GetBucketAttributes(&context, request, &response);
+  if (!status.ok()) {
+    ldpp_dout(dpp, 0)
+        << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 3) gRPC GetBucketAttributes failed: {}"), status.error_message())
+        << dendl;
+    return -1;
+  }
+
+  // We'll load the attributes into the MDOffloadBucket when we create it below.
 
   ldpp_dout(dpp, 20)
       << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 3) tenant={} name={} nu={}"), tenant, name,
@@ -186,8 +240,12 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
   if (ret != 0)
     return ret;
 
-  Bucket* fb = new MDOffloadBucket(std::move(nb), u, this);
+  // Convert the attributes from the proto to rgw::sal::Attrs, then create an
+  // MDOffloadBucket using the next->bucket and the attributes.
+  auto Attrs = akamai::grpcutil::attrs_from_proto(response.attributes());
+  Bucket* fb = new MDOffloadBucket(std::move(nb), u, this, std::move(Attrs));
   bucket->reset(fb);
+
   return 0;
 }
 
@@ -217,13 +275,29 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
 
   // XXX placeholder.
 
-  // // Fetch attributes for this bucket.
-  // auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
+  // Set the attributes for this bucket in the remote store.
+  auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
 
-  // ::grpc::ClientContext context;
-  // mdoffload::v1::GetBucketAttributesRequest request;
-  // mdoffload::v1::GetBucketAttributesResponse response;
-  // auto status = client->stub()->GetBucketAttributes(&context, request, &response);
+  ::grpc::ClientContext context;
+  mdoffload::v1::SetBucketAttributesRequest request;
+  mdoffload::v1::SetBucketAttributesResponse response;
+
+  request.set_user_id(get_display_name());
+  request.set_bucket_name(b.name);
+  request.set_bucket_id(b.bucket_id);
+  for (const auto& it : attrs) {
+    ldpp_dout(dpp, 20)
+        << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: setting attr '{}' ({} bytes)'"), it.first, it.second.length())
+        << dendl;
+    (*request.mutable_attributes_to_add())[it.first] = it.second.to_str();
+  }
+  auto status = client->stub()->SetBucketAttributes(&context, request, &response);
+  if (!status.ok()) {
+    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: gRPC SetBucketAttributes failed: {}"),
+        status.error_message())
+                      << dendl;
+    return -EINVAL;
+  }
 
   ldpp_dout(dpp, 20)
       << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: name={} attrs={}"),
@@ -232,6 +306,7 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
 
   // Pass an empty set of attributes to the next driver.
   rgw::sal::Attrs empty_attrs;
+
   ret = next->create_bucket(dpp, b, zonegroup_id, placement_rule,
       swift_ver_location, pquota_info, policy, empty_attrs,
       info, ep_objv, exclusive, obj_lock_enabled, existed,
@@ -240,6 +315,7 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
     return ret;
 
   Bucket* fb = new MDOffloadBucket(std::move(nb), this, driver_);
+  // Load the real attributes.
   fb->set_attrs(attrs);
   bucket_out->reset(fb);
 
@@ -252,15 +328,6 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
 
 Attrs& MDOffloadBucket::get_attrs()
 {
-  // XXX placeholder.
-
-  // auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
-
-  // ::grpc::ClientContext context;
-  // mdoffload::v1::GetBucketAttributesRequest request;
-  // mdoffload::v1::GetBucketAttributesResponse response;
-  // auto status = client->stub()->GetBucketAttributes(&context, request, &response);
-
   ldout(g_ceph_context, 20)
       << fmt::format(FMT_STRING("MDOffloadBucket::get_attrs: cached_attrs_={}"),
              cached_attrs_)
@@ -282,7 +349,6 @@ Attrs& MDOffloadBucket::get_attrs()
  */
 int MDOffloadBucket::set_attrs(Attrs a)
 {
-  // XXX placeholder.
   cached_attrs_ = a;
   ldout(g_ceph_context, 20)
       << fmt::format(FMT_STRING("MDOffloadBucket::set_attrs: attrs={}"),
@@ -293,7 +359,25 @@ int MDOffloadBucket::set_attrs(Attrs a)
 
 int MDOffloadBucket::merge_and_store_attrs(const DoutPrefixProvider* dpp, Attrs& new_attrs, optional_yield y)
 {
-  // XXX placeholder.
+  // Fetch attributes for this bucket.
+  auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
+  ::grpc::ClientContext context;
+  mdoffload::v1::SetBucketAttributesRequest request;
+  mdoffload::v1::SetBucketAttributesResponse response;
+
+  request.set_bucket_name(get_name());
+  for (const auto& it : new_attrs) {
+    (*request.mutable_attributes_to_add())[it.first] = it.second.to_str();
+  }
+
+  auto status = client->stub()->SetBucketAttributes(&context, request, &response);
+  if (!status.ok()) {
+    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("MDOffloadBucket::merge_and_store_attrs: gRPC SetBucketAttributes failed: {}"),
+        status.error_message())
+                       << dendl;
+    return -EINVAL;
+  }
+
   for (auto& it : new_attrs) {
     cached_attrs_[it.first] = it.second;
   }
@@ -383,8 +467,8 @@ int MDOffloadObject::modify_obj_attrs(const char* attr_name, bufferlist& attr_va
   // XXX placeholder.
   Attrs new_attrs = cached_attrs_;
   ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::modify_obj_attrs: attr_name={} attr_val={}"),
-             attr_name, attr_val.to_str())
+      << fmt::format(FMT_STRING("MDOffloadObject::modify_obj_attrs: attr_name={} attr_val[{} bytes]"),
+             attr_name, attr_val.length())
       << dendl;
   new_attrs[attr_name] = attr_val;
   cached_attrs_ = new_attrs;

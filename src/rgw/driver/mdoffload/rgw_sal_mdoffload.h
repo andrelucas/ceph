@@ -12,13 +12,11 @@
 #pragma once
 
 #include <memory>
-#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include <mutex>
-
-#include <fmt/format.h>
 
 #include <grpc/grpc.h>
 #include <grpcpp/channel.h>
@@ -31,6 +29,17 @@
 
 // fmtlib formatters for Ceph types. Some of these have to_str() and their own
 // operator<<, but this way keeps things consistent.
+
+template <>
+struct fmt::formatter<rgw_obj_key> {
+  constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+
+  template <typename FormatContext>
+  auto format(const rgw_obj_key& k, FormatContext& ctx)
+  {
+    return format_to(ctx.out(), FMT_STRING("rgw_obj_key{{key='{}',instance='{}'}}"), k.name, k.instance);
+  }
+};
 
 template <>
 struct fmt::formatter<rgw_user> {
@@ -120,7 +129,7 @@ struct fmt::formatter<rgw::sal::Attrs> {
       // XXX TO BE CONTINUED: We should read the key name and decode the
       // values accordingly, for the keys we care about. For now, just use
       // to_str() and accept the carnage.
-      out = fmt::format_to(out, FMT_STRING("'{}':{}"), key, value.to_str());
+      out = fmt::format_to(out, FMT_STRING("'{}':[{} bytes]"), key, value.length());
     }
 
     out = fmt::format_to(out, "}}");
@@ -154,6 +163,8 @@ std::string fmt_maybe(T* t)
 }
 
 namespace akamai::grpcutil {
+
+static rgw::sal::Attrs attrs_from_proto(const ::google::protobuf::Map<std::string, std::string>& proto_attrs);
 
 class MDOffloadGrpcClient {
 private:
@@ -355,9 +366,10 @@ private:
   rgw::sal::Attrs cached_attrs_;
 
 public:
-  MDOffloadBucket(std::unique_ptr<Bucket> next, User* user, MDOffloadFilterDriver* driver)
+  MDOffloadBucket(std::unique_ptr<Bucket> next, User* user, MDOffloadFilterDriver* driver, Attrs attrs = {})
       : FilterBucket(std::move(next), user)
       , driver_(driver)
+      , cached_attrs_(std::move(attrs))
   {
   }
   virtual ~MDOffloadBucket() = default;
