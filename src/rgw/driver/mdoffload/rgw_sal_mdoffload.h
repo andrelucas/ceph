@@ -389,6 +389,11 @@ private:
   bool has_attrs_ = false;
 
 public:
+  MDOffloadObject(std::unique_ptr<Object> next, MDOffloadFilterDriver* driver)
+      : FilterObject(std::move(next))
+      , driver_(driver)
+  {
+  }
   MDOffloadObject(std::unique_ptr<Object> next, Bucket* bucket, MDOffloadFilterDriver* driver)
       : FilterObject(std::move(next), bucket)
       , driver_(driver)
