@@ -243,25 +243,7 @@ TEST_F(RGWMDOffloadFilterDriverMockFixture, WithMockGetBucket)
 {
   ASSERT_NE(filter, nullptr);
 
-  rgw_user u;
-  u.id = "test_user";
-
-  std::unique_ptr<rgw::sal::User> user;
-
-  rgw_bucket b;
-  b.name = "test_bucket";
-  optional_yield y = null_yield;
-
-  std::unique_ptr<rgw::sal::Bucket> bucket;
-
-  EXPECT_CALL(mock_base, get_user(u)) //
-      .Times(1);
-  EXPECT_CALL(mock_base, get_bucket(this, testing::_, b, testing::_, y)) //
-      .Times(1);
-
-  user = filter->get_user(u);
-  ASSERT_NE(user, nullptr);
-  filter->get_bucket(this, user.get(), b, &bucket, y);
+  auto bucket = get_bucket();
   ASSERT_NE(bucket, nullptr);
 }
 
