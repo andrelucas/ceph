@@ -4,6 +4,7 @@ project(mdoffload-tests)
 set (CMAKE_LINK_LIBRARIES ${CMAKE_LINK_LIBRARIES} GMock::GMock)
 
 set(test_rgw_mdoffload_srcs
+    fake_sal.cc
     test_rgw_mdoffload.cc
     test_rgw_mdoffload_util.h
 )
