@@ -18,7 +18,7 @@
 #define dout_subsys ceph_subsys_rgw
 
 namespace akamai::grpcutil {
-static rgw::sal::Attrs attrs_from_proto(const ::google::protobuf::Map<std::string, std::string>& proto_attrs)
+rgw::sal::Attrs attrs_from_proto(const ::google::protobuf::Map<std::string, std::string>& proto_attrs)
 {
   rgw::sal::Attrs attrs;
   for (const auto& kv : proto_attrs) {
@@ -128,10 +128,19 @@ int MDOffloadFilterDriver::get_user_by_swift(const DoutPrefixProvider* dpp, cons
 
 std::unique_ptr<Object> MDOffloadFilterDriver::get_object(const rgw_obj_key& k)
 {
+  // Called from RGWHandler_REST_S3::init_from_header() to create an object with no
+  // bucket reference.
   ldout(g_ceph_context, 20)
       << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_object: rgw_obj_key k={}"), k)
       << dendl;
   std::unique_ptr<Object> o = next->get_object(k);
+  if (!o) {
+    // This really shouldn't happen, but log it if it does.
+    ldout(g_ceph_context, 0)
+        << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_object: next->get_object() failed for key {}"), k)
+        << dendl;
+    return nullptr;
+  }
   return std::make_unique<MDOffloadObject>(std::move(o), this);
 }
 
@@ -152,6 +161,10 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
     return ret;
 
   // Bucket exists. Need to preload the bucket attributes.
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 3) fetched bucket name={} id={}"),
+             nb->get_name(), nb->get_bucket_id())
+      << dendl;
 
   // Fetch attributes for this bucket.
   auto client = channel()->create_client<gutil::MDOffloadGrpcClient>();
@@ -161,8 +174,8 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
   mdoffload::v1::GetBucketAttributesResponse response;
 
   request.set_user_id(u->get_display_name());
-  request.set_bucket_name(b.name);
-  request.set_bucket_id(b.bucket_id);
+  request.set_bucket_name(nb->get_name());
+  request.set_bucket_id(nb->get_bucket_id());
 
   auto status = client->stub()->GetBucketAttributes(&context, request, &response);
   if (!status.ok()) {
@@ -206,10 +219,23 @@ int MDOffloadFilterDriver::get_bucket(User* u, const RGWBucketInfo& i, std::uniq
 int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, const std::string& tenant, const std::string& name, std::unique_ptr<Bucket>* bucket, optional_yield y)
 {
   std::unique_ptr<Bucket> nb;
-  int ret;
   User* nu = nextUser(u);
+  int ret;
+
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 3) tenant={} name={} nu={}"), tenant, name,
+             fmt_maybe(nu))
+      << dendl;
+
+  ret = next->get_bucket(dpp, nu, tenant, name, &nb, y);
+  if (ret != 0)
+    return ret;
 
   // Bucket exists. Need to preload the bucket attributes.
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 3) fetched bucket name={} id={}"),
+             nb->get_name(), nb->get_bucket_id())
+      << dendl;
 
   // Fetch attributes for this bucket.
   auto client = channel()->create_client<gutil::MDOffloadGrpcClient>();
@@ -220,6 +246,7 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
 
   request.set_user_id(u->get_display_name());
   request.set_bucket_name(name);
+  request.set_bucket_id(nb->get_bucket_id());
 
   auto status = client->stub()->GetBucketAttributes(&context, request, &response);
   if (!status.ok()) {
@@ -228,17 +255,7 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
         << dendl;
     return -1;
   }
-
   // We'll load the attributes into the MDOffloadBucket when we create it below.
-
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 3) tenant={} name={} nu={}"), tenant, name,
-             fmt_maybe(nu))
-      << dendl;
-
-  ret = next->get_bucket(dpp, nu, tenant, name, &nb, y);
-  if (ret != 0)
-    return ret;
 
   // Convert the attributes from the proto to rgw::sal::Attrs, then create an
   // MDOffloadBucket using the next->bucket and the attributes.
@@ -273,7 +290,27 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
   std::unique_ptr<Bucket> nb;
   int ret;
 
-  // XXX placeholder.
+  // Pass an empty set of attributes to the next driver.
+  rgw::sal::Attrs empty_attrs;
+
+  ret = next->create_bucket(dpp, b, zonegroup_id, placement_rule,
+      swift_ver_location, pquota_info, policy, empty_attrs,
+      info, ep_objv, exclusive, obj_lock_enabled, existed,
+      req_info, &nb, y);
+  if (ret < 0)
+    return ret;
+
+  if (!nb) {
+    ldpp_dout(dpp, 0)
+        << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: next->create_bucket() returned null bucket for name={}"), b.name)
+        << dendl;
+    return -EINVAL;
+  }
+
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: parent driver created bucket name={} id={}"),
+             nb->get_name(), nb->get_bucket_id())
+      << dendl;
 
   // Set the attributes for this bucket in the remote store.
   auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
@@ -283,8 +320,11 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
   mdoffload::v1::SetBucketAttributesResponse response;
 
   request.set_user_id(get_display_name());
-  request.set_bucket_name(b.name);
-  request.set_bucket_id(b.bucket_id);
+
+  // Get the bucket name and ID from the newly created bucket.
+  request.set_bucket_name(nb->get_name());
+  request.set_bucket_id(nb->get_bucket_id());
+
   for (const auto& it : attrs) {
     ldpp_dout(dpp, 20)
         << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: setting attr '{}' ({} bytes)'"), it.first, it.second.length())
@@ -303,16 +343,6 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
       << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: name={} attrs={}"),
              b.name, attrs)
       << dendl;
-
-  // Pass an empty set of attributes to the next driver.
-  rgw::sal::Attrs empty_attrs;
-
-  ret = next->create_bucket(dpp, b, zonegroup_id, placement_rule,
-      swift_ver_location, pquota_info, policy, empty_attrs,
-      info, ep_objv, exclusive, obj_lock_enabled, existed,
-      req_info, &nb, y);
-  if (ret < 0)
-    return ret;
 
   Bucket* fb = new MDOffloadBucket(std::move(nb), this, driver_);
   // Load the real attributes.
@@ -366,6 +396,7 @@ int MDOffloadBucket::merge_and_store_attrs(const DoutPrefixProvider* dpp, Attrs&
   mdoffload::v1::SetBucketAttributesResponse response;
 
   request.set_bucket_name(get_name());
+  request.set_bucket_id(get_bucket_id());
   for (const auto& it : new_attrs) {
     (*request.mutable_attributes_to_add())[it.first] = it.second.to_str();
   }
@@ -382,8 +413,8 @@ int MDOffloadBucket::merge_and_store_attrs(const DoutPrefixProvider* dpp, Attrs&
     cached_attrs_[it.first] = it.second;
   }
   ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadBucket::merge_and_store_attrs: new_attrs={} cached_attrs_={}"),
-             new_attrs, cached_attrs_)
+      << fmt::format(FMT_STRING("MDOffloadBucket::merge_and_store_attrs: bucket='{}' id='{}' new_attrs='{}' cached_attrs_='{}'"),
+             get_name(), get_bucket_id(), new_attrs, cached_attrs_)
       << dendl;
   return 0;
 }

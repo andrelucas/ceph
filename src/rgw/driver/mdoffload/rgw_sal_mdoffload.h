@@ -164,7 +164,7 @@ std::string fmt_maybe(T* t)
 
 namespace akamai::grpcutil {
 
-static rgw::sal::Attrs attrs_from_proto(const ::google::protobuf::Map<std::string, std::string>& proto_attrs);
+rgw::sal::Attrs attrs_from_proto(const ::google::protobuf::Map<std::string, std::string>& proto_attrs);
 
 class MDOffloadGrpcClient {
 private:
