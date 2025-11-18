@@ -25,9 +25,11 @@
 #include <vector>
 
 #include "common/async/yield_context.h"
+#include "common/tracer.h"
+#include "rgw/rgw_oidc_provider.h"
+#include "rgw/rgw_role.h"
 #include "rgw/rgw_sal.h"
 #include "rgw_pubsub.h"
-#include "common/tracer.h"
 
 namespace akamai::fake {
 
@@ -37,6 +39,9 @@ using rgw::bucket_index_layout_generation;
 class FakeBucket;
 class FakeObject;
 class FakeMultipartUpload;
+class FakeRole;
+class FakeOIDCProvider;
+class FakeWriter;
 
 // Minimal concrete classes that satisfy rgw::sal interfaces for filter unit tests.
 
@@ -227,6 +232,53 @@ private:
   rgw_bucket bucket_key_{};
   rgw_placement_rule placement_{};
   rgw::sal::Attrs attrs_{};
+};
+
+class FakeWriter : public Writer {
+public:
+  FakeWriter() = default;
+  ~FakeWriter() override = default;
+
+  int prepare(optional_yield y) override;
+  int process(bufferlist&& data, uint64_t offset) override;
+  int complete(size_t accounted_size, const std::string& etag, ceph::real_time* mtime,
+      ceph::real_time set_mtime, std::map<std::string, bufferlist>& attrs,
+      ceph::real_time delete_at, const char* if_match, const char* if_nomatch,
+      const std::string* user_data, rgw_zone_set* zones_trace, bool* canceled,
+      optional_yield y, uint32_t flags) override;
+};
+
+class FakeRole : public RGWRole {
+public:
+  using RGWRole::RGWRole;
+  FakeRole() = default;
+  ~FakeRole() override = default;
+
+  int store_info(const DoutPrefixProvider* dpp, bool exclusive, optional_yield y) override;
+  int store_name(const DoutPrefixProvider* dpp, bool exclusive, optional_yield y) override;
+  int store_path(const DoutPrefixProvider* dpp, bool exclusive, optional_yield y) override;
+  int read_id(const DoutPrefixProvider* dpp, const std::string& role_name,
+      const std::string& tenant, std::string& role_id, optional_yield y) override;
+  int read_name(const DoutPrefixProvider* dpp, optional_yield y) override;
+  int read_info(const DoutPrefixProvider* dpp, optional_yield y) override;
+  int create(const DoutPrefixProvider* dpp, bool exclusive, const std::string& role_id,
+      optional_yield y) override;
+  int delete_obj(const DoutPrefixProvider* dpp, optional_yield y) override;
+};
+
+class FakeOIDCProvider : public RGWOIDCProvider {
+public:
+  using RGWOIDCProvider::RGWOIDCProvider;
+  FakeOIDCProvider() = default;
+  ~FakeOIDCProvider() override = default;
+
+  int delete_obj(const DoutPrefixProvider* dpp, optional_yield y) override;
+
+protected:
+  int store_url(const DoutPrefixProvider* dpp, const std::string& url, bool exclusive,
+      optional_yield y) override;
+  int read_url(const DoutPrefixProvider* dpp, const std::string& url,
+      const std::string& tenant) override;
 };
 
 class FakeBucket : public Bucket {

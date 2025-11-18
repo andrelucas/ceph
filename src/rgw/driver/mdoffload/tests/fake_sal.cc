@@ -16,9 +16,11 @@
 
 #include <boost/uuid/name_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <memory>
 
 #include "common/dout.h"
 #include "rgw_common.h"
+#include "rgw_role.h"
 
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rgw
@@ -358,6 +360,71 @@ std::unique_ptr<Writer> FakeMultipartUpload::get_writer(const DoutPrefixProvider
 
 void FakeMultipartUpload::print(std::ostream& out) const {
   out << "FakeMultipartUpload{" << key_ << "/" << upload_id_ << "}";
+}
+
+int FakeWriter::prepare(optional_yield) { return 0; }
+
+int FakeWriter::process(bufferlist&&, uint64_t) { return 0; }
+
+int FakeWriter::complete(size_t, const std::string&, ceph::real_time* mtime,
+    ceph::real_time set_mtime, std::map<std::string, bufferlist>& attrs,
+    ceph::real_time, const char*, const char*, const std::string*,
+    rgw_zone_set*, bool* canceled, optional_yield, uint32_t)
+{
+  if (mtime) {
+    *mtime = set_mtime;
+  }
+  attrs.clear();
+  if (canceled) {
+    *canceled = false;
+  }
+  return 0;
+}
+
+int FakeRole::store_info(const DoutPrefixProvider*, bool, optional_yield) { return 0; }
+
+int FakeRole::store_name(const DoutPrefixProvider*, bool, optional_yield) { return 0; }
+
+int FakeRole::store_path(const DoutPrefixProvider*, bool, optional_yield) { return 0; }
+
+int FakeRole::read_id(const DoutPrefixProvider*, const std::string& role_name,
+    const std::string& tenant, std::string& role_id, optional_yield)
+{
+  if (info.id.empty()) {
+    info.id = tenant + ":" + role_name;
+  }
+  role_id = info.id;
+  return 0;
+}
+
+int FakeRole::read_name(const DoutPrefixProvider*, optional_yield) { return 0; }
+
+int FakeRole::read_info(const DoutPrefixProvider*, optional_yield) { return 0; }
+
+int FakeRole::create(const DoutPrefixProvider*, bool, const std::string& role_id,
+    optional_yield)
+{
+  info.id = role_id;
+  return 0;
+}
+
+int FakeRole::delete_obj(const DoutPrefixProvider*, optional_yield) { return 0; }
+
+int FakeOIDCProvider::delete_obj(const DoutPrefixProvider*, optional_yield) { return 0; }
+
+int FakeOIDCProvider::store_url(const DoutPrefixProvider*, const std::string& url, bool,
+    optional_yield)
+{
+  provider_url = url;
+  return 0;
+}
+
+int FakeOIDCProvider::read_url(const DoutPrefixProvider*, const std::string& url,
+    const std::string& tenant_name)
+{
+  provider_url = url;
+  tenant = tenant_name;
+  return 0;
 }
 
 FakeBucket::FakeBucket() = default;
@@ -1009,15 +1076,26 @@ std::string FakeDriver::get_host_id() { return host_id_; }
 
 std::unique_ptr<LuaManager> FakeDriver::get_lua_manager() { return nullptr; }
 
-std::unique_ptr<RGWRole> FakeDriver::get_role(std::string, std::string, std::string,
-                                              std::string, std::string,
-                                              std::multimap<std::string, std::string>) {
-  return nullptr;
+std::unique_ptr<RGWRole> FakeDriver::get_role(std::string name, std::string tenant,
+    std::string path, std::string trust_policy,
+    std::string max_session_duration_str,
+    std::multimap<std::string, std::string> tags)
+{
+  return std::make_unique<FakeRole>(std::move(name), std::move(tenant), std::move(path),
+      std::move(trust_policy),
+      std::move(max_session_duration_str),
+      std::move(tags));
 }
 
-std::unique_ptr<RGWRole> FakeDriver::get_role(std::string) { return nullptr; }
+std::unique_ptr<RGWRole> FakeDriver::get_role(std::string id)
+{
+  return std::make_unique<FakeRole>(std::move(id));
+}
 
-std::unique_ptr<RGWRole> FakeDriver::get_role(const RGWRoleInfo&) { return nullptr; }
+std::unique_ptr<RGWRole> FakeDriver::get_role(const RGWRoleInfo& info)
+{
+  return std::make_unique<FakeRole>(info);
+}
 
 int FakeDriver::get_roles(const DoutPrefixProvider*, optional_yield,
                           const std::string&, const std::string&,
@@ -1025,10 +1103,16 @@ int FakeDriver::get_roles(const DoutPrefixProvider*, optional_yield,
   return 0;
 }
 
-std::unique_ptr<RGWOIDCProvider> FakeDriver::get_oidc_provider() { return nullptr; }
+std::unique_ptr<RGWOIDCProvider> FakeDriver::get_oidc_provider()
+{
+  return std::make_unique<FakeOIDCProvider>();
+}
 
 int FakeDriver::get_oidc_providers(const DoutPrefixProvider*, const std::string&,
-                                   std::vector<std::unique_ptr<RGWOIDCProvider>>&) {
+    std::vector<std::unique_ptr<RGWOIDCProvider>>& providers)
+{
+  providers.clear();
+  providers.emplace_back(std::make_unique<FakeOIDCProvider>());
   return 0;
 }
 
@@ -1039,7 +1123,7 @@ std::unique_ptr<Writer> FakeDriver::get_append_writer(const DoutPrefixProvider*,
                                                       const rgw_placement_rule*,
                                                       const std::string&, uint64_t,
                                                       uint64_t*) {
-  return nullptr;
+  return std::make_unique<FakeWriter>();
 }
 
 std::unique_ptr<Writer> FakeDriver::get_atomic_writer(const DoutPrefixProvider*,
@@ -1049,7 +1133,7 @@ std::unique_ptr<Writer> FakeDriver::get_atomic_writer(const DoutPrefixProvider*,
                                                       const rgw_placement_rule*,
                                                       uint64_t,
                                                       const std::string&) {
-  return nullptr;
+  return std::make_unique<FakeWriter>();
 }
 
 const std::string& FakeDriver::get_compression_type(const rgw_placement_rule&) {
