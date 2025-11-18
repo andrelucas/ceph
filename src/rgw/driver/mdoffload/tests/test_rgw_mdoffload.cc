@@ -645,6 +645,7 @@ protected:
     ret = driver->initialize(g_ceph_context, this);
     ASSERT_GE(ret, 0);
     filter_.reset(driver);
+    ASSERT_NE(filter_, nullptr);
   }
 
   void TearDown()
@@ -661,10 +662,167 @@ protected:
   }
 }; // class RGWMDOffloadFakeDriverFixture
 
-TEST_F(RGWMDOffloadFakeDriverFixture, Placeholder)
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_CreateValidNextSucceeds)
 {
-  // Placeholder test to keep the fixture happy.
-  ASSERT_TRUE(true);
+  auto name = filter_->get_name();
+  // The filter's get_name() will call the fake's get_name(), which will
+  // return "fake-sal".
+  ASSERT_EQ(name, "mdoffload<fake-sal>");
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_GetUserSucceeds)
+{
+  rgw_user u;
+  u.id = "test_user";
+  u.tenant = "test_tenant";
+  u.ns = "test_ns";
+
+  // This depends on FakeDriver::get_user() copying the rgw_user fields into
+  // the FakeUser, and in particular using the id as the display_name since
+  // there's no backend from which to fetch a proper display_name.
+  auto user = filter_->get_user(u);
+  ASSERT_NE(user, nullptr);
+  EXPECT_EQ(user->get_display_name(), u.id);
+  EXPECT_EQ(user->get_tenant(), u.tenant);
+  EXPECT_EQ(user->get_ns(), u.ns);
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_GetBucketVariant1Succeeds)
+{
+  rgw_user u;
+  u.id = "test_user";
+  rgw_bucket b;
+  b.name = "test_bucket";
+  b.bucket_id = akamai::fake::stable_uuid_for_bucket_name(b.name);
+  optional_yield y = null_yield;
+  std::unique_ptr<rgw::sal::Bucket> bucket;
+
+  auto user = filter_->get_user(u);
+  ASSERT_NE(user, nullptr);
+
+  auto ret = filter_->get_bucket(this, user.get(), b, &bucket, y);
+  ASSERT_GE(ret, 0);
+  ASSERT_NE(bucket, nullptr);
+  EXPECT_EQ(bucket->get_name(), b.name);
+  EXPECT_EQ(bucket->get_bucket_id(), b.bucket_id);
+
+  // Check the type of the returned bucket.
+  auto mdo_bucket = dynamic_cast<rgw::sal::MDOffloadBucket*>(bucket.get());
+  ASSERT_NE(mdo_bucket, nullptr);
+  // Check the type of the underlying bucket.
+  auto fake_bucket = dynamic_cast<akamai::fake::FakeBucket*>(mdo_bucket->get_next());
+  ASSERT_NE(fake_bucket, nullptr);
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_GetBucketVariant3Succeeds)
+{
+  rgw_user u;
+  u.id = "test_user";
+  std::string bucket_name = "test_bucket";
+  optional_yield y = null_yield;
+  std::unique_ptr<rgw::sal::Bucket> bucket;
+
+  auto user = filter_->get_user(u);
+  ASSERT_NE(user, nullptr);
+
+  // Variant 3 is called by create_bucket().
+  auto ret = filter_->get_bucket(this, user.get(), "", bucket_name, &bucket, y);
+  ASSERT_GE(ret, 0);
+  ASSERT_NE(bucket, nullptr);
+  EXPECT_EQ(bucket->get_name(), bucket_name);
+  // No bucket_id is provided in this variant.
+  EXPECT_EQ(bucket->get_bucket_id(), "");
+
+  // Check the type of the returned bucket.
+  auto mdo_bucket = dynamic_cast<rgw::sal::MDOffloadBucket*>(bucket.get());
+  ASSERT_NE(mdo_bucket, nullptr);
+  // Check the type of the underlying bucket.
+  auto fake_bucket = dynamic_cast<akamai::fake::FakeBucket*>(mdo_bucket->get_next());
+  ASSERT_NE(fake_bucket, nullptr);
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_GetObjectSucceeds)
+{
+  rgw_user u;
+  u.id = "test_user";
+  rgw_bucket b;
+  b.name = "test_bucket";
+  b.bucket_id = akamai::fake::stable_uuid_for_bucket_name(b.name);
+  optional_yield y = null_yield;
+  std::unique_ptr<rgw::sal::Bucket> bucket;
+
+  auto user = filter_->get_user(u);
+  ASSERT_NE(user, nullptr);
+
+  auto ret = filter_->get_bucket(this, user.get(), b, &bucket, y);
+  ASSERT_GE(ret, 0);
+  ASSERT_NE(bucket, nullptr);
+
+  rgw_obj_key obj_key("test_object_key");
+  std::unique_ptr<rgw::sal::Object> object;
+  object = bucket->get_object(obj_key);
+  ASSERT_NE(object, nullptr);
+  EXPECT_EQ(object->get_key(), obj_key);
+
+  // Check the type of the returned object.
+  auto mdo_object = dynamic_cast<rgw::sal::MDOffloadObject*>(object.get());
+  ASSERT_NE(mdo_object, nullptr);
+  // Check the type of the underlying object.
+  auto fake_object = dynamic_cast<akamai::fake::FakeObject*>(mdo_object->get_next());
+  ASSERT_NE(fake_object, nullptr);
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_CreateBucketSucceeds)
+{
+  rgw_user u;
+  u.id = "test_user";
+  rgw_bucket b;
+  b.name = "test_bucket";
+  b.bucket_id = akamai::fake::stable_uuid_for_bucket_name(b.name);
+  rgw_placement_rule placement {};
+  std::string swift_ver_location {};
+  rgw::sal::Attrs attrs;
+  bufferlist bl;
+  bl.append("test_value");
+  attrs["test_attr"] = bl;
+  RGWBucketInfo binfo;
+  obj_version objv;
+  RGWEnv env;
+  req_info req(g_ceph_context, &env);
+  // This receives the created bucket.
+  std::unique_ptr<rgw::sal::Bucket> bucket;
+
+  auto user = filter_->get_user(u);
+  ASSERT_NE(user, nullptr);
+
+  // When setting up the gRPC client request, we need the user ID.
+  auto ret = user->create_bucket(this,
+      b,
+      "",
+      placement,
+      swift_ver_location,
+      nullptr,
+      RGWAccessControlPolicy {},
+      attrs,
+      binfo,
+      objv,
+      false,
+      false,
+      nullptr,
+      req,
+      &bucket,
+      null_yield);
+  ASSERT_GE(ret, 0);
+  ASSERT_NE(bucket, nullptr);
+  EXPECT_EQ(bucket->get_name(), b.name);
+  EXPECT_EQ(bucket->get_bucket_id(), b.bucket_id);
+
+  // Check the type of the returned bucket.
+  auto mdo_bucket = dynamic_cast<rgw::sal::MDOffloadBucket*>(bucket.get());
+  ASSERT_NE(mdo_bucket, nullptr);
+  // Check the type of the underlying bucket.
+  auto fake_bucket = dynamic_cast<akamai::fake::FakeBucket*>(mdo_bucket->get_next());
+  ASSERT_NE(fake_bucket, nullptr);
 }
 
 /* #endregion Fake */

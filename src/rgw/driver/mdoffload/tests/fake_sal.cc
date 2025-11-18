@@ -14,6 +14,15 @@
 
 #include "fake_sal.h"
 
+#include <boost/uuid/name_generator.hpp>
+#include <boost/uuid/uuid_io.hpp>
+
+#include "common/dout.h"
+#include "rgw_common.h"
+
+#define dout_context g_ceph_context
+#define dout_subsys ceph_subsys_rgw
+
 namespace akamai::fake {
 
 FakeMultipartPart::FakeMultipartPart(uint32_t num, uint64_t size, std::string etag)
@@ -593,7 +602,13 @@ bool FakeBucket::operator!=(const Bucket& b) const { return !(*this == b); }
 FakeUser::FakeUser() = default;
 
 FakeUser::FakeUser(const rgw_user& id) : id_(id) {
+  // Fill in some useful fields without doing too much work.
   info_.user_id = id;
+  info_.display_name = id.id;
+  id_ = id;
+  tenant_ = id.tenant;
+  display_name_ = id.id;
+  ns_ = id.ns;
 }
 
 std::unique_ptr<User> FakeUser::clone() {
@@ -607,16 +622,25 @@ int FakeUser::list_buckets(const DoutPrefixProvider*, const std::string&,
   return 0;
 }
 
-int FakeUser::create_bucket(const DoutPrefixProvider*, const rgw_bucket& b,
-                            const std::string&, rgw_placement_rule&,
-                            std::string&, const RGWQuotaInfo*,
-                            const RGWAccessControlPolicy&, Attrs& attrs,
-                            RGWBucketInfo& info, obj_version&, bool, bool,
-                            bool* existed, req_info&, std::unique_ptr<Bucket>* bucket,
-                            optional_yield) {
+int FakeUser::create_bucket(const DoutPrefixProvider* dpp, const rgw_bucket& b,
+    const std::string&, rgw_placement_rule&,
+    std::string&, const RGWQuotaInfo*,
+    const RGWAccessControlPolicy&, Attrs& attrs,
+    RGWBucketInfo& info, obj_version&, bool, bool,
+    bool* existed, req_info&, std::unique_ptr<Bucket>* bucket,
+    optional_yield)
+{
+  // b is const, but we might change it - we're not a real implementation.
+  rgw_bucket nb = b;
   info.bucket = b;
+
+  if (nb.bucket_id.empty()) {
+    nb.bucket_id = akamai::fake::stable_uuid_for_bucket_name(nb.name);
+    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("synthesising stable bucket_id {} for bucket {}"), nb.bucket_id, nb.name) << dendl;
+  }
+
   if (bucket) {
-    auto fb = std::make_unique<FakeBucket>(b);
+    auto fb = std::make_unique<FakeBucket>(nb);
     fb->set_owner(this);
     *bucket = std::move(fb);
   }
@@ -764,6 +788,7 @@ std::unique_ptr<Object> FakeDriver::get_object(const rgw_obj_key& k) {
   return std::make_unique<FakeObject>(bucket, k);
 }
 
+// mdoffload 'variant 2' of get_bucket().
 int FakeDriver::get_bucket(User* u, const RGWBucketInfo& i,
                            std::unique_ptr<Bucket>* bucket) {
   if (bucket) {
@@ -774,6 +799,7 @@ int FakeDriver::get_bucket(User* u, const RGWBucketInfo& i,
   return 0;
 }
 
+// mdoffload 'variant 1' of get_bucket().
 int FakeDriver::get_bucket(const DoutPrefixProvider*, User* u, const rgw_bucket& b,
                            std::unique_ptr<Bucket>* bucket, optional_yield) {
   if (bucket) {
@@ -784,6 +810,7 @@ int FakeDriver::get_bucket(const DoutPrefixProvider*, User* u, const rgw_bucket&
   return 0;
 }
 
+// mdoffload 'variant 3' of get_bucket(). Upcalls to variant 1.
 int FakeDriver::get_bucket(const DoutPrefixProvider* dpp, User* u,
                            const std::string& tenant, const std::string& name,
                            std::unique_ptr<Bucket>* bucket, optional_yield y) {
@@ -1036,5 +1063,17 @@ void FakeDriver::finalize() {}
 CephContext* FakeDriver::ctx() { return cct_; }
 
 void FakeDriver::register_admin_apis(RGWRESTMgr*) {}
+
+// Utility functions.
+
+std::string stable_uuid_for_bucket_name(const std::string& bucket_name)
+{
+  // Generate a v5 UUID for the bucket ID.
+  using namespace boost::uuids;
+  uuid ns = string_generator()("deadbeef-0ddc-0ffe-ebad-f00ddeadbeef");
+  name_generator_sha1 gen(ns);
+  uuid id = gen(bucket_name);
+  return to_string(id);
+}
 
 } // namespace akamai::fake

@@ -545,4 +545,16 @@ private:
   std::string meta_marker_{};
 };
 
+// Utility functions.
+
+/**
+ * @brief Return a stable UUID for a given bucket name.
+ *
+ * This function generates a stable UUID based on the provided bucket name.
+ *
+ * @param bucket_name
+ * @return std::string The generated stable UUID.
+ */
+std::string stable_uuid_for_bucket_name(const std::string& bucket_name);
+
 } // namespace akamai::fake
