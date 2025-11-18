@@ -660,6 +660,59 @@ protected:
     }
     server_.stop();
   }
+
+  // Fetch a bucket via the filter. The returned bucket is guaranteed to be a
+  // MDOffloadBucket.
+  void fixture_get_bucket(const std::string& bucket_name,
+      std::unique_ptr<rgw::sal::MDOffloadBucket>* filter_bucket_out)
+  {
+    ASSERT_NE(filter_bucket_out, nullptr) << "Must provide output parameter";
+    rgw_user u;
+    u.id = "test_user";
+    rgw_bucket b;
+    b.name = bucket_name;
+    b.bucket_id = akamai::fake::stable_uuid_for_bucket_name(b.name);
+    optional_yield y = null_yield;
+    std::unique_ptr<rgw::sal::Bucket> bucket;
+
+    auto user = filter_->get_user(u);
+    ASSERT_TRUE(user);
+
+    auto ret = filter_->get_bucket(this, user.get(), b, &bucket, y);
+    ASSERT_GE(ret, 0);
+    ASSERT_NE(bucket, nullptr);
+    EXPECT_EQ(bucket->get_name(), b.name);
+    EXPECT_EQ(bucket->get_bucket_id(), b.bucket_id);
+
+    filter_bucket_out->reset(dynamic_cast<rgw::sal::MDOffloadBucket*>(bucket.release()));
+    ASSERT_TRUE(*filter_bucket_out);
+  }
+
+  // Get object with an existing bucket. The returned object is guaranteed to be
+  // a MDOffloadObject.
+  void fixture_get_object(rgw::sal::Bucket* bucket, rgw_obj_key key, std::unique_ptr<rgw::sal::MDOffloadObject>* filter_object_out)
+  {
+    ASSERT_NE(bucket, nullptr) << "Must provide valid bucket";
+    ASSERT_NE(filter_object_out, nullptr) << "Must provide output parameter";
+
+    auto object = bucket->get_object(key);
+    ASSERT_NE(object, nullptr);
+    auto mdo_object = dynamic_cast<rgw::sal::MDOffloadObject*>(object.release());
+    ASSERT_NE(mdo_object, nullptr);
+
+    filter_object_out->reset(mdo_object);
+    ASSERT_TRUE(*filter_object_out);
+  }
+
+  // One-shot get object via bucket name and object key. The returned object is
+  // guaranteed to be a MDOffloadObject.
+  void fixture_get_object(const std::string& bucket_name, rgw_obj_key key, std::unique_ptr<rgw::sal::MDOffloadObject>* filter_object_out)
+  {
+    std::unique_ptr<rgw::sal::MDOffloadBucket> filter_bucket;
+    fixture_get_bucket(bucket_name, &filter_bucket);
+    fixture_get_object(filter_bucket.get(), key, filter_object_out);
+  }
+
 }; // class RGWMDOffloadFakeDriverFixture
 
 TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_CreateValidNextSucceeds)
@@ -823,6 +876,328 @@ TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_CreateBucketSucceeds)
   // Check the type of the underlying bucket.
   auto fake_bucket = dynamic_cast<akamai::fake::FakeBucket*>(mdo_bucket->get_next());
   ASSERT_NE(fake_bucket, nullptr);
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_fixture_get_bucket_Succeeds)
+{
+  std::unique_ptr<rgw::sal::MDOffloadBucket> mdo_bucket;
+  fixture_get_bucket("test_bucket", &mdo_bucket);
+  ASSERT_TRUE(mdo_bucket);
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_fixture_get_object_1_Succeeds)
+{
+  std::unique_ptr<rgw::sal::MDOffloadBucket> mdo_bucket;
+  fixture_get_bucket("test_bucket", &mdo_bucket);
+
+  rgw_obj_key obj_key("test_object_key");
+  std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
+  fixture_get_object(mdo_bucket.get(), obj_key, &mdo_object);
+  ASSERT_TRUE(mdo_object);
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_fixture_get_object_2_Succeeds)
+{
+  rgw_obj_key obj_key("test_object_key");
+  std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
+  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  ASSERT_TRUE(mdo_object);
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Bucket_get_attr_MustNotCallFakeDriver)
+{
+  using namespace ::testing;
+
+  // Set up a default return value for Attrs&.
+  rgw::sal::Attrs empty_attrs;
+  DefaultValue<::rgw::sal::Attrs&>::Set(empty_attrs);
+
+  std::unique_ptr<rgw::sal::MDOffloadBucket> mdo_bucket;
+  fixture_get_bucket("test_bucket", &mdo_bucket);
+  ASSERT_NE(mdo_bucket, nullptr);
+
+  auto fake_bucket = dynamic_cast<akamai::fake::FakeBucket*>(mdo_bucket->get_next());
+  ASSERT_NE(fake_bucket, nullptr);
+
+  // Calling the invalid function directly must throw.
+  ASSERT_THROW(fake_bucket->get_attrs(), akamai::fake::FakeDriverInvalidOperationException);
+  // Calling via the filter MUST NOT throw.
+  ASSERT_NO_THROW({
+    mdo_bucket->get_attrs();
+  });
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Bucket_set_attr_MustNotCallFakeDriver)
+{
+  using namespace ::testing;
+
+  // Set up a default return value for Attrs&.
+  rgw::sal::Attrs empty_attrs;
+  DefaultValue<::rgw::sal::Attrs&>::Set(empty_attrs);
+
+  std::unique_ptr<rgw::sal::MDOffloadBucket> mdo_bucket;
+  fixture_get_bucket("test_bucket", &mdo_bucket);
+  ASSERT_NE(mdo_bucket, nullptr);
+
+  auto fake_bucket = dynamic_cast<akamai::fake::FakeBucket*>(mdo_bucket->get_next());
+  ASSERT_NE(fake_bucket, nullptr);
+
+  // Calling the invalid function directly must throw.
+  ASSERT_THROW(fake_bucket->set_attrs(empty_attrs), akamai::fake::FakeDriverInvalidOperationException);
+  // Calling via the filter MUST NOT throw.
+  ASSERT_NO_THROW({
+    mdo_bucket->set_attrs(empty_attrs);
+  });
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Bucket_merge_and_store_attrs_MustNotCallFakeDriver)
+{
+  using namespace ::testing;
+
+  // Set up a default return value for Attrs&.
+  rgw::sal::Attrs empty_attrs;
+  DefaultValue<::rgw::sal::Attrs&>::Set(empty_attrs);
+
+  std::unique_ptr<rgw::sal::MDOffloadBucket> mdo_bucket;
+  fixture_get_bucket("test_bucket", &mdo_bucket);
+  ASSERT_NE(mdo_bucket, nullptr);
+
+  auto fake_bucket = dynamic_cast<akamai::fake::FakeBucket*>(mdo_bucket->get_next());
+  ASSERT_NE(fake_bucket, nullptr);
+
+  // Calling the invalid function directly must throw.
+  ASSERT_THROW(fake_bucket->merge_and_store_attrs(this, empty_attrs, null_yield), akamai::fake::FakeDriverInvalidOperationException);
+  // Calling via the filter MUST NOT throw.
+  ASSERT_NO_THROW({
+    // When setting up the gRPC client request, we need the bucket name.
+    EXPECT_EQ(mdo_bucket->get_name(), "test_bucket");
+    mdo_bucket->merge_and_store_attrs(this, empty_attrs, null_yield);
+  });
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_User_create_bucket_MustSendEmptyAttrsToFakeDriver)
+{
+  std::unique_ptr<rgw::sal::MDOffloadBucket> mdo_bucket;
+  rgw_user u;
+  u.id = "test_user";
+  rgw_bucket b;
+  b.name = "test_bucket";
+  b.bucket_id = akamai::fake::stable_uuid_for_bucket_name(b.name);
+  rgw_placement_rule placement {};
+  std::string swift_ver_location {};
+  rgw::sal::Attrs nonempty_attrs;
+  bufferlist bl;
+  bl.append("test_value");
+  nonempty_attrs["test_attr"] = bl;
+  RGWBucketInfo binfo;
+  obj_version objv;
+  RGWEnv env;
+  req_info req(g_ceph_context, &env);
+  // This receives the created bucket.
+  std::unique_ptr<rgw::sal::Bucket> bucket;
+
+  auto user = filter_->get_user(u);
+  ASSERT_NE(user, nullptr);
+
+  // When setting up the gRPC client request, we need the user ID.
+  auto ret = user->create_bucket(this,
+      b,
+      "",
+      placement,
+      swift_ver_location,
+      nullptr,
+      RGWAccessControlPolicy {},
+      nonempty_attrs,
+      binfo,
+      objv,
+      false,
+      false,
+      nullptr,
+      req,
+      &bucket,
+      null_yield);
+  ASSERT_GE(ret, 0);
+  ASSERT_NE(bucket, nullptr);
+  EXPECT_EQ(bucket->get_name(), b.name);
+  EXPECT_EQ(bucket->get_bucket_id(), b.bucket_id);
+
+  // Check the type of the returned bucket.
+  auto mdo_bucket_check = dynamic_cast<rgw::sal::MDOffloadBucket*>(bucket.get());
+  ASSERT_NE(mdo_bucket_check, nullptr);
+  // Check the type of the underlying bucket.
+  auto fake_bucket = dynamic_cast<akamai::fake::FakeBucket*>(mdo_bucket_check->get_next());
+  ASSERT_NE(fake_bucket, nullptr);
+
+  // The attrs passed to the fake driver must be empty.
+  fake_bucket->set_throw_on_invalid(false); // Disable throwing for this check.
+  EXPECT_TRUE(fake_bucket->get_attrs().empty());
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Object_get_obj_attrs_MustNotCallFakeDriver)
+{
+  using namespace ::testing;
+
+  // Set up a default return value for int.
+  DefaultValue<int>::Set(0);
+
+  std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
+  rgw_obj_key obj_key("test_object_key");
+  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  ASSERT_NE(mdo_object, nullptr);
+
+  auto fake_object = dynamic_cast<akamai::fake::FakeObject*>(mdo_object->get_next());
+  ASSERT_NE(fake_object, nullptr);
+
+  // Calling the invalid function directly must throw.
+  ASSERT_THROW(fake_object->get_obj_attrs(null_yield, this, nullptr), akamai::fake::FakeDriverInvalidOperationException);
+  // Calling via the filter MUST NOT throw.
+  ASSERT_NO_THROW({
+    mdo_object->get_obj_attrs(null_yield, this, nullptr);
+  });
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Object_set_obj_attrs_MustNotCallFakeDriver)
+{
+  using namespace ::testing;
+
+  // Set up a default return value for int.
+  DefaultValue<int>::Set(0);
+
+  std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
+  rgw_obj_key obj_key("test_object_key");
+  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  ASSERT_NE(mdo_object, nullptr);
+
+  auto fake_object = dynamic_cast<akamai::fake::FakeObject*>(mdo_object->get_next());
+  ASSERT_NE(fake_object, nullptr);
+
+  // Calling the invalid function directly must throw.
+  ASSERT_THROW(fake_object->set_obj_attrs(this, nullptr, nullptr, null_yield), akamai::fake::FakeDriverInvalidOperationException);
+  // Calling via the filter MUST NOT throw.
+  ASSERT_NO_THROW({
+    rgw::sal::Attrs setattrs;
+    rgw::sal::Attrs delattrs;
+    mdo_object->set_obj_attrs(this, &setattrs, &delattrs, null_yield);
+  });
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Object_modify_obj_attrs_MustNotCallFakeDriver)
+{
+  using namespace ::testing;
+
+  // Set up a default return value for int.
+  DefaultValue<int>::Set(0);
+
+  std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
+  rgw_obj_key obj_key("test_object_key");
+  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  ASSERT_NE(mdo_object, nullptr);
+
+  auto fake_object = dynamic_cast<akamai::fake::FakeObject*>(mdo_object->get_next());
+  ASSERT_NE(fake_object, nullptr);
+
+  // Calling the invalid function directly must throw.
+  bufferlist bl;
+  bl.append("test_value");
+  ASSERT_THROW(fake_object->modify_obj_attrs("test_attr", bl, null_yield, this), akamai::fake::FakeDriverInvalidOperationException);
+  // Calling via the filter MUST NOT throw.
+  ASSERT_NO_THROW({
+    mdo_object->modify_obj_attrs("test_attr", bl, null_yield, this);
+  });
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Object_delete_obj_attrs_MustNotCallFakeDriver)
+{
+  using namespace ::testing;
+
+  // Set up a default return value for int.
+  DefaultValue<int>::Set(0);
+
+  std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
+  rgw_obj_key obj_key("test_object_key");
+  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  ASSERT_NE(mdo_object, nullptr);
+
+  auto fake_object = dynamic_cast<akamai::fake::FakeObject*>(mdo_object->get_next());
+  ASSERT_NE(fake_object, nullptr);
+
+  // Calling the invalid function directly must throw.
+  ASSERT_THROW(fake_object->delete_obj_attrs(this, "test_attr", null_yield), akamai::fake::FakeDriverInvalidOperationException);
+  // Calling via the filter MUST NOT throw.
+  ASSERT_NO_THROW({
+    mdo_object->delete_obj_attrs(this, "test_attr", null_yield);
+  });
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Object_get_attrs_MustNotCallFakeDriver)
+{
+  using namespace ::testing;
+
+  // Set up a default return value for rgw::sal::Attrs&.
+  rgw::sal::Attrs empty_attrs;
+  DefaultValue<rgw::sal::Attrs&>::Set(empty_attrs);
+
+  std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
+  rgw_obj_key obj_key("test_object_key");
+  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  ASSERT_NE(mdo_object, nullptr);
+
+  auto fake_object = dynamic_cast<akamai::fake::FakeObject*>(mdo_object->get_next());
+  ASSERT_NE(fake_object, nullptr);
+
+  // Calling the invalid function directly must throw.
+  ASSERT_THROW(fake_object->get_attrs(), akamai::fake::FakeDriverInvalidOperationException);
+  // Calling via the filter MUST NOT throw.
+  ASSERT_NO_THROW({
+    mdo_object->get_attrs();
+  });
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Object_set_attrs_MustNotCallFakeDriver)
+{
+  using namespace ::testing;
+
+  // Set up a default return value for int.
+  DefaultValue<int>::Set(0);
+
+  std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
+  rgw_obj_key obj_key("test_object_key");
+  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  ASSERT_NE(mdo_object, nullptr);
+
+  auto fake_object = dynamic_cast<akamai::fake::FakeObject*>(mdo_object->get_next());
+  ASSERT_NE(fake_object, nullptr);
+
+  // Calling the invalid function directly must throw.
+  rgw::sal::Attrs attrs;
+  ASSERT_THROW(fake_object->set_attrs(attrs), akamai::fake::FakeDriverInvalidOperationException);
+  // Calling via the filter MUST NOT throw.
+  ASSERT_NO_THROW({
+    mdo_object->set_attrs(attrs);
+  });
+}
+
+TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Object_has_attrs_MustNotCallFakeDriver)
+{
+  using namespace ::testing;
+
+  // Set up a default return value for bool.
+  DefaultValue<bool>::Set(false);
+
+  std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
+  rgw_obj_key obj_key("test_object_key");
+  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  ASSERT_NE(mdo_object, nullptr);
+
+  auto fake_object = dynamic_cast<akamai::fake::FakeObject*>(mdo_object->get_next());
+  ASSERT_NE(fake_object, nullptr);
+
+  // Calling the invalid function directly must throw.
+  ASSERT_THROW(fake_object->has_attrs(), akamai::fake::FakeDriverInvalidOperationException);
+  // Calling via the filter MUST NOT throw.
+  ASSERT_NO_THROW({
+    mdo_object->has_attrs();
+  });
 }
 
 /* #endregion Fake */

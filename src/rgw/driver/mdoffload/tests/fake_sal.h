@@ -43,6 +43,61 @@ class FakeRole;
 class FakeOIDCProvider;
 class FakeWriter;
 
+/// Exception thrown for invalid operations, i.e. an operation that should
+/// have been intercepted by the filter driver.
+class FakeDriverInvalidOperationException : public std::runtime_error {
+public:
+  explicit FakeDriverInvalidOperationException(const std::string& message)
+      : std::runtime_error(message)
+  {
+  }
+}; // class FakeDriverInvalidOperationException
+
+/// Catch-all exception for unexpected situations.
+class FakeDriverUnexpectedStateException : public std::runtime_error {
+public:
+  explicit FakeDriverUnexpectedStateException(const std::string& message)
+      : std::runtime_error(message)
+  {
+  }
+}; // class FakeDriverUnexpectedStateException
+
+/**
+ * @brief Mixin class to provide invalid operation handling.
+ *
+ * Add to a class to have the ability to throw on invalid operations. On by
+ * default, can be disabled via set_throw_on_invalid().
+ *
+ * When an invalid operation is detected, call invalid_operation(). This will
+ * throw FakeDriverInvalidOperationException if throwing is enabled.
+ */
+class ObjectHasInvalidOperation {
+public:
+  void set_throw_on_invalid(bool value) noexcept { throw_on_invalid_ = value; }
+  bool get_throw_on_invalid() const noexcept
+  {
+    return throw_on_invalid_;
+  }
+  inline void invalid_operation(const std::string& operation) const
+  {
+    if (throw_on_invalid_) {
+      throw FakeDriverInvalidOperationException("Invalid operation: " + operation);
+    }
+  }
+
+private:
+  bool throw_on_invalid_ { true };
+};
+
+/**
+ * @brief Macro to simplify invalid operation handling.
+ *
+ */
+#define INVALID_OP                          \
+  do {                                      \
+    invalid_operation(__PRETTY_FUNCTION__); \
+  } while (0)
+
 // Minimal concrete classes that satisfy rgw::sal interfaces for filter unit tests.
 
 class FakeMultipartPart : public MultipartPart {
@@ -66,7 +121,7 @@ private:
   ceph::real_time mtime_{};
 };
 
-class FakeObject : public Object {
+class FakeObject : public Object, public ObjectHasInvalidOperation {
 public:
   FakeObject();
   explicit FakeObject(const rgw_bucket& bucket, const rgw_obj_key& key);
@@ -281,7 +336,7 @@ protected:
       const std::string& tenant) override;
 };
 
-class FakeBucket : public Bucket {
+class FakeBucket : public Bucket, public ObjectHasInvalidOperation {
 public:
   FakeBucket();
   explicit FakeBucket(const rgw_bucket& key);

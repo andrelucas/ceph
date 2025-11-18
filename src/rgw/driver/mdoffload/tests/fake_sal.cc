@@ -99,6 +99,7 @@ int FakeObject::get_obj_state(const DoutPrefixProvider*, RGWObjState**, optional
 
 int FakeObject::set_obj_attrs(const DoutPrefixProvider*, Attrs* setattrs,
                               Attrs* delattrs, optional_yield) {
+  INVALID_OP;
   if (setattrs) {
     attrs_ = *setattrs;
     has_attrs_ = true;
@@ -112,6 +113,7 @@ int FakeObject::set_obj_attrs(const DoutPrefixProvider*, Attrs* setattrs,
 }
 
 int FakeObject::get_obj_attrs(optional_yield, const DoutPrefixProvider*, rgw_obj* target_obj) {
+  INVALID_OP;
   if (target_obj) {
     *target_obj = obj_;
   }
@@ -120,6 +122,7 @@ int FakeObject::get_obj_attrs(optional_yield, const DoutPrefixProvider*, rgw_obj
 
 int FakeObject::modify_obj_attrs(const char* attr_name, bufferlist& attr_val,
                                  optional_yield, const DoutPrefixProvider*) {
+  INVALID_OP;
   if (attr_name) {
     attrs_[attr_name] = attr_val;
     has_attrs_ = true;
@@ -129,6 +132,7 @@ int FakeObject::modify_obj_attrs(const char* attr_name, bufferlist& attr_val,
 
 int FakeObject::delete_obj_attrs(const DoutPrefixProvider*, const char* attr_name,
                                  optional_yield) {
+  INVALID_OP;
   if (attr_name) {
     attrs_.erase(attr_name);
   }
@@ -165,17 +169,30 @@ int FakeObject::dump_obj_layout(const DoutPrefixProvider*, optional_yield,
   return 0;
 }
 
-Attrs& FakeObject::get_attrs() { return attrs_; }
+Attrs& FakeObject::get_attrs()
+{
+  INVALID_OP;
+  return attrs_;
+}
 
-const Attrs& FakeObject::get_attrs() const { return attrs_; }
+const Attrs& FakeObject::get_attrs() const
+{
+  INVALID_OP;
+  return attrs_;
+}
 
 int FakeObject::set_attrs(Attrs a) {
+  INVALID_OP;
   attrs_ = std::move(a);
   has_attrs_ = true;
   return 0;
 }
 
-bool FakeObject::has_attrs() { return has_attrs_; }
+bool FakeObject::has_attrs()
+{
+  INVALID_OP;
+  return has_attrs_;
+}
 
 ceph::real_time FakeObject::get_mtime() const { return mtime_; }
 
@@ -445,9 +462,14 @@ int FakeBucket::list(const DoutPrefixProvider*, ListParams&, int, ListResults& r
   return 0;
 }
 
-Attrs& FakeBucket::get_attrs() { return attrs_; }
+Attrs& FakeBucket::get_attrs()
+{
+  INVALID_OP;
+  return attrs_;
+}
 
 int FakeBucket::set_attrs(Attrs a) {
+  INVALID_OP;
   attrs_ = std::move(a);
   return 0;
 }
@@ -534,6 +556,7 @@ int FakeBucket::check_quota(const DoutPrefixProvider*, RGWQuota&, uint64_t,
 
 int FakeBucket::merge_and_store_attrs(const DoutPrefixProvider*, Attrs& new_attrs,
                                       optional_yield) {
+  INVALID_OP;
   for (const auto& [k, v] : new_attrs) {
     attrs_[k] = v;
   }
