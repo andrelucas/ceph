@@ -407,6 +407,10 @@ TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Bucket_merge_and_store_attr
   });
 }
 
+// We have to intercept User->create_bucket() and ensure that the attrs passed to the
+// next driver are empty. There's no call to set_attrs() or
+// merge_and_store_attrs() in the bucket creation path, so this is the only
+// way to check we're not letting attrs through our filter's net.
 TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_User_create_bucket_MustSendEmptyAttrsToFakeDriver)
 {
   std::unique_ptr<rgw::sal::MDOffloadBucket> mdo_bucket;

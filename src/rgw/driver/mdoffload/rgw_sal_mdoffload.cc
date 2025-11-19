@@ -14,6 +14,7 @@
 #include "global/global_context.h"
 #include "mdoffload/v1/mdoffload.pb.h"
 #include "rgw_common.h"
+#include "rgw_sal.h"
 
 #define dout_subsys ceph_subsys_rgw
 
@@ -336,7 +337,7 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
     ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: gRPC SetBucketAttributes failed: {}"),
         status.error_message())
                       << dendl;
-    return -EINVAL;
+    return -EINVAL; // XXX appropriate error code?
   }
 
   ldpp_dout(dpp, 20)
@@ -406,7 +407,7 @@ int MDOffloadBucket::merge_and_store_attrs(const DoutPrefixProvider* dpp, Attrs&
     ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("MDOffloadBucket::merge_and_store_attrs: gRPC SetBucketAttributes failed: {}"),
         status.error_message())
                        << dendl;
-    return -EINVAL;
+    return -EINVAL; // XXX appropriate error code?
   }
 
   for (auto& it : new_attrs) {
@@ -434,6 +435,25 @@ std::unique_ptr<Object> MDOffloadBucket::get_object(const rgw_obj_key& key)
 
 // rgw::sal::MDoffloadObject
 
+int MDOffloadObject::delete_object(const DoutPrefixProvider* dpp,
+    optional_yield y,
+    uint32_t flags)
+{
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadObject::delete_object: key='{}' flags={}"), get_key(), flags)
+      << dendl;
+  return next->delete_object(dpp, y, flags);
+}
+
+int MDOffloadObject::delete_obj_aio(const DoutPrefixProvider* dpp, RGWObjState* astate, Completions* aio,
+    bool keep_index_consistent, optional_yield y)
+{
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadObject::delete_obj_aio: key='{}' keep_index_consistent={}"), get_key(), keep_index_consistent)
+      << dendl;
+  return next->delete_obj_aio(dpp, astate, aio, keep_index_consistent, y);
+}
+
 int MDOffloadObject::set_obj_attrs(const DoutPrefixProvider* dpp, Attrs* setattrs, Attrs* delattrs, optional_yield y)
 {
   // The Rados driver uses this to set attributes in the backing store.
@@ -447,7 +467,44 @@ int MDOffloadObject::set_obj_attrs(const DoutPrefixProvider* dpp, Attrs* setattr
   // same if we're storing a specific mtime. Ideally we'd automatically store
   // an mtime on the attributes and it wouldn't have to be a separate item.
 
-  // XXX placeholder.
+  // Send our gRPC to set the attributes.
+  auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
+  ::grpc::ClientContext context;
+  mdoffload::v1::SetObjectAttributesRequest request;
+  mdoffload::v1::SetObjectAttributesResponse response;
+  Bucket* bucket = get_bucket();
+  Object* next_obj = get_next();
+
+  request.set_bucket_name(bucket->get_name());
+  request.set_bucket_id(bucket->get_bucket_id());
+  request.set_object_key(next_obj->get_key().name);
+  request.set_object_instance_id(next_obj->get_key().instance);
+  if (setattrs != nullptr) {
+    for (const auto& it : *setattrs) {
+      ldpp_dout(dpp, 20)
+          << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: setting attr '{}' ({} bytes)'"), it.first, it.second.length())
+          << dendl;
+      (*request.mutable_attributes_to_add())[it.first] = it.second.to_str();
+    }
+  }
+  if (delattrs != nullptr) {
+    for (const auto& it : *delattrs) {
+      ldpp_dout(dpp, 20)
+          << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: deleting attr '{}'"), it.first)
+          << dendl;
+      request.add_attributes_to_delete(it.first);
+      ;
+    }
+  }
+  auto status = client->stub()->SetObjectAttributes(&context, request, &response);
+  if (!status.ok()) {
+    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: gRPC SetObjectAttributes failed: {}"),
+        status.error_message())
+                       << dendl;
+    return -EINVAL; // XXX appropriate error code?
+  }
+
+  // Only after gRPC success do we modify our cached attributes.
   Attrs new_attrs = cached_attrs_;
   if (setattrs != nullptr) {
     for (const auto& it : *setattrs) {
@@ -476,8 +533,33 @@ int MDOffloadObject::get_obj_attrs(optional_yield y, const DoutPrefixProvider* d
   // The Rados driver fetches the attributes from the backing store using this
   // call.
 
-  // XXX placeholder.
-  cached_attrs_ = Attrs {}; // Since we're not actually storing anything XXX.
+  // Send our gRPC to get the attributes.
+  auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
+  ::grpc::ClientContext context;
+  mdoffload::v1::GetObjectAttributesRequest request;
+  mdoffload::v1::GetObjectAttributesResponse response;
+  Bucket* bucket = get_bucket();
+  Object* next_obj = get_next();
+  request.set_bucket_name(bucket->get_name());
+  request.set_bucket_id(bucket->get_bucket_id());
+  request.set_object_key(next_obj->get_key().name);
+  request.set_object_instance_id(next_obj->get_key().instance);
+  auto status = client->stub()->GetObjectAttributes(&context, request, &response);
+  if (!status.ok()) {
+    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("MDOffloadObject::get_obj_attrs: gRPC GetObjectAttributes failed: {}"),
+        status.error_message())
+                       << dendl;
+    return -EINVAL; // XXX appropriate error code?
+  }
+
+  auto new_attrs = rgw::sal::Attrs {};
+  for (const auto& kv : response.attributes()) {
+    bufferlist bl;
+    bl.append(kv.second);
+    new_attrs[kv.first] = std::move(bl);
+  }
+
+  cached_attrs_ = std::move(new_attrs);
   has_attrs_ = true;
   ldpp_dout(dpp, 20)
       << fmt::format(FMT_STRING("MDOffloadObject::get_obj_attrs: cached_attrs_={}"),
@@ -488,14 +570,39 @@ int MDOffloadObject::get_obj_attrs(optional_yield y, const DoutPrefixProvider* d
 }
 int MDOffloadObject::modify_obj_attrs(const char* attr_name, bufferlist& attr_val, optional_yield y, const DoutPrefixProvider* dpp)
 {
-  // The Rados driver uses this to modify a single attribute.
+  // The Rados driver uses this to modify a single attribute. Note that an
+  // attribute's use may be more than just a simple key/value pair; for
+  // example, tags are all stored on the single attribute
+  // user.rgw.z-amz-tagging.
 
   // NOTE the Rados driver call to set_atomic() when modifying attributes. We
   // need to be VERY CAREFUL to not modify the upstream object's invariants;
   // changes are we may have to make that call here too, without the attr
   // changes.
 
-  // XXX placeholder.
+  // Send our gRPC to set the attribute.
+  auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
+  ::grpc::ClientContext context;
+  mdoffload::v1::SetObjectAttributesRequest request;
+  mdoffload::v1::SetObjectAttributesResponse response;
+  Bucket* bucket = get_bucket();
+  Object* next_obj = get_next();
+
+  request.set_bucket_name(bucket->get_name());
+  request.set_bucket_id(bucket->get_bucket_id());
+  request.set_object_key(next_obj->get_key().name);
+  request.set_object_instance_id(next_obj->get_key().instance);
+  (*request.mutable_attributes_to_add())[attr_name] = attr_val.to_str();
+
+  auto status = client->stub()->SetObjectAttributes(&context, request, &response);
+  if (!status.ok()) {
+    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("MDOffloadObject::modify_obj_attrs: gRPC SetObjectAttributes failed: {}"),
+        status.error_message())
+                       << dendl;
+    return -EINVAL; // XXX appropriate error code?
+  }
+
+  // Only after gRPC success do we modify our cached attributes.
   Attrs new_attrs = cached_attrs_;
   ldpp_dout(dpp, 20)
       << fmt::format(FMT_STRING("MDOffloadObject::modify_obj_attrs: attr_name={} attr_val[{} bytes]"),
@@ -517,8 +624,29 @@ int MDOffloadObject::delete_obj_attrs(const DoutPrefixProvider* dpp, const char*
   // changes are we may have to make that call here too, without the attr
   // changes.
 
-  // XXX placeholder.
+  // Send our gRPC to delete the attribute.
+  auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
+  ::grpc::ClientContext context;
+  mdoffload::v1::SetObjectAttributesRequest request;
+  mdoffload::v1::SetObjectAttributesResponse response;
+  Bucket* bucket = get_bucket();
+  Object* next_obj = get_next();
 
+  request.set_bucket_name(bucket->get_name());
+  request.set_bucket_id(bucket->get_bucket_id());
+  request.set_object_key(next_obj->get_key().name);
+  request.set_object_instance_id(next_obj->get_key().instance);
+  request.add_attributes_to_delete(attr_name);
+
+  auto status = client->stub()->SetObjectAttributes(&context, request, &response);
+  if (!status.ok()) {
+    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("MDOffloadObject::delete_obj_attrs: gRPC SetObjectAttributes failed: {}"),
+        status.error_message())
+                       << dendl;
+    return -EINVAL; // XXX appropriate error code?
+  }
+
+  // Only after gRPC success do we modify our cached attributes.
   Attrs rmattr;
   rmattr[attr_name] = bufferlist();
   ldpp_dout(dpp, 20)
