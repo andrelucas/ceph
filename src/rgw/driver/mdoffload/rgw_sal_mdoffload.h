@@ -413,6 +413,50 @@ public:
   }
   virtual ~MDOffloadObject() = default;
 
+  struct MDOffloadReadOp : FilterReadOp {
+    std::unique_ptr<ReadOp> next;
+    Bucket* bucket_;
+    MDOffloadFilterDriver* driver_;
+
+    MDOffloadReadOp(std::unique_ptr<ReadOp> _next, Bucket* bucket, MDOffloadFilterDriver* driver)
+        : FilterReadOp(std::move(_next))
+        , bucket_(bucket)
+        , driver_(driver)
+    {
+    }
+    virtual ~MDOffloadReadOp() = default;
+
+    virtual int prepare(optional_yield y, const DoutPrefixProvider* dpp) override;
+    virtual int read(int64_t ofs, int64_t end, bufferlist& bl, optional_yield y,
+        const DoutPrefixProvider* dpp) override;
+    virtual int iterate(const DoutPrefixProvider* dpp, int64_t ofs, int64_t end,
+        RGWGetDataCB* cb, optional_yield y) override;
+    virtual int get_attr(const DoutPrefixProvider* dpp, const char* name,
+        bufferlist& dest, optional_yield y) override;
+  };
+  struct MDOffloadDeleteOp : FilterDeleteOp {
+    std::unique_ptr<DeleteOp> next;
+    Bucket* bucket_;
+    MDOffloadFilterDriver* driver_;
+
+    MDOffloadDeleteOp(std::unique_ptr<DeleteOp> _next, Bucket* bucket, MDOffloadFilterDriver* driver)
+        : FilterDeleteOp(std::move(_next))
+        , bucket_(bucket)
+        , driver_(driver)
+    {
+    }
+
+    virtual ~MDOffloadDeleteOp() = default;
+
+    virtual int delete_obj(const DoutPrefixProvider* dpp, optional_yield y, uint32_t flags) override;
+  };
+
+  virtual int delete_object(const DoutPrefixProvider* dpp,
+      optional_yield y,
+      uint32_t flags) override;
+  virtual int delete_obj_aio(const DoutPrefixProvider* dpp, RGWObjState* astate, Completions* aio,
+      bool keep_index_consistent, optional_yield y) override;
+
   /** Set attributes for this object from the backing store.  Attrs can be set or
    * deleted.  @note the attribute APIs may be revisited in the future. */
   virtual int set_obj_attrs(const DoutPrefixProvider* dpp, Attrs* setattrs, Attrs* delattrs, optional_yield y) override;
@@ -431,6 +475,9 @@ public:
   virtual int set_attrs(Attrs a) override;
   /** Check to see if attributes are cached on this object */
   virtual bool has_attrs(void) override;
+
+  virtual std::unique_ptr<ReadOp> get_read_op() override;
+  virtual std::unique_ptr<DeleteOp> get_delete_op() override;
 
 }; // class MDOffloadObject
 

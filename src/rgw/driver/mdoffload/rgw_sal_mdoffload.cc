@@ -433,12 +433,82 @@ std::unique_ptr<Object> MDOffloadBucket::get_object(const rgw_obj_key& key)
 
 /****************************************************************************/
 
-// rgw::sal::MDoffloadObject
+// rgw::sal::MDOffloadObject
+
+// rgw::sal::MDOffloadObject::MDOffloadReadOp
+
+std::unique_ptr<Object::ReadOp> MDOffloadObject::get_read_op()
+{
+  // Almost-duplicate of FilterObject::get_read_op() returning the correct
+  // type.
+  std::unique_ptr<ReadOp> r = next->get_read_op();
+  return std::make_unique<MDOffloadReadOp>(std::move(r), get_bucket(), driver_);
+}
+
+int MDOffloadObject::MDOffloadReadOp::prepare(optional_yield y, const DoutPrefixProvider* dpp)
+{
+  // Passthrough with logging.
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::prepare"))
+      << dendl;
+  return FilterObject::FilterReadOp::prepare(y, dpp);
+}
+
+int MDOffloadObject::MDOffloadReadOp::read(int64_t ofs, int64_t end, bufferlist& bl,
+    optional_yield y, const DoutPrefixProvider* dpp)
+{
+  // Passthrough with logging.
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::read: ofs={} end={}"), ofs, end)
+      << dendl;
+  return FilterObject::FilterReadOp::read(ofs, end, bl, y, dpp);
+}
+
+int MDOffloadObject::MDOffloadReadOp::get_attr(const DoutPrefixProvider* dpp, const char* name, bufferlist& dest, optional_yield y)
+{
+  // Passthrough with logging.
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::get_attr: name='{}'"), name)
+      << dendl;
+  return FilterObject::FilterReadOp::get_attr(dpp, name, dest, y);
+}
+
+int MDOffloadObject::MDOffloadReadOp::iterate(const DoutPrefixProvider* dpp, int64_t ofs,
+    int64_t end, RGWGetDataCB* cb, optional_yield y)
+{
+  // Passthrough with logging.
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::iterate: ofs={} end={}"), ofs, end)
+      << dendl;
+  return FilterObject::FilterReadOp::iterate(dpp, ofs, end, cb, y);
+}
+
+// rgw::sal::MDOffloadObject::MDOffloadDeleteOp
+
+std::unique_ptr<Object::DeleteOp> MDOffloadObject::get_delete_op()
+{
+  // Almost-duplicate of FilterObject::get_delete_op() returning the correct
+  // type.
+  std::unique_ptr<DeleteOp> d = next->get_delete_op();
+  return std::make_unique<MDOffloadDeleteOp>(std::move(d), get_bucket(), driver_);
+}
+
+int MDOffloadObject::MDOffloadDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional_yield y, uint32_t flags)
+{
+  // XXX placeholder: delete upstream attributes, or at least mark as
+  // deleting.
+  ldpp_dout(dpp, 20)
+      << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadDeleteOp::delete_obj: flags={}"), flags)
+      << dendl;
+  int r = FilterObject::FilterDeleteOp::delete_obj(dpp, y, flags);
+  return r;
+}
 
 int MDOffloadObject::delete_object(const DoutPrefixProvider* dpp,
     optional_yield y,
     uint32_t flags)
 {
+  // Passthrough with logging.
   ldpp_dout(dpp, 20)
       << fmt::format(FMT_STRING("MDOffloadObject::delete_object: key='{}' flags={}"), get_key(), flags)
       << dendl;
@@ -448,6 +518,7 @@ int MDOffloadObject::delete_object(const DoutPrefixProvider* dpp,
 int MDOffloadObject::delete_obj_aio(const DoutPrefixProvider* dpp, RGWObjState* astate, Completions* aio,
     bool keep_index_consistent, optional_yield y)
 {
+  // Passthrough with logging.
   ldpp_dout(dpp, 20)
       << fmt::format(FMT_STRING("MDOffloadObject::delete_obj_aio: key='{}' keep_index_consistent={}"), get_key(), keep_index_consistent)
       << dendl;
