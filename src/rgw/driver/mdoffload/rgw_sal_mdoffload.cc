@@ -575,27 +575,40 @@ int MDOffloadObject::set_obj_attrs(const DoutPrefixProvider* dpp, Attrs* setattr
     return -EINVAL; // XXX appropriate error code?
   }
 
-  // Only after gRPC success do we modify our cached attributes.
-  Attrs new_attrs = cached_attrs_;
-  if (setattrs != nullptr) {
-    for (const auto& it : *setattrs) {
-      new_attrs[it.first] = it.second;
-    }
-  }
-  if (delattrs != nullptr) {
-    for (const auto& it : *delattrs) {
-      new_attrs.erase(it.first);
-    }
+  // // Only after gRPC success do we modify our cached attributes.
+  // Attrs new_attrs = cached_attrs_;
+  // if (setattrs != nullptr) {
+  //   for (const auto& it : *setattrs) {
+  //     new_attrs[it.first] = it.second;
+  //   }
+  // }
+  // if (delattrs != nullptr) {
+  //   for (const auto& it : *delattrs) {
+  //     new_attrs.erase(it.first);
+  //   }
+  // }
+  // ldpp_dout(dpp, 20)
+  //     << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: setattrs={} delattrs={} cached_attrs_={}"),
+  //            fmt_maybe(setattrs),
+  //            fmt_maybe(delattrs),
+  //            cached_attrs_)
+  //     << dendl;
+  // cached_attrs_ = new_attrs;
+  // has_attrs_ = true;
+
+  int ret = FilterObject::set_obj_attrs(dpp, setattrs, delattrs, y);
+  if (ret < 0) {
+    // XXX uh-oh - what do we do here? We've already modified the remote.
+    // XXX FIXME
+    ldpp_dout(dpp, 20)
+        << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: FilterObject::set_obj_attrs() failed: {}"), ret)
+        << dendl;
+    return ret;
   }
   ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: setattrs={} delattrs={} cached_attrs_={}"),
-             fmt_maybe(setattrs),
-             fmt_maybe(delattrs),
-             cached_attrs_)
+      << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: set_attrs() attrs={}"),
+             FilterObject::get_attrs())
       << dendl;
-  cached_attrs_ = new_attrs;
-  has_attrs_ = true;
-
   return 0;
 }
 
@@ -630,11 +643,18 @@ int MDOffloadObject::get_obj_attrs(optional_yield y, const DoutPrefixProvider* d
     new_attrs[kv.first] = std::move(bl);
   }
 
-  cached_attrs_ = std::move(new_attrs);
-  has_attrs_ = true;
+  // cached_attrs_ = std::move(new_attrs);
+  // has_attrs_ = true;
+  // ldpp_dout(dpp, 20)
+  //     << fmt::format(FMT_STRING("MDOffloadObject::get_obj_attrs: cached_attrs_={}"),
+  //            cached_attrs_)
+  //     << dendl;
+
+  // XXX passthrough
+  FilterObject::set_attrs(std::move(new_attrs));
   ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::get_obj_attrs: cached_attrs_={}"),
-             cached_attrs_)
+      << fmt::format(FMT_STRING("MDOffloadObject::get_obj_attrs: set_attrs() attrs={}"),
+             FilterObject::get_attrs())
       << dendl;
 
   return 0;
@@ -673,14 +693,23 @@ int MDOffloadObject::modify_obj_attrs(const char* attr_name, bufferlist& attr_va
     return -EINVAL; // XXX appropriate error code?
   }
 
-  // Only after gRPC success do we modify our cached attributes.
-  Attrs new_attrs = cached_attrs_;
+  // // Only after gRPC success do we modify our cached attributes.
+  // Attrs new_attrs = cached_attrs_;
+  // ldpp_dout(dpp, 20)
+  //     << fmt::format(FMT_STRING("MDOffloadObject::modify_obj_attrs: attr_name={} attr_val[{} bytes]"),
+  //            attr_name, attr_val.length())
+  //     << dendl;
+  // new_attrs[attr_name] = attr_val;
+  // cached_attrs_ = new_attrs;
+
+  // XXX passthrough
+  auto& attrs = FilterObject::get_attrs();
+  attrs[attr_name] = attr_val;
+  // set_attrs(attrs);
   ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::modify_obj_attrs: attr_name={} attr_val[{} bytes]"),
-             attr_name, attr_val.length())
+      << fmt::format(FMT_STRING("MDOffloadObject::modify_obj_attrs: set_attrs() attrs={}"),
+             attrs)
       << dendl;
-  new_attrs[attr_name] = attr_val;
-  cached_attrs_ = new_attrs;
 
   return 0;
 }
@@ -724,32 +753,54 @@ int MDOffloadObject::delete_obj_attrs(const DoutPrefixProvider* dpp, const char*
       << fmt::format(FMT_STRING("MDOffloadObject::delete_obj_attrs: attr_name={}"),
              attr_name)
       << dendl;
-  return set_obj_attrs(dpp, nullptr, &rmattr, y);
+  return FilterObject::set_obj_attrs(dpp, nullptr, &rmattr, y);
 }
 
 Attrs& MDOffloadObject::get_attrs(void)
 {
-  // XXX placeholder (but probably not far wrong).
-  return cached_attrs_;
+  // // XXX placeholder (but probably not far wrong).
+  // return cached_attrs_;
+
+  // XXX passthrough
+  auto& a = FilterObject::get_attrs();
+  ldout(g_ceph_context, 20)
+      << fmt::format(FMT_STRING("MDOffloadObject::get_attrs: attrs={}"),
+             a)
+      << dendl;
+  return a;
 }
 
 const Attrs& MDOffloadObject::get_attrs(void) const
 {
-  // XXX placeholder (but probably not far wrong).
-  return cached_attrs_;
+  // // XXX placeholder (but probably not far wrong).
+  // return cached_attrs_;
+
+  // XXX passthrough
+  const auto& a = FilterObject::get_attrs();
+  ldout(g_ceph_context, 20)
+      << fmt::format(FMT_STRING("MDOffloadObject::get_attrs (const): attrs={}"),
+             a)
+      << dendl;
+  return a;
 }
 
 int MDOffloadObject::set_attrs(Attrs a)
 {
-  // XXX placeholder (but probably not far wrong).
-  cached_attrs_ = a;
-  return 0;
+  // // XXX placeholder (but probably not far wrong).
+  // cached_attrs_ = a;
+  // return 0;
+
+  // XXX passthrough
+  return FilterObject::set_attrs(std::move(a));
 }
 
 bool MDOffloadObject::has_attrs(void)
 {
-  // XXX placeholder (but probably not far wrong).
-  return has_attrs_;
+  // // XXX placeholder (but probably not far wrong).
+  // return has_attrs_;
+
+  // XXX passthrough
+  return FilterObject::has_attrs();
 }
 
 /****************************************************************************/
