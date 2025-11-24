@@ -138,11 +138,16 @@ protected:
 
   // One-shot get object via bucket name and object key. The returned object is
   // guaranteed to be a MDOffloadObject.
-  void fixture_get_object(const std::string& bucket_name, rgw_obj_key key, std::unique_ptr<rgw::sal::MDOffloadObject>* filter_object_out)
+  void fixture_get_object(const std::string& bucket_name,
+      std::unique_ptr<rgw::sal::MDOffloadBucket>* filter_bucket_out,
+      rgw_obj_key key,
+      std::unique_ptr<rgw::sal::MDOffloadObject>* filter_object_out)
   {
-    std::unique_ptr<rgw::sal::MDOffloadBucket> filter_bucket;
-    fixture_get_bucket(bucket_name, &filter_bucket);
-    fixture_get_object(filter_bucket.get(), key, filter_object_out);
+    ASSERT_NE(filter_bucket_out, nullptr) << "Must provide output parameter";
+    ASSERT_NE(filter_object_out, nullptr) << "Must provide output parameter";
+
+    fixture_get_bucket(bucket_name, filter_bucket_out);
+    fixture_get_object(filter_bucket_out->get(), key, filter_object_out);
   }
 
 }; // class RGWMDOffloadFakeDriverFixture
@@ -331,8 +336,9 @@ TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_fixture_get_object_1_Succee
 TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_fixture_get_object_2_Succeeds)
 {
   rgw_obj_key obj_key("test_object_key");
+  std::unique_ptr<rgw::sal::MDOffloadBucket> mdo_bucket;
   std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
-  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  fixture_get_object("test_bucket", &mdo_bucket, obj_key, &mdo_object);
   ASSERT_TRUE(mdo_object);
 }
 
@@ -476,9 +482,10 @@ TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Object_get_obj_attrs_MustNo
   // Set up a default return value for int.
   DefaultValue<int>::Set(0);
 
+  std::unique_ptr<rgw::sal::MDOffloadBucket> mdo_bucket;
   std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
   rgw_obj_key obj_key("test_object_key");
-  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  fixture_get_object("test_bucket", &mdo_bucket, obj_key, &mdo_object);
   ASSERT_NE(mdo_object, nullptr);
 
   auto fake_object = dynamic_cast<akamai::fake::FakeObject*>(mdo_object->get_next());
@@ -499,9 +506,10 @@ TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Object_set_obj_attrs_MustNo
   // Set up a default return value for int.
   DefaultValue<int>::Set(0);
 
+  std::unique_ptr<rgw::sal::MDOffloadBucket> mdo_bucket;
   std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
   rgw_obj_key obj_key("test_object_key");
-  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  fixture_get_object("test_bucket", &mdo_bucket, obj_key, &mdo_object);
   ASSERT_NE(mdo_object, nullptr);
 
   auto fake_object = dynamic_cast<akamai::fake::FakeObject*>(mdo_object->get_next());
@@ -524,9 +532,10 @@ TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Object_modify_obj_attrs_Mus
   // Set up a default return value for int.
   DefaultValue<int>::Set(0);
 
+  std::unique_ptr<rgw::sal::MDOffloadBucket> mdo_bucket;
   std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
   rgw_obj_key obj_key("test_object_key");
-  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  fixture_get_object("test_bucket", &mdo_bucket, obj_key, &mdo_object);
   ASSERT_NE(mdo_object, nullptr);
 
   auto fake_object = dynamic_cast<akamai::fake::FakeObject*>(mdo_object->get_next());
@@ -549,9 +558,10 @@ TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Object_delete_obj_attrs_Mus
   // Set up a default return value for int.
   DefaultValue<int>::Set(0);
 
+  std::unique_ptr<rgw::sal::MDOffloadBucket> mdo_bucket;
   std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
   rgw_obj_key obj_key("test_object_key");
-  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  fixture_get_object("test_bucket", &mdo_bucket, obj_key, &mdo_object);
   ASSERT_NE(mdo_object, nullptr);
 
   auto fake_object = dynamic_cast<akamai::fake::FakeObject*>(mdo_object->get_next());
@@ -573,9 +583,10 @@ TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Object_get_attrs_MustNotCal
   rgw::sal::Attrs empty_attrs;
   DefaultValue<rgw::sal::Attrs&>::Set(empty_attrs);
 
+  std::unique_ptr<rgw::sal::MDOffloadBucket> mdo_bucket;
   std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
   rgw_obj_key obj_key("test_object_key");
-  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  fixture_get_object("test_bucket", &mdo_bucket, obj_key, &mdo_object);
   ASSERT_NE(mdo_object, nullptr);
 
   auto fake_object = dynamic_cast<akamai::fake::FakeObject*>(mdo_object->get_next());
@@ -596,9 +607,10 @@ TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Object_set_attrs_MustNotCal
   // Set up a default return value for int.
   DefaultValue<int>::Set(0);
 
+  std::unique_ptr<rgw::sal::MDOffloadBucket> mdo_bucket;
   std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
   rgw_obj_key obj_key("test_object_key");
-  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  fixture_get_object("test_bucket", &mdo_bucket, obj_key, &mdo_object);
   ASSERT_NE(mdo_object, nullptr);
 
   auto fake_object = dynamic_cast<akamai::fake::FakeObject*>(mdo_object->get_next());
@@ -620,9 +632,10 @@ TEST_F(RGWMDOffloadFakeDriverFixture, WithFakeDriver_Object_has_attrs_MustNotCal
   // Set up a default return value for bool.
   DefaultValue<bool>::Set(false);
 
+  std::unique_ptr<rgw::sal::MDOffloadBucket> mdo_bucket;
   std::unique_ptr<rgw::sal::MDOffloadObject> mdo_object;
   rgw_obj_key obj_key("test_object_key");
-  fixture_get_object("test_bucket", obj_key, &mdo_object);
+  fixture_get_object("test_bucket", &mdo_bucket, obj_key, &mdo_object);
   ASSERT_NE(mdo_object, nullptr);
 
   auto fake_object = dynamic_cast<akamai::fake::FakeObject*>(mdo_object->get_next());
