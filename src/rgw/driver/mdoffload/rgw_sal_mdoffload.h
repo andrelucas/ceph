@@ -304,6 +304,23 @@ public:
   /** Lookup a Bucket by name.  Queries driver for bucket info. */
   virtual int get_bucket(const DoutPrefixProvider* dpp, User* u, const std::string& tenant, const std::string& name, std::unique_ptr<Bucket>* bucket, optional_yield y) override;
 
+  virtual std::unique_ptr<Writer> get_append_writer(const DoutPrefixProvider* dpp,
+      optional_yield y,
+      rgw::sal::Object* obj,
+      const rgw_user& owner,
+      const rgw_placement_rule* ptail_placement_rule,
+      const std::string& unique_tag,
+      uint64_t position,
+      uint64_t* cur_accounted_size) override;
+
+  virtual std::unique_ptr<Writer> get_atomic_writer(const DoutPrefixProvider* dpp,
+      optional_yield y,
+      rgw::sal::Object* obj,
+      const rgw_user& owner,
+      const rgw_placement_rule* ptail_placement_rule,
+      uint64_t olh_epoch,
+      const std::string& unique_tag) override;
+
   // Non-inherited methods.
   std::shared_ptr<gutil::GrpcChannelWrapper> channel() { return channelwrapper_; }
 
@@ -480,6 +497,29 @@ public:
   virtual std::unique_ptr<DeleteOp> get_delete_op() override;
 
 }; // class MDOffloadObject
+
+class MDOffloadWriter : public FilterWriter {
+private:
+  MDOffloadFilterDriver* driver_ { nullptr };
+
+public:
+  MDOffloadWriter(std::unique_ptr<Writer> next, Object* obj, MDOffloadFilterDriver* driver)
+      : FilterWriter(std::move(next), obj)
+      , driver_(driver)
+  {
+  }
+  ~MDOffloadWriter() override = default;
+
+  int prepare(optional_yield y) override;
+  int process(bufferlist&& data, uint64_t offset) override;
+  int complete(size_t accounted_size, const std::string& etag,
+      ceph::real_time* mtime, ceph::real_time set_mtime,
+      std::map<std::string, bufferlist>& attrs,
+      ceph::real_time delete_at, const char* if_match,
+      const char* if_nomatch, const std::string* user_data,
+      rgw_zone_set* zones_trace, bool* canceled,
+      optional_yield y, uint32_t flags) override;
+};
 
 } // namespace rgw::sal
 

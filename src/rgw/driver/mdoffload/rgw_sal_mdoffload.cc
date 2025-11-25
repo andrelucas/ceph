@@ -51,6 +51,17 @@ static inline User* nextUser(User* t)
   return dynamic_cast<MDOffloadUser*>(t)->get_next();
 }
 
+static inline Object* nextObject(Object* t)
+{
+  if (!t)
+    return nullptr;
+
+  if (auto* mo = dynamic_cast<MDOffloadObject*>(t)) {
+    return mo->get_next();
+  }
+  return t;
+}
+
 /****************************************************************************/
 
 // MDOffloadFilterDriver
@@ -265,6 +276,39 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
   bucket->reset(fb);
 
   return 0;
+}
+
+std::unique_ptr<Writer> MDOffloadFilterDriver::get_append_writer(const DoutPrefixProvider* dpp,
+    optional_yield y,
+    rgw::sal::Object* obj,
+    const rgw_user& owner,
+    const rgw_placement_rule* ptail_placement_rule,
+    const std::string& unique_tag,
+    uint64_t position,
+    uint64_t* cur_accounted_size)
+{
+  std::unique_ptr<Writer> writer = next->get_append_writer(dpp, y, nextObject(obj), owner,
+      ptail_placement_rule, unique_tag, position, cur_accounted_size);
+  if (!writer) {
+    return nullptr;
+  }
+  return std::make_unique<MDOffloadWriter>(std::move(writer), obj, this);
+}
+
+std::unique_ptr<Writer> MDOffloadFilterDriver::get_atomic_writer(const DoutPrefixProvider* dpp,
+    optional_yield y,
+    rgw::sal::Object* obj,
+    const rgw_user& owner,
+    const rgw_placement_rule* ptail_placement_rule,
+    uint64_t olh_epoch,
+    const std::string& unique_tag)
+{
+  std::unique_ptr<Writer> writer = next->get_atomic_writer(dpp, y, nextObject(obj), owner,
+      ptail_placement_rule, olh_epoch, unique_tag);
+  if (!writer) {
+    return nullptr;
+  }
+  return std::make_unique<MDOffloadWriter>(std::move(writer), obj, this);
 }
 
 /****************************************************************************/
@@ -801,6 +845,81 @@ bool MDOffloadObject::has_attrs(void)
 
   // XXX passthrough
   return FilterObject::has_attrs();
+}
+
+/****************************************************************************/
+
+int MDOffloadWriter::prepare(optional_yield y)
+{
+  ldout(g_ceph_context, 20)
+      << fmt::format(FMT_STRING("MDOffloadWriter::prepare: object='{}'"),
+             obj ? obj->get_name() : std::string("<null>"))
+      << dendl;
+  return FilterWriter::prepare(y);
+}
+
+int MDOffloadWriter::process(bufferlist&& data, uint64_t offset)
+{
+  ldout(g_ceph_context, 20)
+      << fmt::format(FMT_STRING("MDOffloadWriter::process: object='{}' offset={} len={}"),
+             obj ? obj->get_name() : std::string("<null>"), offset, data.length())
+      << dendl;
+  return FilterWriter::process(std::move(data), offset);
+}
+
+int MDOffloadWriter::complete(size_t accounted_size, const std::string& etag,
+    ceph::real_time* mtime, ceph::real_time set_mtime,
+    std::map<std::string, bufferlist>& attrs, ceph::real_time delete_at,
+    const char* if_match, const char* if_nomatch, const std::string* user_data,
+    rgw_zone_set* zones_trace, bool* canceled, optional_yield y, uint32_t flags)
+{
+  ldout(g_ceph_context, 20)
+      << fmt::format(FMT_STRING("MDOffloadWriter::complete: object='{}' accounted_size={} flags={} attrs={}"),
+             obj ? obj->get_name() : std::string("<null>"), accounted_size, flags, attrs)
+      << dendl;
+
+  // Send the full set of attributes to the remote store.
+  auto object = obj;
+  if (!object) {
+    // XXX Can this really happen?
+    ldout(g_ceph_context, 0)
+        << fmt::format(FMT_STRING("MDOffloadWriter::complete: no object"))
+        << dendl;
+    return -EINVAL; // XXX appropriate error code?
+  }
+  auto bucket = obj->get_bucket();
+  if (!bucket) {
+    ldout(g_ceph_context, 0)
+        << fmt::format(FMT_STRING("MDOffloadWriter::complete: no bucket for object='{}'"), obj ? obj->get_name() : std::string("<null>"))
+        << dendl;
+    return -EINVAL; // XXX appropriate error code?
+  }
+  auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
+  ::grpc::ClientContext context;
+  mdoffload::v1::SetObjectAttributesRequest request;
+  mdoffload::v1::SetObjectAttributesResponse response;
+  request.set_bucket_name(bucket->get_name());
+  request.set_bucket_id(bucket->get_bucket_id());
+  request.set_object_key(object->get_key().name);
+  request.set_object_instance_id(object->get_key().instance);
+  for (const auto& it : attrs) {
+    ldout(g_ceph_context, 20)
+        << fmt::format(FMT_STRING("MDOffloadWriter::complete: setting attr '{}' ({} bytes)'"), it.first, it.second.length())
+        << dendl;
+    (*request.mutable_attributes_to_add())[it.first] = it.second.to_str();
+  }
+  auto status = client->stub()->SetObjectAttributes(&context, request, &response);
+  if (!status.ok()) {
+    ldout(g_ceph_context, 0) << fmt::format(FMT_STRING("MDOffloadWriter::complete: gRPC SetObjectAttributes failed: {}"),
+        status.error_message())
+                             << dendl;
+    return -EINVAL; // XXX appropriate error code?
+  }
+
+  // Attrs empty_attrs;
+  return FilterWriter::complete(accounted_size, etag, mtime, set_mtime, attrs,
+      delete_at, if_match, if_nomatch, user_data, zones_trace, canceled, y,
+      flags);
 }
 
 /****************************************************************************/
