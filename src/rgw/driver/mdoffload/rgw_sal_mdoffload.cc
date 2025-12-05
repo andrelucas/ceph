@@ -1173,6 +1173,14 @@ int MDOffloadWriter::complete(size_t accounted_size, const std::string& etag,
 // A list of the attributes that are exported to the remote store.
 static std::set<std::string> attr_object_exported = {
   RGW_ATTR_ACL,
+  RGW_ATTR_CRYPT_CONTEXT,
+  RGW_ATTR_CRYPT_DATAKEY,
+  RGW_ATTR_CRYPT_KEYID,
+  RGW_ATTR_CRYPT_KEYMD5,
+  RGW_ATTR_CRYPT_KEYSEL,
+  RGW_ATTR_CRYPT_MODE,
+  RGW_ATTR_CRYPT_PARTS,
+  RGW_ATTR_CRYPT_PREFIX,
   RGW_ATTR_ETAG,
   RGW_ATTR_STORAGE_CLASS,
   RGW_ATTR_TAGS,
@@ -1183,16 +1191,35 @@ bool MDOffloadObject::attr_is_exported(const std::string& attr_name)
   return attr_object_exported.contains(attr_name);
 }
 
-static std::set<std::string> attr_object_import_check = {
-  RGW_ATTR_ETAG,
-};
-
 bool MDOffloadObject::attr_needs_import_check(const std::string& attr_name)
 {
+  // Attributes we want to check for changes on import. We really, really don't
+  // want attributes to change, or we're asking for sync trouble.
+  static std::set<std::string> attr_object_import_check = {
+    RGW_ATTR_CRYPT_DATAKEY,
+    RGW_ATTR_CRYPT_PREFIX,
+    RGW_ATTR_CRYPT_PARTS,
+    RGW_ATTR_CRYPT_KEYID,
+    RGW_ATTR_CRYPT_KEYSEL,
+    RGW_ATTR_CRYPT_CONTEXT,
+    RGW_ATTR_CRYPT_KEYMD5,
+    RGW_ATTR_CRYPT_MODE,
+    RGW_ATTR_ETAG,
+  };
   return attr_object_import_check.contains(attr_name);
 }
 
+// Attributes we don't want stored in Rados. This means we intercept them in
+// Writer::prepare() and remove them from the Attrs passed to the next driver.
 static std::set<std::string> attr_object_import_prohibited = {
+  RGW_ATTR_CRYPT_DATAKEY,
+  RGW_ATTR_CRYPT_PREFIX,
+  RGW_ATTR_CRYPT_PARTS,
+  RGW_ATTR_CRYPT_KEYID,
+  RGW_ATTR_CRYPT_KEYSEL,
+  RGW_ATTR_CRYPT_CONTEXT,
+  RGW_ATTR_CRYPT_KEYMD5,
+  RGW_ATTR_CRYPT_MODE,
   RGW_ATTR_TAGS,
 };
 
