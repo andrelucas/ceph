@@ -26,6 +26,7 @@
 #include "rgw_common.h"
 #include "rgw_sal.h"
 #include "rgw_sal_filter.h"
+#include "rgw_sal_filterlog.h"
 
 // fmtlib formatters for Ceph types. Some of these have to_str() and their own
 // operator<<, but this way keeps things consistent.
@@ -262,17 +263,24 @@ namespace rgw::sal {
 
 namespace gutil = akamai::grpcutil;
 
-class MDOffloadFilterDriver : public FilterDriver {
+class MDOffloadFilterDriver : public FilterLogDriver {
 
 private:
   std::shared_ptr<gutil::GrpcChannelWrapper> channelwrapper_;
 
 public:
   MDOffloadFilterDriver(CephContext* cct, rgw::sal::Driver* next)
-      : FilterDriver(next)
+      : FilterLogDriver(next)
   {
   }
   virtual ~MDOffloadFilterDriver() = default;
+
+  // Delete copy and move constructors and assignment operators. ATTOW they're
+  // not used, let's not assume that will always be the case.
+  MDOffloadFilterDriver(const MDOffloadFilterDriver&) = delete;
+  MDOffloadFilterDriver& operator=(const MDOffloadFilterDriver&) = delete;
+  MDOffloadFilterDriver(MDOffloadFilterDriver&&) = delete;
+  MDOffloadFilterDriver& operator=(MDOffloadFilterDriver&&) = delete;
 
   virtual int initialize(CephContext* cct, const DoutPrefixProvider* dpp) override;
 
@@ -331,13 +339,13 @@ public:
 
 }; // class MDOffloadDriver
 
-class MDOffloadUser : public FilterUser {
+class MDOffloadUser : public FilterLogUser {
 private:
   MDOffloadFilterDriver* driver_ = nullptr;
 
 public:
   MDOffloadUser(std::unique_ptr<User> next, MDOffloadFilterDriver* driver)
-      : FilterUser(std::move(next))
+      : FilterLogUser(std::move(next))
       , driver_(driver)
   {
   }
@@ -365,7 +373,7 @@ public:
       optional_yield y) override;
 }; // class MDOffloadUser
 
-class MDOffloadBucket : public FilterBucket {
+class MDOffloadBucket : public FilterLogBucket {
 
 private:
   MDOffloadFilterDriver* driver_ = nullptr;
@@ -380,16 +388,23 @@ private:
    * we're not having to change the API in multiple places, creating a
    * maintenance problem over time.
    */
-  rgw::sal::Attrs cached_attrs_;
+  ::rgw::sal::Attrs cached_attrs_;
 
 public:
   MDOffloadBucket(std::unique_ptr<Bucket> next, User* user, MDOffloadFilterDriver* driver, Attrs attrs = {})
-      : FilterBucket(std::move(next), user)
+      : FilterLogBucket(std::move(next), user)
       , driver_(driver)
       , cached_attrs_(std::move(attrs))
   {
   }
   virtual ~MDOffloadBucket() = default;
+
+  // Delete copy and move constructors and assignment operators. ATTOW they're
+  // not used, let's not assume that will always be the case.
+  MDOffloadBucket(const MDOffloadBucket&) = delete;
+  MDOffloadBucket& operator=(const MDOffloadBucket&) = delete;
+  MDOffloadBucket(MDOffloadBucket&&) = delete;
+  MDOffloadBucket& operator=(MDOffloadBucket&&) = delete;
 
   virtual Attrs& get_attrs() override;
   virtual int set_attrs(Attrs a) override;
@@ -399,7 +414,7 @@ public:
 
 }; // class MDOffloadFilterBucket
 
-class MDOffloadObject : public FilterObject {
+class MDOffloadObject : public FilterLogObject {
 
 private:
   MDOffloadFilterDriver* driver_ = nullptr;
@@ -418,26 +433,29 @@ private:
   // bool has_attrs_ = false;
 
 public:
-  MDOffloadObject(std::unique_ptr<Object> next, MDOffloadFilterDriver* driver)
-      : FilterObject(std::move(next))
-      , driver_(driver)
-  {
-  }
-  MDOffloadObject(std::unique_ptr<Object> next, Bucket* bucket, MDOffloadFilterDriver* driver)
-      : FilterObject(std::move(next), bucket)
-      , driver_(driver)
-  {
-  }
+  MDOffloadObject(std::unique_ptr<Object> next, MDOffloadFilterDriver* driver);
+  MDOffloadObject(std::unique_ptr<Object> next, Bucket* bucket, MDOffloadFilterDriver* driver);
+  // Clone 'constructor'.
+  MDOffloadObject(MDOffloadObject& _o);
   virtual ~MDOffloadObject() = default;
 
-  struct MDOffloadReadOp : FilterReadOp {
+  // Delete copy and move constructors and assignment operators. ATTOW they're
+  // not used, let's not assume that will always be the case.
+  MDOffloadObject(const MDOffloadObject&) = delete;
+  MDOffloadObject& operator=(const MDOffloadObject&) = delete;
+  MDOffloadObject(MDOffloadObject&&) = delete;
+  MDOffloadObject& operator=(MDOffloadObject&&) = delete;
+
+  struct MDOffloadReadOp : FilterLogReadOp {
     std::unique_ptr<ReadOp> next;
     Bucket* bucket_;
+    Object* object_;
     MDOffloadFilterDriver* driver_;
 
-    MDOffloadReadOp(std::unique_ptr<ReadOp> _next, Bucket* bucket, MDOffloadFilterDriver* driver)
-        : FilterReadOp(std::move(_next))
+    MDOffloadReadOp(std::unique_ptr<ReadOp> _next, Object* object, Bucket* bucket, MDOffloadFilterDriver* driver)
+        : FilterLogReadOp(std::move(_next))
         , bucket_(bucket)
+        , object_(object)
         , driver_(driver)
     {
     }
@@ -451,13 +469,13 @@ public:
     virtual int get_attr(const DoutPrefixProvider* dpp, const char* name,
         bufferlist& dest, optional_yield y) override;
   };
-  struct MDOffloadDeleteOp : FilterDeleteOp {
+  struct MDOffloadDeleteOp : FilterLogDeleteOp {
     std::unique_ptr<DeleteOp> next;
     Bucket* bucket_;
     MDOffloadFilterDriver* driver_;
 
     MDOffloadDeleteOp(std::unique_ptr<DeleteOp> _next, Bucket* bucket, MDOffloadFilterDriver* driver)
-        : FilterDeleteOp(std::move(_next))
+        : FilterLogDeleteOp(std::move(_next))
         , bucket_(bucket)
         , driver_(driver)
     {
@@ -493,18 +511,30 @@ public:
   /** Check to see if attributes are cached on this object */
   virtual bool has_attrs(void) override;
 
+  virtual void set_bucket(Bucket* b) override;
+
   virtual std::unique_ptr<ReadOp> get_read_op() override;
   virtual std::unique_ptr<DeleteOp> get_delete_op() override;
 
+  // Utilities.
+public:
+  // Attributes that are exported from RADOS to offload.
+  static bool attr_is_exported(const std::string& attr_name);
+  // Attributes that need to be checked when exporting from RADOS to offload.
+  // If they differ, there's a problem.
+  static bool attr_needs_import_check(const std::string& attr_name);
+  // Don't allow certain attributes to be imported from offload to RADOS.
+  static bool attr_import_prohibited(const std::string& attr_name);
+
 }; // class MDOffloadObject
 
-class MDOffloadWriter : public FilterWriter {
+class MDOffloadWriter : public FilterLogWriter {
 private:
   MDOffloadFilterDriver* driver_ { nullptr };
 
 public:
   MDOffloadWriter(std::unique_ptr<Writer> next, Object* obj, MDOffloadFilterDriver* driver)
-      : FilterWriter(std::move(next), obj)
+      : FilterLogWriter(std::move(next), obj)
       , driver_(driver)
   {
   }

@@ -52,6 +52,10 @@ message SetObjectAttributesRequest {
   string object_instance_id = 4;
   map<string, bytes> attributes_to_add = 5;
   repeated string attributes_to_delete = 6;
+  // Set true if this is a new object instance. For nonversioned buckets this
+  // has the effect of erasing any existing attributes prior to applying the
+  // additions/deletions.
+  bool new_object_instance = 8;
 }
 
 message SetObjectAttributesResponse {}
