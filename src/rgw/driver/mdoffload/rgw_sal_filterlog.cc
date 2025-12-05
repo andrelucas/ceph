@@ -284,12 +284,28 @@ std::unique_ptr<Object> FilterLogObject::clone() {
 
 std::unique_ptr<Object::ReadOp> FilterLogObject::get_read_op() {
   log_call("FilterLogObject::get_read_op");
-  return FilterObject::get_read_op();
+  auto* base = get_next();
+  if (!base) {
+    return nullptr;
+  }
+  auto op = base->get_read_op();
+  if (!op) {
+    return nullptr;
+  }
+  return std::make_unique<FilterLogReadOp>(std::move(op));
 }
 
 std::unique_ptr<Object::DeleteOp> FilterLogObject::get_delete_op() {
   log_call("FilterLogObject::get_delete_op");
-  return FilterObject::get_delete_op();
+  auto* base = get_next();
+  if (!base) {
+    return nullptr;
+  }
+  auto op = base->get_delete_op();
+  if (!op) {
+    return nullptr;
+  }
+  return std::make_unique<FilterLogDeleteOp>(std::move(op));
 }
 
 int FilterLogObject::delete_object(const DoutPrefixProvider* dpp,
@@ -329,6 +345,58 @@ int FilterLogObject::delete_obj_attrs(const DoutPrefixProvider* dpp,
                                       const char* attr_name, optional_yield y) {
   log_call(dpp, "FilterLogObject::delete_obj_attrs");
   return FilterObject::delete_obj_attrs(dpp, attr_name, y);
+}
+
+FilterLogObject::FilterLogReadOp::FilterLogReadOp(
+    std::unique_ptr<Object::ReadOp> next_op)
+    : FilterObject::FilterReadOp(std::move(next_op))
+{
+}
+
+int FilterLogObject::FilterLogReadOp::prepare(optional_yield y,
+    const DoutPrefixProvider* dpp)
+{
+  log_call(dpp, "FilterLogReadOp::prepare");
+  return FilterObject::FilterReadOp::prepare(y, dpp);
+}
+
+int FilterLogObject::FilterLogReadOp::read(int64_t ofs, int64_t end,
+    bufferlist& bl, optional_yield y,
+    const DoutPrefixProvider* dpp)
+{
+  log_call(dpp, "FilterLogReadOp::read");
+  return FilterObject::FilterReadOp::read(ofs, end, bl, y, dpp);
+}
+
+int FilterLogObject::FilterLogReadOp::iterate(const DoutPrefixProvider* dpp,
+    int64_t ofs, int64_t end,
+    RGWGetDataCB* cb,
+    optional_yield y)
+{
+  log_call(dpp, "FilterLogReadOp::iterate");
+  return FilterObject::FilterReadOp::iterate(dpp, ofs, end, cb, y);
+}
+
+int FilterLogObject::FilterLogReadOp::get_attr(const DoutPrefixProvider* dpp,
+    const char* name,
+    bufferlist& dest,
+    optional_yield y)
+{
+  log_call(dpp, "FilterLogReadOp::get_attr");
+  return FilterObject::FilterReadOp::get_attr(dpp, name, dest, y);
+}
+
+FilterLogObject::FilterLogDeleteOp::FilterLogDeleteOp(
+    std::unique_ptr<Object::DeleteOp> next_op)
+    : FilterObject::FilterDeleteOp(std::move(next_op))
+{
+}
+
+int FilterLogObject::FilterLogDeleteOp::delete_obj(
+    const DoutPrefixProvider* dpp, optional_yield y, uint32_t flags)
+{
+  log_call(dpp, "FilterLogDeleteOp::delete_obj");
+  return FilterObject::FilterDeleteOp::delete_obj(dpp, y, flags);
 }
 
 FilterLogWriter::FilterLogWriter(std::unique_ptr<Writer> next_writer, Object* obj)

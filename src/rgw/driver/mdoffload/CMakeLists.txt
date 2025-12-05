@@ -4,7 +4,9 @@ project(mdoffload)
 set (CMAKE_LINK_LIBRARIES ${CMAKE_LINK_LIBRARIES} gtest)
 
 set(mdoffload_srcs
-    rgw_sal_mdoffload.cc)
+    rgw_sal_mdoffload.cc
+    rgw_sal_filterlog.cc
+)
 
 include_directories(${CMAKE_INCLUDE_DIR})
 

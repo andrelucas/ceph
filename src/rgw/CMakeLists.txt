@@ -222,7 +222,9 @@ if(WITH_RADOSGW_DAOS)
 endif()
 if(WITH_RADOSGW_MDOFFLOAD)
   add_subdirectory(driver/mdoffload)
-  list(APPEND librgw_common_srcs driver/mdoffload/rgw_sal_mdoffload.cc)
+  list(APPEND librgw_common_srcs
+    driver/mdoffload/rgw_sal_mdoffload.cc
+    driver/mdoffload/rgw_sal_filterlog.cc)
 endif()
 if(WITH_JAEGER)
   list(APPEND librgw_common_srcs rgw_tracer.cc)

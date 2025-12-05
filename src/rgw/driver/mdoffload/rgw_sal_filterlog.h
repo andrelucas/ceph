@@ -77,6 +77,29 @@ public:
 
 class FilterLogObject : public FilterObject {
 public:
+  class FilterLogReadOp : public FilterObject::FilterReadOp {
+  public:
+    explicit FilterLogReadOp(std::unique_ptr<Object::ReadOp> next_op);
+    ~FilterLogReadOp() override = default;
+
+    int prepare(optional_yield y, const DoutPrefixProvider* dpp) override;
+    int read(int64_t ofs, int64_t end, bufferlist& bl, optional_yield y,
+        const DoutPrefixProvider* dpp) override;
+    int iterate(const DoutPrefixProvider* dpp, int64_t ofs, int64_t end,
+        RGWGetDataCB* cb, optional_yield y) override;
+    int get_attr(const DoutPrefixProvider* dpp, const char* name,
+        bufferlist& dest, optional_yield y) override;
+  };
+
+  class FilterLogDeleteOp : public FilterObject::FilterDeleteOp {
+  public:
+    explicit FilterLogDeleteOp(std::unique_ptr<Object::DeleteOp> next_op);
+    ~FilterLogDeleteOp() override = default;
+
+    int delete_obj(const DoutPrefixProvider* dpp, optional_yield y,
+        uint32_t flags) override;
+  };
+
   explicit FilterLogObject(std::unique_ptr<Object> next_object);
   FilterLogObject(std::unique_ptr<Object> next_object, Bucket* bucket);
   ~FilterLogObject() override = default;
