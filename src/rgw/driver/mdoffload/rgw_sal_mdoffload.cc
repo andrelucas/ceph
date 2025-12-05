@@ -21,6 +21,11 @@
 
 #define dout_subsys ceph_subsys_rgw
 
+// Shorthand to check if we are configured at runtime to emit logs at a
+// certain level. Used to avoid building log message strings unnecessarily.
+#define LOG_ENABLED(cct, level) ((cct)->_conf->subsys.should_gather(dout_subsys, (level)))
+#define G_LOG_ENABLED(level) LOG_ENABLED(g_ceph_context, level)
+
 namespace akamai::grpcutil {
 rgw::sal::Attrs attrs_from_proto(const ::google::protobuf::Map<std::string, std::string>& proto_attrs)
 {
