@@ -680,7 +680,7 @@ std::unique_ptr<Object::DeleteOp> MDOffloadObject::get_delete_op()
   // Almost-duplicate of FilterLogObject::get_delete_op() returning the correct
   // type.
   std::unique_ptr<DeleteOp> d = next->get_delete_op();
-  return std::make_unique<MDOffloadDeleteOp>(std::move(d), get_bucket(), driver_);
+  return std::make_unique<MDOffloadDeleteOp>(std::move(d), this, get_bucket(), driver_);
 }
 
 int MDOffloadObject::MDOffloadDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional_yield y, uint32_t flags)

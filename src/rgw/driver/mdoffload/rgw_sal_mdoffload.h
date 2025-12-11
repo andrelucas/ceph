@@ -469,14 +469,17 @@ public:
     virtual int get_attr(const DoutPrefixProvider* dpp, const char* name,
         bufferlist& dest, optional_yield y) override;
   };
+
   struct MDOffloadDeleteOp : FilterLogDeleteOp {
     std::unique_ptr<DeleteOp> next;
     Bucket* bucket_;
+    Object* object_;
     MDOffloadFilterDriver* driver_;
 
-    MDOffloadDeleteOp(std::unique_ptr<DeleteOp> _next, Bucket* bucket, MDOffloadFilterDriver* driver)
+    MDOffloadDeleteOp(std::unique_ptr<DeleteOp> _next, Object* object, Bucket* bucket, MDOffloadFilterDriver* driver)
         : FilterLogDeleteOp(std::move(_next))
         , bucket_(bucket)
+        , object_(object)
         , driver_(driver)
     {
     }
