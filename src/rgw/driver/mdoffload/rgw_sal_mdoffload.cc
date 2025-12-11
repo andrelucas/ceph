@@ -519,7 +519,7 @@ MDOffloadObject::MDOffloadObject(std::unique_ptr<Object> next, MDOffloadFilterDr
     , driver_(driver)
 {
   ldout(g_ceph_context, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject({}):: created object for (no bucket) key='{}'"), (void*)this, get_key())
+      << fmt::format(FMT_STRING("MDOffloadObject({}):: created object for (no bucket) key={}"), (void*)this, get_key())
       << dendl;
 }
 
@@ -529,7 +529,7 @@ MDOffloadObject::MDOffloadObject(std::unique_ptr<Object> next, Bucket* bucket, M
     , driver_(driver)
 {
   ldout(g_ceph_context, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject({}):: created object for bucket='{}' key='{}'"), (void*)this, bucket->get_name(), get_key())
+      << fmt::format(FMT_STRING("MDOffloadObject({}):: created object for bucket='{}' key={}"), (void*)this, bucket->get_name(), get_key())
       << dendl;
 }
 
@@ -538,7 +538,7 @@ MDOffloadObject::MDOffloadObject(MDOffloadObject& _o)
     : FilterLogObject(_o)
 {
   ldout(g_ceph_context, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject({}):: clone from MDOffloadObject({}) for key='{}'"), (void*)this, (void*)&_o, get_key())
+      << fmt::format(FMT_STRING("MDOffloadObject({}):: clone from MDOffloadObject({}) for key={}"), (void*)this, (void*)&_o, get_key())
       << dendl;
   // Clone local fields.
   driver_ = _o.driver_;
@@ -548,7 +548,7 @@ MDOffloadObject::MDOffloadObject(MDOffloadObject& _o)
 
 std::unique_ptr<Object::ReadOp> MDOffloadObject::get_read_op()
 {
-  ldout(g_ceph_context, 20) << fmt::format(FMT_STRING("MDOffloadObject({})::get_read_op: key='{}'"), (void*)this, get_key()) << dendl;
+  ldout(g_ceph_context, 20) << fmt::format(FMT_STRING("MDOffloadObject({})::get_read_op: key={}"), (void*)this, get_key()) << dendl;
 
   // Almost-duplicate of FilterLogObject::get_read_op() returning the correct
   // type.
@@ -606,7 +606,7 @@ int MDOffloadObject::MDOffloadReadOp::prepare(optional_yield y, const DoutPrefix
   }
   Attrs fetched_attrs = akamai::grpcutil::attrs_from_proto(response.attributes());
   ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::prepare: fetched attributes for bucket {} id {} object key='{}' attrs={}"),
+      << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::prepare: fetched attributes for bucket {} id {} object key={} attrs={}"),
              bucket_->get_name(), bucket_->get_bucket_id(), key, fetched_attrs)
       << dendl;
 
@@ -685,13 +685,10 @@ std::unique_ptr<Object::DeleteOp> MDOffloadObject::get_delete_op()
 
 int MDOffloadObject::MDOffloadDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional_yield y, uint32_t flags)
 {
-  // XXX placeholder: delete upstream attributes, or at least mark as
-  // deleting.
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadDeleteOp::delete_obj: flags={}"), flags)
-      << dendl;
-  int r = FilterLogObject::FilterLogDeleteOp::delete_obj(dpp, y, flags);
-  return r;
+  // Passthrough with logging.
+  COND_LOG_D(dpp, 20, "MDOffloadObject::MDOffloadDeleteOp::delete_obj: bucket={} key={} flags={}",
+      bucket_->get_name(), object_->get_key(), flags);
+  return FilterLogObject::FilterLogDeleteOp::delete_obj(dpp, y, flags);
 }
 
 int MDOffloadObject::delete_object(const DoutPrefixProvider* dpp,
@@ -699,9 +696,8 @@ int MDOffloadObject::delete_object(const DoutPrefixProvider* dpp,
     uint32_t flags)
 {
   // Passthrough with logging.
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::delete_object: key='{}' flags={}"), get_key(), flags)
-      << dendl;
+  COND_LOG_D(dpp, 20, "MDOffloadObject::delete_object: bucket={} key={} flags={}",
+      get_bucket()->get_name(), get_key(), flags);
   return next->delete_object(dpp, y, flags);
 }
 
@@ -709,9 +705,8 @@ int MDOffloadObject::delete_obj_aio(const DoutPrefixProvider* dpp, RGWObjState* 
     bool keep_index_consistent, optional_yield y)
 {
   // Passthrough with logging.
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::delete_obj_aio: key='{}' keep_index_consistent={}"), get_key(), keep_index_consistent)
-      << dendl;
+  COND_LOG_D(dpp, 20, "MDOffloadObject::delete_obj_aio: bucket={} key={} keep_index_consistent={}",
+      get_bucket()->get_name(), get_key(), keep_index_consistent);
   return next->delete_obj_aio(dpp, astate, aio, keep_index_consistent, y);
 }
 
@@ -951,80 +946,13 @@ int MDOffloadObject::delete_obj_attrs(const DoutPrefixProvider* dpp, const char*
 
 Attrs& MDOffloadObject::get_attrs(void)
 {
-  // // XXX placeholder
-  // return cached_attrs_;
-
-  // XXX passthrough
+  // Passthrough.
   return FilterLogObject::get_attrs();
-
-  // // XXX !!! Need some caching here, at the moment try to use the underlying
-  // // object to pull the RADOS-only attributes.
-
-  // // Pull the attributes from the underlying object
-  // auto& real_attr = FilterLogObject::get_attrs();
-  // if (get_bucket()) {
-
-  //   ldout(g_ceph_context, 20)
-  //       << fmt::format(FMT_STRING("MDOffloadObject::get_attrs: bucket={} bucket_id={} attrs={}"),
-  //              get_bucket()->get_name(), get_bucket()->get_bucket_id(), real_attr)
-  //       << dendl;
-
-  //   auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
-  //   ::grpc::ClientContext context;
-  //   mdoffload::v1::GetObjectAttributesRequest request;
-  //   mdoffload::v1::GetObjectAttributesResponse response;
-  //   auto key = get_key();
-  //   request.set_bucket_name(get_bucket()->get_name());
-  //   request.set_bucket_id(get_bucket()->get_bucket_id());
-  //   request.set_object_key(key.name);
-  //   request.set_object_instance_id(key.instance);
-  //   auto status = client->stub()->GetObjectAttributes(&context, request, &response);
-  //   if (status.ok()) {
-  //     ldout(g_ceph_context, 20)
-  //         << fmt::format(FMT_STRING("MDOffloadObject::get_attrs: fetched attributes for object key='{}' attrs={}"),
-  //                key, ::akamai::grpcutil::attrs_from_proto(response.attributes()))
-  //         << dendl;
-  //     for (const auto& kv : response.attributes()) {
-
-  //       auto item = real_attr.find(kv.first);
-  //       if (item != real_attr.end()) {
-  //         ldout(g_ceph_context, 20)
-  //             << fmt::format(FMT_STRING("MDOffloadObject::get_attrs: XXX overridden rados attr found attr='{}' rados={} ext={}"),
-  //                    kv.first, item->second.length(), kv.second.length())
-  //             << dendl;
-  //       }
-  //       bufferlist bl;
-  //       bl.append(kv.second);
-  //       real_attr[kv.first] = std::move(bl);
-  //     }
-  //     ldout(g_ceph_context, 20)
-  //         << fmt::format(FMT_STRING("MDOffloadObject::get_attrs: merged attrs={}"),
-  //                real_attr)
-  //         << dendl;
-  //     return real_attr;
-
-  //   } else {
-
-  //     ldout(g_ceph_context, 20) << fmt::format(FMT_STRING("MDOffloadObject::get_attrs: gRPC GetObjectAttributes failed: {}"),
-  //         status.error_message())
-  //                               << dendl;
-  //     return real_attr; // XXX no merge - WE NEED TO FAIL HERE
-  //   }
-
-  // } else {
-  //   ldout(g_ceph_context, 20)
-  //       << fmt::format(FMT_STRING("MDOffloadObject::get_attrs: bucket=<null> attrs={}"), real_attr)
-  //       << dendl;
-  // }
-  // return real_attr;
 }
 
 const Attrs& MDOffloadObject::get_attrs(void) const
 {
-  // // XXX placeholder
-  // return cached_attrs_;
-
-  // XXX passthrough
+  // Passthrough.
   const auto& a = FilterLogObject::get_attrs();
   if (get_bucket()) {
     ldout(g_ceph_context, 20)
@@ -1053,7 +981,7 @@ bool MDOffloadObject::has_attrs(void)
 
 void MDOffloadObject::set_bucket(Bucket* b)
 {
-  COND_LOG_G(20, "MDOffloadObject({})::set_bucket: bucket='{}' key='{}'", (void*)this, b ? b->get_name() : std::string("<null>"), get_key());
+  COND_LOG_G(20, "MDOffloadObject({})::set_bucket: bucket='{}' key={}", (void*)this, b ? b->get_name() : std::string("<null>"), get_key());
   rgw::sal::FilterLogObject::set_bucket(b);
 }
 
