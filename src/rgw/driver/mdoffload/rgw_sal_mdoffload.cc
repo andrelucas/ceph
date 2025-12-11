@@ -914,36 +914,39 @@ int MDOffloadObject::delete_obj_attrs(const DoutPrefixProvider* dpp, const char*
   // changes are we may have to make that call here too, without the attr
   // changes.
 
-  // Send our gRPC to delete the attribute.
-  auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
-  ::grpc::ClientContext context;
-  mdoffload::v1::SetObjectAttributesRequest request;
-  mdoffload::v1::SetObjectAttributesResponse response;
-  Bucket* bucket = get_bucket();
-  Object* next_obj = get_next();
+  if (!MDOffloadObject::attr_is_exported(attr_name)) {
+    // Passthrough with logging.
+    COND_LOG_D(dpp, 20, "MDOffloadObject::delete_obj_attrs: non-exported attr_name='{}', passthrough", attr_name);
+    return FilterLogObject::delete_obj_attrs(dpp, attr_name, y);
 
-  request.set_bucket_name(bucket->get_name());
-  request.set_bucket_id(bucket->get_bucket_id());
-  request.set_object_key(next_obj->get_key().name);
-  request.set_object_instance_id(next_obj->get_key().instance);
-  request.add_attributes_to_delete(attr_name);
+  } else {
+    // Send our gRPC to delete the attribute.
+    auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
+    ::grpc::ClientContext context;
+    mdoffload::v1::SetObjectAttributesRequest request;
+    mdoffload::v1::SetObjectAttributesResponse response;
+    Bucket* bucket = get_bucket();
+    Object* next_obj = get_next();
 
-  auto status = client->stub()->SetObjectAttributes(&context, request, &response);
-  if (!status.ok()) {
-    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("MDOffloadObject::delete_obj_attrs: gRPC SetObjectAttributes failed: {}"),
-        status.error_message())
-                       << dendl;
-    return -EINVAL; // XXX appropriate error code?
+    request.set_bucket_name(bucket->get_name());
+    request.set_bucket_id(bucket->get_bucket_id());
+    request.set_object_key(next_obj->get_key().name);
+    request.set_object_instance_id(next_obj->get_key().instance);
+    request.add_attributes_to_delete(attr_name);
+
+    auto status = client->stub()->SetObjectAttributes(&context, request, &response);
+    if (!status.ok()) {
+      COND_LOG_D(dpp, 20, "MDOffloadObject::delete_obj_attrs: gRPC SetObjectAttributes failed: {}", status.error_message());
+      return -EINVAL; // XXX appropriate error code?
+    }
+
+    // Only after gRPC success do we modify our cached attributes.
+    Attrs rmattr;
+    rmattr[attr_name] = bufferlist();
+
+    COND_LOG_D(dpp, 20, "MDOffloadObject::delete_obj_attrs: attr_name={}", attr_name);
+    return FilterLogObject::set_obj_attrs(dpp, nullptr, &rmattr, y);
   }
-
-  // Only after gRPC success do we modify our cached attributes.
-  Attrs rmattr;
-  rmattr[attr_name] = bufferlist();
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::delete_obj_attrs: attr_name={}"),
-             attr_name)
-      << dendl;
-  return FilterLogObject::set_obj_attrs(dpp, nullptr, &rmattr, y);
 }
 
 Attrs& MDOffloadObject::get_attrs(void)
@@ -1038,29 +1041,20 @@ const Attrs& MDOffloadObject::get_attrs(void) const
 
 int MDOffloadObject::set_attrs(Attrs a)
 {
-  // // XXX placeholder (but probably not far wrong).
-  // cached_attrs_ = a;
-  // return 0;
-
-  // XXX passthrough
+  // Passthrough.
   return FilterLogObject::set_attrs(std::move(a));
 }
 
 bool MDOffloadObject::has_attrs(void)
 {
-  // // XXX placeholder (but probably not far wrong).
-  // return has_attrs_;
-
-  // XXX passthrough
+  // Passthrough.
   return FilterLogObject::has_attrs();
 }
 
 void MDOffloadObject::set_bucket(Bucket* b)
 {
-  ldout(g_ceph_context, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject({})::set_bucket: bucket='{}' key='{}'"), (void*)this, b ? b->get_name() : std::string("<null>"), get_key())
-      << dendl;
-  FilterLogObject::set_bucket(b);
+  COND_LOG_G(20, "MDOffloadObject({})::set_bucket: bucket='{}' key='{}'", (void*)this, b ? b->get_name() : std::string("<null>"), get_key());
+  rgw::sal::FilterLogObject::set_bucket(b);
 }
 
 /****************************************************************************/
@@ -1213,21 +1207,23 @@ bool MDOffloadObject::attr_is_exported(const std::string& attr_name)
   return attr_object_exported.contains(attr_name);
 }
 
+// Attributes we want to check for changes on import. We really, really don't
+// want attributes to change, or we're asking for sync trouble.
+static std::set<std::string> attr_object_import_check = {
+  RGW_ATTR_CRYPT_DATAKEY,
+  RGW_ATTR_CRYPT_PREFIX,
+  RGW_ATTR_CRYPT_PARTS,
+  RGW_ATTR_CRYPT_KEYID,
+  RGW_ATTR_CRYPT_KEYSEL,
+  RGW_ATTR_CRYPT_CONTEXT,
+  RGW_ATTR_CRYPT_KEYMD5,
+  RGW_ATTR_CRYPT_MODE,
+  RGW_ATTR_ETAG,
+};
+
 bool MDOffloadObject::attr_needs_import_check(const std::string& attr_name)
 {
-  // Attributes we want to check for changes on import. We really, really don't
-  // want attributes to change, or we're asking for sync trouble.
-  static std::set<std::string> attr_object_import_check = {
-    RGW_ATTR_CRYPT_DATAKEY,
-    RGW_ATTR_CRYPT_PREFIX,
-    RGW_ATTR_CRYPT_PARTS,
-    RGW_ATTR_CRYPT_KEYID,
-    RGW_ATTR_CRYPT_KEYSEL,
-    RGW_ATTR_CRYPT_CONTEXT,
-    RGW_ATTR_CRYPT_KEYMD5,
-    RGW_ATTR_CRYPT_MODE,
-    RGW_ATTR_ETAG,
-  };
+
   return attr_object_import_check.contains(attr_name);
 }
 
