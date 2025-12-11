@@ -24,7 +24,29 @@
 // Shorthand to check if we are configured at runtime to emit logs at a
 // certain level. Used to avoid building log message strings unnecessarily.
 #define LOG_ENABLED(cct, level) ((cct)->_conf->subsys.should_gather(dout_subsys, (level)))
-#define G_LOG_ENABLED(level) LOG_ENABLED(g_ceph_context, level)
+// Variant taking a dpp instead of a cct.
+#define LOG_ENABLED_D(dpp, level) LOG_ENABLED((dpp)->get_cct(), level)
+// Global version.
+#define LOG_ENABLED_G(level) LOG_ENABLED(g_ceph_context, level)
+
+#define COND_LOG(cct, level, msg, ...)                                         \
+  do {                                                                         \
+    if (LOG_ENABLED(cct, level)) {                                             \
+      ldout(cct, level) << fmt::format(FMT_STRING(msg), __VA_ARGS__) << dendl; \
+    }                                                                          \
+  } while (0)
+#define COND_LOG_D(dpp, level, msg, ...)                                           \
+  do {                                                                             \
+    if (LOG_ENABLED_D(dpp, level)) {                                               \
+      ldpp_dout(dpp, level) << fmt::format(FMT_STRING(msg), __VA_ARGS__) << dendl; \
+    }                                                                              \
+  } while (0)
+#define COND_LOG_G(level, msg, ...)                                                       \
+  do {                                                                                    \
+    if (LOG_ENABLED_G(level)) {                                                           \
+      ldout(g_ceph_context, level) << fmt::format(FMT_STRING(msg), __VA_ARGS__) << dendl; \
+    }                                                                                     \
+  } while (0)
 
 namespace akamai::grpcutil {
 rgw::sal::Attrs attrs_from_proto(const ::google::protobuf::Map<std::string, std::string>& proto_attrs)
