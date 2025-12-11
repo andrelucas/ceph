@@ -7,9 +7,11 @@ option go_package = "bits.linode.com/LinodeApi/obj-endpoint/gen/proto/mdoffload/
 service MDOffloadService {
   rpc GetBucketAttributes(GetBucketAttributesRequest) returns (GetBucketAttributesResponse);
   rpc SetBucketAttributes(SetBucketAttributesRequest) returns (SetBucketAttributesResponse);
+  rpc PurgeBucketAttributes(PurgeBucketAttributesRequest) returns (PurgeBucketAttributesResponse);
 
   rpc SetObjectAttributes(SetObjectAttributesRequest) returns (SetObjectAttributesResponse);
   rpc GetObjectAttributes(GetObjectAttributesRequest) returns (GetObjectAttributesResponse);
+  rpc PurgeObjectAttributes(PurgeObjectAttributesRequest) returns (PurgeObjectAttributesResponse);
 }
 
 message GetBucketAttributesRequest {
@@ -31,6 +33,14 @@ message SetBucketAttributesRequest {
 }
 
 message SetBucketAttributesResponse {}
+
+message PurgeBucketAttributesRequest {
+  string user_id = 5;
+  string bucket_id = 1;
+  string bucket_name = 2;
+}
+
+message PurgeBucketAttributesResponse {}
 
 message GetObjectAttributesRequest {
   string user_id = 5;
@@ -60,3 +70,12 @@ message SetObjectAttributesRequest {
 
 message SetObjectAttributesResponse {}
 
+message PurgeObjectAttributesRequest {
+  string user_id = 5;
+  string bucket_id = 1;
+  string bucket_name = 2;
+  string object_key = 3;
+  string object_instance_id = 4;
+}
+
+message PurgeObjectAttributesResponse {}
