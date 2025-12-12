@@ -635,6 +635,12 @@ int MDOffloadObject::MDOffloadDeleteOp::delete_obj(const DoutPrefixProvider* dpp
   COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadDeleteOp::delete_obj: bucket={} key={} flags={}",
       bucket_->get_name(), object_->get_key(), flags);
 
+  auto ret = FilterLogObject::FilterLogDeleteOp::delete_obj(dpp, y, flags);
+  if (ret < 0) {
+    LOG_PFX(dpp, 0, "MDOffloadObject::MDOffloadDeleteOp::delete_obj: FilterLogDeleteOp::delete_obj() failed ret={}", ret);
+    return ret;
+  }
+
   auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
   ::grpc::ClientContext context;
   mdoffload::v1::PurgeObjectAttributesRequest request;
@@ -646,11 +652,9 @@ int MDOffloadObject::MDOffloadDeleteOp::delete_obj(const DoutPrefixProvider* dpp
   request.set_object_instance_id(key.instance);
   auto status = client->stub()->PurgeObjectAttributes(&context, request, &response);
   if (!status.ok()) {
-    LOG_PFX(dpp, 0, "MDOffloadObject::MDOffloadDeleteOp::delete_obj: gRPC PurgeObjectAttributes failed: {}", status.error_message());
-    // Fall through; we still want to delete the object even
-    // if we can't purge the attributes.
+    LOG_PFX(dpp, 0, "MDOffloadObject::MDOffloadDeleteOp::delete_obj: gRPC PurgeObjectAttributes failed (object still deleted): {}", status.error_message());
   }
-  return FilterLogObject::FilterLogDeleteOp::delete_obj(dpp, y, flags);
+  return 0;
 }
 
 int MDOffloadObject::delete_object(const DoutPrefixProvider* dpp,
