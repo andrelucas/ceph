@@ -10,6 +10,8 @@ class FilterLogUser;
 class FilterLogBucket;
 class FilterLogObject;
 class FilterLogWriter;
+class FilterLogMultipartPart;
+class FilterLogMultipartUpload;
 
 class FilterLogDriver : public FilterDriver {
 public:
@@ -73,6 +75,15 @@ public:
 
   std::unique_ptr<Object> get_object(const rgw_obj_key& key) override;
   std::unique_ptr<Bucket> clone() override;
+  std::unique_ptr<MultipartUpload> get_multipart_upload(
+      const std::string& oid, std::optional<std::string> upload_id = std::nullopt,
+      ACLOwner owner = {}, ceph::real_time mtime = real_clock::now()) override;
+  int list_multiparts(const DoutPrefixProvider* dpp, const std::string& prefix,
+      std::string& marker, const std::string& delim,
+      const int& max_uploads,
+      std::vector<std::unique_ptr<MultipartUpload>>& uploads,
+      std::map<std::string, bool>* common_prefixes,
+      bool* is_truncated) override;
 };
 
 class FilterLogObject : public FilterObject {
@@ -136,6 +147,55 @@ public:
                const char* if_nomatch, const std::string* user_data,
                rgw_zone_set* zones_trace, bool* canceled,
                optional_yield y, uint32_t flags) override;
+};
+
+class FilterLogMultipartPart : public FilterMultipartPart {
+public:
+  explicit FilterLogMultipartPart(std::unique_ptr<MultipartPart> next_part);
+  ~FilterLogMultipartPart() override = default;
+
+  uint32_t get_num() override;
+  uint64_t get_size() override;
+  const std::string& get_etag() override;
+  ceph::real_time& get_mtime() override;
+};
+
+class FilterLogMultipartUpload : public FilterMultipartUpload {
+public:
+  FilterLogMultipartUpload(std::unique_ptr<MultipartUpload> next_upload,
+      Bucket* bucket);
+  ~FilterLogMultipartUpload() override = default;
+
+  const std::string& get_meta() const override;
+  const std::string& get_key() const override;
+  const std::string& get_upload_id() const override;
+  const ACLOwner& get_owner() const override;
+  ceph::real_time& get_mtime() override;
+  std::map<uint32_t, std::unique_ptr<MultipartPart>>& get_parts() override;
+  const jspan_context& get_trace() override;
+  std::unique_ptr<rgw::sal::Object> get_meta_obj() override;
+  int init(const DoutPrefixProvider* dpp, optional_yield y, ACLOwner& owner,
+      rgw_placement_rule& dest_placement,
+      rgw::sal::Attrs& attrs) override;
+  int list_parts(const DoutPrefixProvider* dpp, CephContext* cct,
+      int num_parts, int marker, int* next_marker, bool* truncated,
+      bool assume_unsorted = false) override;
+  int abort(const DoutPrefixProvider* dpp, CephContext* cct) override;
+  int complete(const DoutPrefixProvider* dpp, optional_yield y, CephContext* cct,
+      std::map<int, std::string>& part_etags,
+      std::list<rgw_obj_index_key>& remove_objs,
+      uint64_t& accounted_size, bool& compressed,
+      RGWCompressionInfo& cs_info, off_t& ofs, std::string& tag,
+      ACLOwner& owner, uint64_t olh_epoch,
+      rgw::sal::Object* target_obj) override;
+  int get_info(const DoutPrefixProvider* dpp, optional_yield y,
+      rgw_placement_rule** rule,
+      rgw::sal::Attrs* attrs = nullptr) override;
+  std::unique_ptr<Writer> get_writer(
+      const DoutPrefixProvider* dpp, optional_yield y, rgw::sal::Object* obj,
+      const rgw_user& owner, const rgw_placement_rule* ptail_placement_rule,
+      uint64_t part_num, const std::string& part_num_str) override;
+  void print(std::ostream& out) const override;
 };
 
 } // namespace rgw::sal

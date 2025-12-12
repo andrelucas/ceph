@@ -262,6 +262,38 @@ std::unique_ptr<Bucket> FilterLogBucket::clone() {
   return std::make_unique<FilterLogBucket>(std::move(cloned), get_owner());
 }
 
+std::unique_ptr<MultipartUpload> FilterLogBucket::get_multipart_upload(
+    const std::string& oid, std::optional<std::string> upload_id,
+    ACLOwner owner, ceph::real_time mtime)
+{
+  log_call("FilterLogBucket::get_multipart_upload");
+  auto upload = next->get_multipart_upload(oid, std::move(upload_id), owner, mtime);
+  if (!upload) {
+    return nullptr;
+  }
+  return std::make_unique<FilterLogMultipartUpload>(std::move(upload), this);
+}
+
+int FilterLogBucket::list_multiparts(
+    const DoutPrefixProvider* dpp, const std::string& prefix,
+    std::string& marker, const std::string& delim, const int& max_uploads,
+    std::vector<std::unique_ptr<MultipartUpload>>& uploads,
+    std::map<std::string, bool>* common_prefixes, bool* is_truncated)
+{
+  log_call(dpp, "FilterLogBucket::list_multiparts");
+  std::vector<std::unique_ptr<MultipartUpload>> inner;
+  int ret = next->list_multiparts(dpp, prefix, marker, delim, max_uploads,
+      inner, common_prefixes, is_truncated);
+  if (ret < 0) {
+    return ret;
+  }
+  for (auto& upload : inner) {
+    uploads.emplace_back(
+        std::make_unique<FilterLogMultipartUpload>(std::move(upload), this));
+  }
+  return 0;
+}
+
 FilterLogObject::FilterLogObject(std::unique_ptr<Object> next_object)
     : FilterObject(std::move(next_object)) {}
 
@@ -423,6 +455,175 @@ int FilterLogWriter::complete(size_t accounted_size, const std::string& etag,
   return FilterWriter::complete(accounted_size, etag, mtime, set_mtime, attrs,
                                 delete_at, if_match, if_nomatch, user_data,
                                 zones_trace, canceled, y, flags);
+}
+
+FilterLogMultipartPart::FilterLogMultipartPart(
+    std::unique_ptr<MultipartPart> next_part)
+    : FilterMultipartPart(std::move(next_part))
+{
+}
+
+uint32_t FilterLogMultipartPart::get_num()
+{
+  log_call("FilterLogMultipartPart::get_num");
+  return FilterMultipartPart::get_num();
+}
+
+uint64_t FilterLogMultipartPart::get_size()
+{
+  log_call("FilterLogMultipartPart::get_size");
+  return FilterMultipartPart::get_size();
+}
+
+const std::string& FilterLogMultipartPart::get_etag()
+{
+  log_call("FilterLogMultipartPart::get_etag");
+  return FilterMultipartPart::get_etag();
+}
+
+ceph::real_time& FilterLogMultipartPart::get_mtime()
+{
+  log_call("FilterLogMultipartPart::get_mtime");
+  return FilterMultipartPart::get_mtime();
+}
+
+FilterLogMultipartUpload::FilterLogMultipartUpload(
+    std::unique_ptr<MultipartUpload> next_upload, Bucket* bucket)
+    : FilterMultipartUpload(std::move(next_upload), bucket)
+{
+}
+
+const std::string& FilterLogMultipartUpload::get_meta() const
+{
+  log_call("FilterLogMultipartUpload::get_meta");
+  return FilterMultipartUpload::get_meta();
+}
+
+const std::string& FilterLogMultipartUpload::get_key() const
+{
+  log_call("FilterLogMultipartUpload::get_key");
+  return FilterMultipartUpload::get_key();
+}
+
+const std::string& FilterLogMultipartUpload::get_upload_id() const
+{
+  log_call("FilterLogMultipartUpload::get_upload_id");
+  return FilterMultipartUpload::get_upload_id();
+}
+
+const ACLOwner& FilterLogMultipartUpload::get_owner() const
+{
+  log_call("FilterLogMultipartUpload::get_owner");
+  return FilterMultipartUpload::get_owner();
+}
+
+ceph::real_time& FilterLogMultipartUpload::get_mtime()
+{
+  log_call("FilterLogMultipartUpload::get_mtime");
+  return FilterMultipartUpload::get_mtime();
+}
+
+std::map<uint32_t, std::unique_ptr<MultipartPart>>&
+FilterLogMultipartUpload::get_parts()
+{
+  log_call("FilterLogMultipartUpload::get_parts");
+  return FilterMultipartUpload::get_parts();
+}
+
+const jspan_context& FilterLogMultipartUpload::get_trace()
+{
+  log_call("FilterLogMultipartUpload::get_trace");
+  return FilterMultipartUpload::get_trace();
+}
+
+std::unique_ptr<rgw::sal::Object> FilterLogMultipartUpload::get_meta_obj()
+{
+  log_call("FilterLogMultipartUpload::get_meta_obj");
+  auto meta = next->get_meta_obj();
+  if (!meta) {
+    return nullptr;
+  }
+  return std::make_unique<FilterLogObject>(std::move(meta), bucket);
+}
+
+int FilterLogMultipartUpload::init(const DoutPrefixProvider* dpp,
+    optional_yield y, ACLOwner& owner,
+    rgw_placement_rule& dest_placement,
+    rgw::sal::Attrs& attrs)
+{
+  log_call(dpp, "FilterLogMultipartUpload::init");
+  return FilterMultipartUpload::init(dpp, y, owner, dest_placement, attrs);
+}
+
+int FilterLogMultipartUpload::list_parts(
+    const DoutPrefixProvider* dpp, CephContext* cct, int num_parts, int marker,
+    int* next_marker, bool* truncated, bool assume_unsorted)
+{
+  log_call(dpp, "FilterLogMultipartUpload::list_parts");
+  int ret = next->list_parts(dpp, cct, num_parts, marker, next_marker,
+      truncated, assume_unsorted);
+  if (ret < 0) {
+    return ret;
+  }
+  parts.clear();
+  for (auto& entry : next->get_parts()) {
+    parts.emplace(entry.first,
+        std::make_unique<FilterLogMultipartPart>(
+            std::move(entry.second)));
+  }
+  return 0;
+}
+
+int FilterLogMultipartUpload::abort(const DoutPrefixProvider* dpp,
+    CephContext* cct)
+{
+  log_call(dpp, "FilterLogMultipartUpload::abort");
+  return FilterMultipartUpload::abort(dpp, cct);
+}
+
+int FilterLogMultipartUpload::complete(
+    const DoutPrefixProvider* dpp, optional_yield y, CephContext* cct,
+    std::map<int, std::string>& part_etags,
+    std::list<rgw_obj_index_key>& remove_objs, uint64_t& accounted_size,
+    bool& compressed, RGWCompressionInfo& cs_info, off_t& ofs,
+    std::string& tag, ACLOwner& owner, uint64_t olh_epoch,
+    rgw::sal::Object* target_obj)
+{
+  log_call(dpp, "FilterLogMultipartUpload::complete");
+  return FilterMultipartUpload::complete(dpp, y, cct, part_etags, remove_objs,
+      accounted_size, compressed, cs_info,
+      ofs, tag, owner, olh_epoch,
+      target_obj);
+}
+
+int FilterLogMultipartUpload::get_info(const DoutPrefixProvider* dpp,
+    optional_yield y,
+    rgw_placement_rule** rule,
+    rgw::sal::Attrs* attrs)
+{
+  log_call(dpp, "FilterLogMultipartUpload::get_info");
+  return FilterMultipartUpload::get_info(dpp, y, rule, attrs);
+}
+
+std::unique_ptr<Writer> FilterLogMultipartUpload::get_writer(
+    const DoutPrefixProvider* dpp, optional_yield y, rgw::sal::Object* obj,
+    const rgw_user& owner,
+    const rgw_placement_rule* ptail_placement_rule, uint64_t part_num,
+    const std::string& part_num_str)
+{
+  log_call(dpp, "FilterLogMultipartUpload::get_writer");
+  auto writer = next->get_writer(dpp, y, unwrap_object(obj), owner,
+      ptail_placement_rule, part_num, part_num_str);
+  if (!writer) {
+    return nullptr;
+  }
+  return std::make_unique<FilterLogWriter>(std::move(writer), obj);
+}
+
+void FilterLogMultipartUpload::print(std::ostream& out) const
+{
+  log_call("FilterLogMultipartUpload::print");
+  FilterMultipartUpload::print(out);
 }
 
 } // namespace rgw::sal
