@@ -476,6 +476,45 @@ std::unique_ptr<Object> MDOffloadBucket::get_object(const rgw_obj_key& key)
   return md_object;
 }
 
+std::unique_ptr<MultipartUpload> MDOffloadBucket::get_multipart_upload(
+    const std::string& oid,
+    std::optional<std::string> upload_id,
+    ACLOwner owner, ceph::real_time mtime)
+{
+  std::unique_ptr<MultipartUpload> nmu = next->get_multipart_upload(oid, upload_id, owner, mtime);
+
+  return std::make_unique<MDOffloadMultipartUpload>(std::move(nmu), this);
+}
+
+int MDOffloadBucket::list_multiparts(const DoutPrefixProvider* dpp,
+    const std::string& prefix,
+    std::string& marker,
+    const std::string& delim,
+    const int& max_uploads,
+    std::vector<std::unique_ptr<MultipartUpload>>& uploads,
+    std::map<std::string, bool>* common_prefixes,
+    bool* is_truncated)
+{
+  std::vector<std::unique_ptr<MultipartUpload>> nup;
+  int ret;
+
+  ret = next->list_multiparts(dpp, prefix, marker, delim, max_uploads, nup,
+      common_prefixes, is_truncated);
+  if (ret < 0)
+    return ret;
+
+  for (auto& ent : nup) {
+    uploads.emplace_back(std::make_unique<MDOffloadMultipartUpload>(std::move(ent), this));
+  }
+
+  return 0;
+}
+
+int MDOffloadBucket::abort_multiparts(const DoutPrefixProvider* dpp, CephContext* cct)
+{
+  return next->abort_multiparts(dpp, cct);
+}
+
 /****************************************************************************/
 
 // rgw::sal::MDOffloadObject
@@ -955,6 +994,30 @@ void MDOffloadObject::set_bucket(Bucket* b)
   COND_LOG_G(20, "MDOffloadObject({})::set_bucket: bucket='{}' key={}",
       (void*)this, b ? b->get_name() : std::string("<null>"), get_key());
   rgw::sal::FilterLogObject::set_bucket(b);
+}
+
+/****************************************************************************/
+
+// MDOffloadMultipartUpload
+
+int MDOffloadMultipartUpload::complete(const DoutPrefixProvider* dpp,
+    optional_yield y, CephContext* cct,
+    std::map<int, std::string>& part_etags,
+    std::list<rgw_obj_index_key>& remove_objs,
+    uint64_t& accounted_size, bool& compressed,
+    RGWCompressionInfo& cs_info, off_t& ofs,
+    std::string& tag, ACLOwner& owner,
+    uint64_t olh_epoch,
+    rgw::sal::Object* target_obj)
+{
+  COND_LOG_PFX(dpp, 20, "MDOffloadMultipartUpload::complete: bucket='{}' bucket_id='{}' object='{}' upload_id={}, attrs={}",
+      bucket->get_name(), bucket->get_bucket_id(), target_obj->get_key(), get_upload_id(), target_obj->get_attrs());
+
+  // XXX Process: Upload and then remove exportable attributes.
+
+  return FilterLogMultipartUpload::complete(dpp, y, cct, part_etags,
+      remove_objs, accounted_size, compressed, cs_info, ofs,
+      tag, owner, olh_epoch, target_obj);
 }
 
 /****************************************************************************/

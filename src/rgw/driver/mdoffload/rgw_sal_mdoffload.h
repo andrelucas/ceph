@@ -412,6 +412,21 @@ public:
 
   virtual std::unique_ptr<Object> get_object(const rgw_obj_key& key) override;
 
+  virtual std::unique_ptr<MultipartUpload> get_multipart_upload(
+      const std::string& oid,
+      std::optional<std::string> upload_id = std::nullopt,
+      ACLOwner owner = {}, ceph::real_time mtime = real_clock::now()) override;
+  virtual int list_multiparts(const DoutPrefixProvider* dpp,
+      const std::string& prefix,
+      std::string& marker,
+      const std::string& delim,
+      const int& max_uploads,
+      std::vector<std::unique_ptr<MultipartUpload>>& uploads,
+      std::map<std::string, bool>* common_prefixes,
+      bool* is_truncated) override;
+  virtual int abort_multiparts(const DoutPrefixProvider* dpp,
+      CephContext* cct) override;
+
 }; // class MDOffloadFilterBucket
 
 class MDOffloadObject : public FilterLogObject {
@@ -530,6 +545,29 @@ public:
   static bool attr_import_prohibited(const std::string& attr_name);
 
 }; // class MDOffloadObject
+
+class MDOffloadMultipartUpload : public FilterLogMultipartUpload {
+private:
+  MDOffloadFilterDriver* driver_ { nullptr };
+
+public:
+  MDOffloadMultipartUpload(std::unique_ptr<MultipartUpload> next,
+      Bucket* bucket)
+      : FilterLogMultipartUpload(std::move(next), bucket)
+  {
+  }
+  virtual ~MDOffloadMultipartUpload() override = default;
+
+  virtual int complete(const DoutPrefixProvider* dpp,
+      optional_yield y, CephContext* cct,
+      std::map<int, std::string>& part_etags,
+      std::list<rgw_obj_index_key>& remove_objs,
+      uint64_t& accounted_size, bool& compressed,
+      RGWCompressionInfo& cs_info, off_t& ofs,
+      std::string& tag, ACLOwner& owner,
+      uint64_t olh_epoch,
+      rgw::sal::Object* target_obj) override;
+}; // class MDOffloadMultipartUpload
 
 class MDOffloadWriter : public FilterLogWriter {
 private:
