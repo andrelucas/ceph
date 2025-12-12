@@ -113,7 +113,7 @@ int MDOffloadFilterDriver::initialize(CephContext* cct, const DoutPrefixProvider
   // XXX no mTLS, no channel parameters, no nothing.
   auto uri = cct->_conf->rgw_mdoffload_grpc_uri;
   if (uri.empty()) {
-    ldpp_dout(dpp, 0) << "MDOffloadFilterDriver::initialize: no gRPC URI configured" << dendl;
+    LOG_PFX(dpp, 0, "MDOffloadFilterDriver::initialize: no gRPC URI configured");
     return -1;
   }
   channelwrapper_ = std::make_shared<gutil::GrpcChannelWrapper>(uri);
@@ -179,15 +179,11 @@ std::unique_ptr<Object> MDOffloadFilterDriver::get_object(const rgw_obj_key& k)
 {
   // Called from RGWHandler_REST_S3::init_from_header() to create an object with no
   // bucket reference.
-  ldout(g_ceph_context, 20)
-      << fmt::format(FMT_STRING("MDOffloadFilterDriver({})::get_object: rgw_obj_key k={}"), (void*)this, k)
-      << dendl;
+  COND_LOG_G(20, "MDOffloadFilterDriver({})::get_object: rgw_obj_key k={}", (void*)this, k);
   std::unique_ptr<Object> o = next->get_object(k);
   if (!o) {
     // This really shouldn't happen, but log it if it does.
-    ldout(g_ceph_context, 0)
-        << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_object: next->get_object() failed for key {}"), k)
-        << dendl;
+    LOG_G(0, "MDOffloadFilterDriver::get_object: next->get_object() failed for key {}", k);
     return nullptr;
   }
   return std::make_unique<MDOffloadObject>(std::move(o), this);
@@ -200,20 +196,16 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
   int ret;
   User* nu = nextUser(u);
 
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 1) rgw_bucket b={} nu={}"), b,
-             fmt_maybe(nu))
-      << dendl;
+  COND_LOG_PFX(dpp, 20, "MDOffloadFilterDriver::get_bucket: (variant 1) rgw_bucket b={} nu={}", b,
+      fmt_maybe(nu));
 
   ret = next->get_bucket(dpp, nu, b, &nb, y);
   if (ret != 0)
     return ret;
 
   // Bucket exists. Need to preload the bucket attributes.
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 3) fetched bucket name={} id={}"),
-             nb->get_name(), nb->get_bucket_id())
-      << dendl;
+  COND_LOG_PFX(dpp, 20, "MDOffloadFilterDriver::get_bucket: (variant 3) fetched bucket name={} id={}",
+      nb->get_name(), nb->get_bucket_id());
 
   // Fetch attributes for this bucket.
   auto client = channel()->create_client<gutil::MDOffloadGrpcClient>();
@@ -228,9 +220,7 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
 
   auto status = client->stub()->GetBucketAttributes(&context, request, &response);
   if (!status.ok()) {
-    ldpp_dout(dpp, 0)
-        << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 3) gRPC GetBucketAttributes failed: {}"), status.error_message())
-        << dendl;
+    LOG_PFX(dpp, 0, "MDOffloadFilterDriver::get_bucket: (variant 3) gRPC GetBucketAttributes failed: {}", status.error_message());
     return -1;
   }
 
@@ -247,10 +237,8 @@ int MDOffloadFilterDriver::get_bucket(User* u, const RGWBucketInfo& i, std::uniq
   int ret;
   User* nu = nextUser(u);
 
-  ldout(g_ceph_context, 20)
-      << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 2) RGWBucketInfo i={} nu={}"), i,
-             fmt_maybe(nu))
-      << dendl;
+  COND_LOG_G(20, "MDOffloadFilterDriver::get_bucket: (variant 2) RGWBucketInfo i={} nu={}", i,
+      fmt_maybe(nu));
 
   ret = next->get_bucket(nu, i, &nb);
   if (ret != 0)
@@ -271,20 +259,16 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
   User* nu = nextUser(u);
   int ret;
 
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 3) tenant={} name={} nu={}"), tenant, name,
-             fmt_maybe(nu))
-      << dendl;
+  COND_LOG_PFX(dpp, 20, "MDOffloadFilterDriver::get_bucket: (variant 3) tenant={} name={} nu={}", tenant, name,
+      fmt_maybe(nu));
 
   ret = next->get_bucket(dpp, nu, tenant, name, &nb, y);
   if (ret != 0)
     return ret;
 
   // Bucket exists. Need to preload the bucket attributes.
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 3) fetched bucket name={} id={}"),
-             nb->get_name(), nb->get_bucket_id())
-      << dendl;
+  COND_LOG_PFX(dpp, 20, "MDOffloadFilterDriver::get_bucket: (variant 3) fetched bucket name={} id={}",
+      nb->get_name(), nb->get_bucket_id());
 
   // Fetch attributes for this bucket.
   auto client = channel()->create_client<gutil::MDOffloadGrpcClient>();
@@ -299,9 +283,7 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
 
   auto status = client->stub()->GetBucketAttributes(&context, request, &response);
   if (!status.ok()) {
-    ldpp_dout(dpp, 0)
-        << fmt::format(FMT_STRING("MDOffloadFilterDriver::get_bucket: (variant 3) gRPC GetBucketAttributes failed: {}"), status.error_message())
-        << dendl;
+    LOG_PFX(dpp, 0, "MDOffloadFilterDriver::get_bucket: (variant 3) gRPC GetBucketAttributes failed: {}", status.error_message());
     return -1;
   }
   // We'll load the attributes into the MDOffloadBucket when we create it below.
@@ -383,16 +365,12 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
     return ret;
 
   if (!nb) {
-    ldpp_dout(dpp, 0)
-        << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: next->create_bucket() returned null bucket for name={}"), b.name)
-        << dendl;
+    LOG_PFX(dpp, 0, "MDOffloadUser::create_bucket: next->create_bucket() returned null bucket for name={}", b.name);
     return -EINVAL;
   }
 
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: parent driver created bucket name={} id={}"),
-             nb->get_name(), nb->get_bucket_id())
-      << dendl;
+  COND_LOG_PFX(dpp, 20, "MDOffloadUser::create_bucket: parent driver created bucket name={} id={}",
+      nb->get_name(), nb->get_bucket_id());
 
   // Set the attributes for this bucket in the remote store.
   auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
@@ -408,23 +386,17 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
   request.set_bucket_id(nb->get_bucket_id());
 
   for (const auto& it : attrs) {
-    ldpp_dout(dpp, 20)
-        << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: setting attr '{}' ({} bytes)'"), it.first, it.second.length())
-        << dendl;
+    COND_LOG_PFX(dpp, 20, "MDOffloadUser::create_bucket: setting attr '{}' ({} bytes)'", it.first, it.second.length());
     (*request.mutable_attributes_to_add())[it.first] = it.second.to_str();
   }
   auto status = client->stub()->SetBucketAttributes(&context, request, &response);
   if (!status.ok()) {
-    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: gRPC SetBucketAttributes failed: {}"),
-        status.error_message())
-                      << dendl;
+    LOG_PFX(dpp, 0, "MDOffloadUser::create_bucket: gRPC SetBucketAttributes failed: {}", status.error_message());
     return -EINVAL; // XXX appropriate error code?
   }
 
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadUser::create_bucket: name={} attrs={}"),
-             b.name, attrs)
-      << dendl;
+  COND_LOG_PFX(dpp, 20, "MDOffloadUser::create_bucket: name={} id={} attrs={}",
+      nb->get_name(), nb->get_bucket_id(), attrs);
 
   Bucket* fb = new MDOffloadBucket(std::move(nb), this, driver_);
   // Load the real attributes.
@@ -570,13 +542,12 @@ int MDOffloadObject::MDOffloadReadOp::prepare(optional_yield y, const DoutPrefix
   // Call the base class, then load all the attributes. This is the first
   // opportunity to work on object attributes.
 
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::prepare pre-exec"))
-      << dendl;
+  COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadReadOp::prepare: pre-exec");
+
   // Rados ReadOp::prepare() will load xattrs.
   int ret = FilterLogObject::FilterLogReadOp::prepare(y, dpp);
   if (ret < 0) {
-    ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::prepare() failed ret={}"), ret) << dendl;
+    LOG_PFX(dpp, 0, "MDOffloadObject::MDOffloadReadOp::prepare: FilterLogReadOp::prepare() failed ret={}", ret);
     return ret;
   }
 
@@ -606,16 +577,12 @@ int MDOffloadObject::MDOffloadReadOp::prepare(optional_yield y, const DoutPrefix
   request.set_object_instance_id(key.instance);
   auto status = client->stub()->GetObjectAttributes(&context, request, &response);
   if (!status.ok()) {
-    ldpp_dout(dpp, 0) << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::prepare: gRPC GetObjectAttributes failed: {}"),
-        status.error_message())
-                      << dendl;
+    LOG_PFX(dpp, 0, "MDOffloadObject::MDOffloadReadOp::prepare: gRPC GetObjectAttributes failed: {}", status.error_message());
     return ERR_INTERNAL_ERROR; // XXX appropriate error code?
   }
   Attrs fetched_attrs = akamai::grpcutil::attrs_from_proto(response.attributes());
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::prepare: fetched attributes for bucket {} id {} object key={} attrs={}"),
-             bucket_->get_name(), bucket_->get_bucket_id(), key, fetched_attrs)
-      << dendl;
+  COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadReadOp::prepare: fetched attributes for bucket {} id {} object key={} attrs={}",
+      bucket_->get_name(), bucket_->get_bucket_id(), key, fetched_attrs);
 
   // Loop through the attributes we fetched. If the attribute is marked for a
   // diff check, do so. Otherwise merge the attribute directly.
@@ -627,16 +594,12 @@ int MDOffloadObject::MDOffloadReadOp::prepare(optional_yield y, const DoutPrefix
         // Attribute exists locally, compare.
         if (local_it->second == it.second) {
           // No change.
-          ldpp_dout(dpp, 20)
-              << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::prepare: attribute '{}' unchanged"), it.first)
-              << dendl;
+          COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadReadOp::prepare: attribute '{}' unchanged", it.first);
           should_add = false;
 
         } else {
           // Changed.
-          ldpp_dout(dpp, 1)
-              << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::prepare: attribute '{}' CHANGED, updating"), it.first)
-              << dendl;
+          LOG_PFX(dpp, 1, "MDOffloadObject::MDOffloadReadOp::prepare: attribute '{}' CHANGED, updating", it.first);
         }
       }
     }
@@ -644,9 +607,7 @@ int MDOffloadObject::MDOffloadReadOp::prepare(optional_yield y, const DoutPrefix
       attr[it.first] = it.second;
     }
   }
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::prepare: merged attributes={}"), attr)
-      << dendl;
+  COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadReadOp::prepare: merged attributes={}", attr);
 
   return 0;
 }
@@ -655,18 +616,14 @@ int MDOffloadObject::MDOffloadReadOp::read(int64_t ofs, int64_t end, bufferlist&
     optional_yield y, const DoutPrefixProvider* dpp)
 {
   // Passthrough with logging.
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::read: ofs={} end={}"), ofs, end)
-      << dendl;
+  COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadReadOp::read: ofs={} end={}", ofs, end);
   return FilterLogObject::FilterLogReadOp::read(ofs, end, bl, y, dpp);
 }
 
 int MDOffloadObject::MDOffloadReadOp::get_attr(const DoutPrefixProvider* dpp, const char* name, bufferlist& dest, optional_yield y)
 {
   // Passthrough with logging.
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::get_attr: name='{}'"), name)
-      << dendl;
+  COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadReadOp::get_attr: name='{}'", name);
   return FilterLogObject::FilterLogReadOp::get_attr(dpp, name, dest, y);
 }
 
@@ -674,9 +631,7 @@ int MDOffloadObject::MDOffloadReadOp::iterate(const DoutPrefixProvider* dpp, int
     int64_t end, RGWGetDataCB* cb, optional_yield y)
 {
   // Passthrough with logging.
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::iterate: ofs={} end={}"), ofs, end)
-      << dendl;
+  COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadReadOp::iterate: ofs={} end={}", ofs, end);
   return FilterLogObject::FilterLogReadOp::iterate(dpp, ofs, end, cb, y);
 }
 
@@ -692,8 +647,7 @@ std::unique_ptr<Object::DeleteOp> MDOffloadObject::get_delete_op()
 
 int MDOffloadObject::MDOffloadDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional_yield y, uint32_t flags)
 {
-  // Passthrough with logging.
-  COND_LOG_D(dpp, 20, "MDOffloadObject::MDOffloadDeleteOp::delete_obj: bucket={} key={} flags={}",
+  COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadDeleteOp::delete_obj: bucket={} key={} flags={}",
       bucket_->get_name(), object_->get_key(), flags);
   return FilterLogObject::FilterLogDeleteOp::delete_obj(dpp, y, flags);
 }
@@ -702,18 +656,40 @@ int MDOffloadObject::delete_object(const DoutPrefixProvider* dpp,
     optional_yield y,
     uint32_t flags)
 {
-  // Passthrough with logging.
-  COND_LOG_D(dpp, 20, "MDOffloadObject::delete_object: bucket={} key={} flags={}",
+  // RGWCompleteMultipart::execute() calls this instead of using the DeleteOp,
+  // so it needs the gRPC callout.
+
+  COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_object: bucket={} key={} flags={}",
       get_bucket()->get_name(), get_key(), flags);
+
+  auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
+  ::grpc::ClientContext context;
+  mdoffload::v1::PurgeObjectAttributesRequest request;
+  mdoffload::v1::PurgeObjectAttributesResponse response;
+  auto key = get_key();
+  request.set_bucket_name(get_bucket()->get_name());
+  request.set_bucket_id(get_bucket()->get_bucket_id());
+  request.set_object_key(key.name);
+  request.set_object_instance_id(key.instance);
+  auto status = client->stub()->PurgeObjectAttributes(&context, request, &response);
+  if (!status.ok()) {
+    LOG_PFX(dpp, 0, "MDOffloadObject::delete_object: gRPC PurgeObjectAttributes failed: {}", status.error_message());
+    // Fall through; we still want to delete the object even
+    // if we can't purge the attributes.
+  }
+
   return next->delete_object(dpp, y, flags);
 }
 
 int MDOffloadObject::delete_obj_aio(const DoutPrefixProvider* dpp, RGWObjState* astate, Completions* aio,
     bool keep_index_consistent, optional_yield y)
 {
-  // Passthrough with logging.
-  COND_LOG_D(dpp, 20, "MDOffloadObject::delete_obj_aio: bucket={} key={} keep_index_consistent={}",
+  COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_aio: bucket={} key={} keep_index_consistent={}",
       get_bucket()->get_name(), get_key(), keep_index_consistent);
+
+  // XXX NO CODE CALLS THIS! (In v18.2.7) Should we implement attribute
+  // purging here too?
+
   return next->delete_obj_aio(dpp, astate, aio, keep_index_consistent, y);
 }
 
@@ -752,18 +728,14 @@ int MDOffloadObject::set_obj_attrs(const DoutPrefixProvider* dpp, Attrs* setattr
   }
   if (delattrs != nullptr) {
     for (const auto& it : *delattrs) {
-      ldpp_dout(dpp, 20)
-          << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: deleting attr '{}'"), it.first)
-          << dendl;
+      COND_LOG_PFX(dpp, 20, "MDOffloadObject::set_obj_attrs: deleting attr '{}'", it.first);
       request.add_attributes_to_delete(it.first);
       ;
     }
   }
   auto status = client->stub()->SetObjectAttributes(&context, request, &response);
   if (!status.ok()) {
-    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: gRPC SetObjectAttributes failed: {}"),
-        status.error_message())
-                       << dendl;
+    COND_LOG_PFX(dpp, 20, "MDOffloadObject::set_obj_attrs: gRPC SetObjectAttributes failed: {}", status.error_message());
     return -EINVAL; // XXX appropriate error code?
   }
 
@@ -822,9 +794,8 @@ int MDOffloadObject::get_obj_attrs(optional_yield y, const DoutPrefixProvider* d
   request.set_object_instance_id(next_obj->get_key().instance);
   auto status = client->stub()->GetObjectAttributes(&context, request, &response);
   if (!status.ok()) {
-    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("MDOffloadObject::get_obj_attrs: gRPC GetObjectAttributes failed: {}"),
-        status.error_message())
-                       << dendl;
+    COND_LOG_PFX(dpp, 20, "MDOffloadObject::get_obj_attrs: gRPC GetObjectAttributes failed: {}",
+        status.error_message());
     return -EINVAL; // XXX appropriate error code?
   }
 
@@ -844,10 +815,7 @@ int MDOffloadObject::get_obj_attrs(optional_yield y, const DoutPrefixProvider* d
 
   // XXX passthrough
   FilterLogObject::set_attrs(std::move(new_attrs));
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::get_obj_attrs: set_attrs() passthrough attrs={}"),
-             FilterLogObject::get_attrs())
-      << dendl;
+  COND_LOG_PFX(dpp, 20, "MDOffloadObject::get_obj_attrs: set_attrs() passthrough attrs={}", FilterLogObject::get_attrs());
 
   return 0;
 }
@@ -879,9 +847,7 @@ int MDOffloadObject::modify_obj_attrs(const char* attr_name, bufferlist& attr_va
 
   auto status = client->stub()->SetObjectAttributes(&context, request, &response);
   if (!status.ok()) {
-    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("MDOffloadObject::modify_obj_attrs: gRPC SetObjectAttributes failed: {}"),
-        status.error_message())
-                       << dendl;
+    COND_LOG_PFX(dpp, 20, "MDOffloadObject::modify_obj_attrs: gRPC SetObjectAttributes failed: {}", status.error_message());
     return -EINVAL; // XXX appropriate error code?
   }
 
@@ -898,10 +864,7 @@ int MDOffloadObject::modify_obj_attrs(const char* attr_name, bufferlist& attr_va
   auto& attrs = FilterLogObject::get_attrs();
   attrs[attr_name] = attr_val;
   // set_attrs(attrs);
-  ldpp_dout(dpp, 20)
-      << fmt::format(FMT_STRING("MDOffloadObject::modify_obj_attrs: set_attrs() attrs={}"),
-             attrs)
-      << dendl;
+  COND_LOG_PFX(dpp, 20, "MDOffloadObject::modify_obj_attrs: set_attrs() attrs={}", attrs);
 
   return 0;
 }
@@ -918,7 +881,7 @@ int MDOffloadObject::delete_obj_attrs(const DoutPrefixProvider* dpp, const char*
 
   if (!MDOffloadObject::attr_is_exported(attr_name)) {
     // Passthrough with logging.
-    COND_LOG_D(dpp, 20, "MDOffloadObject::delete_obj_attrs: non-exported attr_name='{}', passthrough", attr_name);
+    COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: non-exported attr_name='{}', passthrough", attr_name);
     return FilterLogObject::delete_obj_attrs(dpp, attr_name, y);
 
   } else {
@@ -938,7 +901,7 @@ int MDOffloadObject::delete_obj_attrs(const DoutPrefixProvider* dpp, const char*
 
     auto status = client->stub()->SetObjectAttributes(&context, request, &response);
     if (!status.ok()) {
-      COND_LOG_D(dpp, 20, "MDOffloadObject::delete_obj_attrs: gRPC SetObjectAttributes failed: {}", status.error_message());
+      COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: gRPC SetObjectAttributes failed: {}", status.error_message());
       return -EINVAL; // XXX appropriate error code?
     }
 
@@ -946,7 +909,7 @@ int MDOffloadObject::delete_obj_attrs(const DoutPrefixProvider* dpp, const char*
     Attrs rmattr;
     rmattr[attr_name] = bufferlist();
 
-    COND_LOG_D(dpp, 20, "MDOffloadObject::delete_obj_attrs: attr_name={}", attr_name);
+    COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: attr_name={}", attr_name);
     return FilterLogObject::set_obj_attrs(dpp, nullptr, &rmattr, y);
   }
 }
@@ -962,14 +925,10 @@ const Attrs& MDOffloadObject::get_attrs(void) const
   // Passthrough.
   const auto& a = FilterLogObject::get_attrs();
   if (get_bucket()) {
-    ldout(g_ceph_context, 20)
-        << fmt::format(FMT_STRING("MDOffloadObject::get_attrs (const): bucket={} bucket_id={} attrs={}"),
-               get_bucket()->get_name(), get_bucket()->get_bucket_id(), a)
-        << dendl;
+    COND_LOG_G(20, "MDOffloadObject::get_attrs (const): bucket={} bucket_id={} attrs={}",
+        get_bucket()->get_name(), get_bucket()->get_bucket_id(), a);
   } else {
-    ldout(g_ceph_context, 20)
-        << fmt::format(FMT_STRING("MDOffloadObject::get_attrs (const): bucket=<null> attrs={}"), a)
-        << dendl;
+    COND_LOG_G(20, "MDOffloadObject::get_attrs (const): bucket=<null> attrs={}", a);
   }
   return a;
 }
@@ -988,7 +947,8 @@ bool MDOffloadObject::has_attrs(void)
 
 void MDOffloadObject::set_bucket(Bucket* b)
 {
-  COND_LOG_G(20, "MDOffloadObject({})::set_bucket: bucket='{}' key={}", (void*)this, b ? b->get_name() : std::string("<null>"), get_key());
+  COND_LOG_G(20, "MDOffloadObject({})::set_bucket: bucket='{}' key={}",
+      (void*)this, b ? b->get_name() : std::string("<null>"), get_key());
   rgw::sal::FilterLogObject::set_bucket(b);
 }
 
@@ -998,19 +958,15 @@ void MDOffloadObject::set_bucket(Bucket* b)
 
 int MDOffloadWriter::prepare(optional_yield y)
 {
-  ldout(g_ceph_context, 20)
-      << fmt::format(FMT_STRING("MDOffloadWriter::prepare: object='{}'"),
-             obj ? obj->get_name() : std::string("<null>"))
-      << dendl;
+  COND_LOG_G(20, "MDOffloadWriter::prepare: object='{}'",
+      obj ? obj->get_name() : std::string("<null>"));
   return FilterLogWriter::prepare(y);
 }
 
 int MDOffloadWriter::process(bufferlist&& data, uint64_t offset)
 {
-  ldout(g_ceph_context, 20)
-      << fmt::format(FMT_STRING("MDOffloadWriter::process: object='{}' offset={} len={}"),
-             obj ? obj->get_name() : std::string("<null>"), offset, data.length())
-      << dendl;
+  COND_LOG_G(20, "MDOffloadWriter::process: object='{}' offset={} len={}",
+      obj ? obj->get_name() : std::string("<null>"), offset, data.length());
   return FilterLogWriter::process(std::move(data), offset);
 }
 
@@ -1020,25 +976,19 @@ int MDOffloadWriter::complete(size_t accounted_size, const std::string& etag,
     const char* if_match, const char* if_nomatch, const std::string* user_data,
     rgw_zone_set* zones_trace, bool* canceled, optional_yield y, uint32_t flags)
 {
-  ldout(g_ceph_context, 20)
-      << fmt::format(FMT_STRING("MDOffloadWriter::complete: object='{}' accounted_size={} flags={} attrs={}"),
-             obj ? obj->get_name() : std::string("<null>"), accounted_size, flags, attrs)
-      << dendl;
-
+  COND_LOG_G(20, "MDOffloadWriter::complete: object='{}' accounted_size={} flags={} attrs={}",
+      obj ? obj->get_name() : std::string("<null>"), accounted_size, flags, attrs);
   // Send the full set of attributes to the remote store.
   auto object = obj;
   if (!object) {
     // XXX Can this really happen?
-    ldout(g_ceph_context, 0)
-        << fmt::format(FMT_STRING("MDOffloadWriter::complete: no object"))
-        << dendl;
+    LOG_G(0, "MDOffloadWriter::complete: no object");
     return -EINVAL; // XXX appropriate error code?
   }
   auto bucket = obj->get_bucket();
   if (!bucket) {
-    ldout(g_ceph_context, 0)
-        << fmt::format(FMT_STRING("MDOffloadWriter::complete: no bucket for object='{}'"), obj ? obj->get_name() : std::string("<null>"))
-        << dendl;
+    LOG_G(0, "MDOffloadWriter::complete: no bucket for object='{}'",
+        obj ? obj->get_name() : std::string("<null>"));
     return -EINVAL; // XXX appropriate error code?
   }
 
@@ -1058,21 +1008,15 @@ int MDOffloadWriter::complete(size_t accounted_size, const std::string& etag,
 
   for (const auto& it : attrs) {
     if (MDOffloadObject::attr_is_exported(it.first)) {
-      ldout(g_ceph_context, 20)
-          << fmt::format(FMT_STRING("{}: setting attr '{}' ({} bytes)'"), msg_prefix, it.first, it.second.length())
-          << dendl;
+      COND_LOG_G(20, "{}: setting attr '{}' ({} bytes)", msg_prefix, it.first, it.second.length());
       (*request.mutable_attributes_to_add())[it.first] = it.second.to_str();
       attr_count++;
     } else {
-      ldout(g_ceph_context, 20)
-          << fmt::format(FMT_STRING("MDOffloadWriter::complete: skipping non-exported attr '{}'"), it.first)
-          << dendl;
+      COND_LOG_G(20, "MDOffloadWriter::complete: skipping non-exported attr '{}'", it.first);
     }
   }
   if (attr_count == 0) {
-    ldout(g_ceph_context, 20)
-        << fmt::format(FMT_STRING("{}: no exported attributes to set for object='{}'"), msg_prefix, object->get_name())
-        << dendl;
+    COND_LOG_G(20, "{}: no exported attributes to set for object='{}'", msg_prefix, object->get_name());
   } else {
 
     request.set_bucket_name(bucket->get_name());
@@ -1083,9 +1027,7 @@ int MDOffloadWriter::complete(size_t accounted_size, const std::string& etag,
 
     auto status = client->stub()->SetObjectAttributes(&context, request, &response);
     if (!status.ok()) {
-      ldout(g_ceph_context, 0) << fmt::format(FMT_STRING("{}: gRPC SetObjectAttributes failed: {}"),
-          msg_prefix, status.error_message())
-                               << dendl;
+      LOG_G(0, "{}: gRPC SetObjectAttributes failed: {}", msg_prefix, status.error_message());
       return -ERR_INTERNAL_ERROR; // XXX appropriate error code?
     }
   }
@@ -1109,10 +1051,7 @@ int MDOffloadWriter::complete(size_t accounted_size, const std::string& etag,
 
   for (const auto& it : attrs) {
     if (MDOffloadObject::attr_import_prohibited(it.first)) {
-      ldout(g_ceph_context, 1)
-          << fmt::format(FMT_STRING("{}: removing external-only attribute '{}' from local attrs"),
-                 msg_prefix, it.first)
-          << dendl;
+      LOG_G(1, "{}: removing external-only attribute '{}' from local attrs", msg_prefix, it.first);
       attrs.erase(it.first);
     }
   }
