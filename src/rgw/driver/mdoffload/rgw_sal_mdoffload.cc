@@ -14,46 +14,13 @@
 #include <set>
 
 #include "common/dout.h"
-#include "global/global_context.h"
 #include "mdoffload/v1/mdoffload.pb.h"
 #include "rgw_common.h"
 #include "rgw_sal.h"
 
+#include "mdoffload_logutil.h"
+
 #define dout_subsys ceph_subsys_rgw
-
-// Shorthand to check if we are configured at runtime to emit logs at a
-// certain level. Used to avoid building log message strings unnecessarily.
-#define LOG_ENABLED(cct, level) ((cct)->_conf->subsys.should_gather(dout_subsys, (level)))
-// Variant taking a dpp instead of a cct.
-#define LOG_ENABLED_PFX(dpp, level) LOG_ENABLED((dpp)->get_cct(), level)
-// Global version.
-#define LOG_ENABLED_G(level) LOG_ENABLED(g_ceph_context, level)
-
-#define LOG(cct, level, msg, ...)                                                          \
-  do {                                                                                     \
-    ldout(cct, level) << fmt::format(FMT_STRING(msg) __VA_OPT__(, ) __VA_ARGS__) << dendl; \
-  } while (0)
-
-#define LOG_PFX(dpp, level, msg, ...)                                                          \
-  do {                                                                                         \
-    ldpp_dout(dpp, level) << fmt::format(FMT_STRING(msg) __VA_OPT__(, ) __VA_ARGS__) << dendl; \
-  } while (0)
-
-#define LOG_G(level, msg, ...) LOG(g_ceph_context, level, msg __VA_OPT__(, ) __VA_ARGS__)
-
-#define COND_LOG(cct, level, msg, ...)                                                       \
-  do {                                                                                       \
-    if (LOG_ENABLED(cct, level)) {                                                           \
-      ldout(cct, level) << fmt::format(FMT_STRING(msg) __VA_OPT__(, ) __VA_ARGS__) << dendl; \
-    }                                                                                        \
-  } while (0)
-#define COND_LOG_PFX(dpp, level, msg, ...)                                                       \
-  do {                                                                                           \
-    if (LOG_ENABLED_PFX(dpp, level)) {                                                           \
-      ldpp_dout(dpp, level) << fmt::format(FMT_STRING(msg) __VA_OPT__(, ) __VA_ARGS__) << dendl; \
-    }                                                                                            \
-  } while (0)
-#define COND_LOG_G(level, msg, ...) COND_LOG(g_ceph_context, level, msg __VA_OPT__(, ) __VA_ARGS__)
 
 namespace akamai::grpcutil {
 rgw::sal::Attrs attrs_from_proto(const ::google::protobuf::Map<std::string, std::string>& proto_attrs)
