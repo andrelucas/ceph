@@ -490,7 +490,7 @@ int MDOffloadBucket::abort_multiparts(const DoutPrefixProvider* dpp, CephContext
 // persists in the req_state and is upgraded using [driver]::set_bucket()
 // later, in init_permissions().
 MDOffloadObject::MDOffloadObject(std::unique_ptr<Object> next, MDOffloadFilterDriver* driver)
-    : FilterLogObject(std::move(next))
+    : MDOFilterParentObject(std::move(next))
     , driver_(driver)
 {
   COND_LOG_G(20, "MDOffloadObject({}):: created object for (no bucket) key={}", (void*)this, get_key());
@@ -498,7 +498,7 @@ MDOffloadObject::MDOffloadObject(std::unique_ptr<Object> next, MDOffloadFilterDr
 
 // Constructor with bucket.
 MDOffloadObject::MDOffloadObject(std::unique_ptr<Object> next, Bucket* bucket, MDOffloadFilterDriver* driver)
-    : FilterLogObject(std::move(next), bucket)
+    : MDOFilterParentObject(std::move(next), bucket)
     , driver_(driver)
 {
   COND_LOG_G(20, "MDOffloadObject({}):: created object for bucket='{}' key={}",
@@ -507,7 +507,7 @@ MDOffloadObject::MDOffloadObject(std::unique_ptr<Object> next, Bucket* bucket, M
 
 // 'Clone' constructor.
 MDOffloadObject::MDOffloadObject(MDOffloadObject& _o)
-    : FilterLogObject(_o)
+    : MDOFilterParentObject(_o)
 {
   COND_LOG_G(20, "MDOffloadObject({}):: clone from MDOffloadObject({}) for key={}", (void*)this, (void*)&_o, get_key());
   // Clone local fields.
@@ -520,7 +520,7 @@ std::unique_ptr<Object::ReadOp> MDOffloadObject::get_read_op()
 {
   COND_LOG_G(20, "MDOffloadObject::get_read_op: key={}", get_key());
 
-  // Almost-duplicate of FilterLogObject::get_read_op() returning the correct
+  // Almost-duplicate of MDOFilter*Object::get_read_op() returning the correct
   // type.
   std::unique_ptr<ReadOp> r = next->get_read_op();
 
@@ -536,9 +536,9 @@ int MDOffloadObject::MDOffloadReadOp::prepare(optional_yield y, const DoutPrefix
   COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadReadOp::prepare: pre-exec");
 
   // Rados ReadOp::prepare() will load xattrs.
-  int ret = FilterLogObject::FilterLogReadOp::prepare(y, dpp);
+  int ret = MDOFilterParentObjectReadOp::prepare(y, dpp);
   if (ret < 0) {
-    LOG_PFX(dpp, 0, "MDOffloadObject::MDOffloadReadOp::prepare: FilterLogReadOp::prepare() failed ret={}", ret);
+    LOG_PFX(dpp, 0, "MDOffloadObject::MDOffloadReadOp::prepare: MDOFilter*ReadOp::prepare() failed ret={}", ret);
     return ret;
   }
 
@@ -608,14 +608,14 @@ int MDOffloadObject::MDOffloadReadOp::read(int64_t ofs, int64_t end, bufferlist&
 {
   // Passthrough with logging.
   COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadReadOp::read: ofs={} end={}", ofs, end);
-  return FilterLogObject::FilterLogReadOp::read(ofs, end, bl, y, dpp);
+  return MDOFilterParentObjectReadOp::read(ofs, end, bl, y, dpp);
 }
 
 int MDOffloadObject::MDOffloadReadOp::get_attr(const DoutPrefixProvider* dpp, const char* name, bufferlist& dest, optional_yield y)
 {
   // Passthrough with logging.
   COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadReadOp::get_attr: name='{}'", name);
-  return FilterLogObject::FilterLogReadOp::get_attr(dpp, name, dest, y);
+  return MDOFilterParentObjectReadOp::get_attr(dpp, name, dest, y);
 }
 
 int MDOffloadObject::MDOffloadReadOp::iterate(const DoutPrefixProvider* dpp, int64_t ofs,
@@ -623,14 +623,14 @@ int MDOffloadObject::MDOffloadReadOp::iterate(const DoutPrefixProvider* dpp, int
 {
   // Passthrough with logging.
   COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadReadOp::iterate: ofs={} end={}", ofs, end);
-  return FilterLogObject::FilterLogReadOp::iterate(dpp, ofs, end, cb, y);
+  return MDOFilterParentObjectReadOp::iterate(dpp, ofs, end, cb, y);
 }
 
 // rgw::sal::MDOffloadObject::MDOffloadDeleteOp
 
 std::unique_ptr<Object::DeleteOp> MDOffloadObject::get_delete_op()
 {
-  // Almost-duplicate of FilterLogObject::get_delete_op() returning the correct
+  // Almost-duplicate of Filter*Object::get_delete_op() returning the correct
   // type.
   std::unique_ptr<DeleteOp> d = next->get_delete_op();
   return std::make_unique<MDOffloadDeleteOp>(std::move(d), this, get_bucket(), driver_);
@@ -641,9 +641,9 @@ int MDOffloadObject::MDOffloadDeleteOp::delete_obj(const DoutPrefixProvider* dpp
   COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadDeleteOp::delete_obj: bucket={} key={} flags={}",
       bucket_->get_name(), object_->get_key(), flags);
 
-  auto ret = FilterLogObject::FilterLogDeleteOp::delete_obj(dpp, y, flags);
+  auto ret = MDOFilterParentObjectDeleteOp::delete_obj(dpp, y, flags);
   if (ret < 0) {
-    LOG_PFX(dpp, 0, "MDOffloadObject::MDOffloadDeleteOp::delete_obj: FilterLogDeleteOp::delete_obj() failed ret={}", ret);
+    LOG_PFX(dpp, 0, "MDOffloadObject::MDOffloadDeleteOp::delete_obj: Filter*DeleteOp::delete_obj() failed ret={}", ret);
     return ret;
   }
 
@@ -771,18 +771,18 @@ int MDOffloadObject::set_obj_attrs(const DoutPrefixProvider* dpp, Attrs* setattr
   // cached_attrs_ = new_attrs;
   // has_attrs_ = true;
 
-  int ret = FilterLogObject::set_obj_attrs(dpp, setattrs, delattrs, y);
+  int ret = MDOFilterParentObject::set_obj_attrs(dpp, setattrs, delattrs, y);
   if (ret < 0) {
     // XXX uh-oh - what do we do here? We've already modified the remote.
     // XXX FIXME
     ldpp_dout(dpp, 20)
-        << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: FilterLogObject::set_obj_attrs() failed: {}"), ret)
+        << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: Filter*Object::set_obj_attrs() failed: {}"), ret)
         << dendl;
     return ret;
   }
   ldpp_dout(dpp, 20)
       << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: set_attrs() attrs={}"),
-             FilterLogObject::get_attrs())
+             MDOFilterParentObject::get_attrs())
       << dendl;
   return 0;
 }
@@ -825,8 +825,8 @@ int MDOffloadObject::get_obj_attrs(optional_yield y, const DoutPrefixProvider* d
   //     << dendl;
 
   // XXX passthrough
-  FilterLogObject::set_attrs(std::move(new_attrs));
-  COND_LOG_PFX(dpp, 20, "MDOffloadObject::get_obj_attrs: set_attrs() passthrough attrs={}", FilterLogObject::get_attrs());
+  MDOFilterParentObject::set_attrs(std::move(new_attrs));
+  COND_LOG_PFX(dpp, 20, "MDOffloadObject::get_obj_attrs: set_attrs() passthrough attrs={}", MDOFilterParentObject::get_attrs());
 
   return 0;
 }
@@ -872,7 +872,7 @@ int MDOffloadObject::modify_obj_attrs(const char* attr_name, bufferlist& attr_va
   // cached_attrs_ = new_attrs;
 
   // XXX passthrough
-  auto& attrs = FilterLogObject::get_attrs();
+  auto& attrs = MDOFilterParentObject::get_attrs();
   attrs[attr_name] = attr_val;
   // set_attrs(attrs);
   COND_LOG_PFX(dpp, 20, "MDOffloadObject::modify_obj_attrs: set_attrs() attrs={}", attrs);
@@ -893,7 +893,7 @@ int MDOffloadObject::delete_obj_attrs(const DoutPrefixProvider* dpp, const char*
   if (!MDOffloadObject::attr_is_exported(attr_name)) {
     // Passthrough with logging.
     COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: non-exported attr_name='{}', passthrough", attr_name);
-    return FilterLogObject::delete_obj_attrs(dpp, attr_name, y);
+    return MDOFilterParentObject::delete_obj_attrs(dpp, attr_name, y);
 
   } else {
     // Send our gRPC to delete the attribute.
@@ -921,20 +921,20 @@ int MDOffloadObject::delete_obj_attrs(const DoutPrefixProvider* dpp, const char*
     rmattr[attr_name] = bufferlist();
 
     COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: attr_name={}", attr_name);
-    return FilterLogObject::set_obj_attrs(dpp, nullptr, &rmattr, y);
+    return MDOFilterParentObject::set_obj_attrs(dpp, nullptr, &rmattr, y);
   }
 }
 
 Attrs& MDOffloadObject::get_attrs(void)
 {
   // Passthrough.
-  return FilterLogObject::get_attrs();
+  return MDOFilterParentObject::get_attrs();
 }
 
 const Attrs& MDOffloadObject::get_attrs(void) const
 {
   // Passthrough.
-  const auto& a = FilterLogObject::get_attrs();
+  const auto& a = MDOFilterParentObject::get_attrs();
   if (get_bucket()) {
     COND_LOG_G(20, "MDOffloadObject::get_attrs (const): bucket={} bucket_id={} attrs={}",
         get_bucket()->get_name(), get_bucket()->get_bucket_id(), a);
@@ -947,20 +947,20 @@ const Attrs& MDOffloadObject::get_attrs(void) const
 int MDOffloadObject::set_attrs(Attrs a)
 {
   // Passthrough.
-  return FilterLogObject::set_attrs(std::move(a));
+  return MDOFilterParentObject::set_attrs(std::move(a));
 }
 
 bool MDOffloadObject::has_attrs(void)
 {
   // Passthrough.
-  return FilterLogObject::has_attrs();
+  return MDOFilterParentObject::has_attrs();
 }
 
 void MDOffloadObject::set_bucket(Bucket* b)
 {
   COND_LOG_G(20, "MDOffloadObject({})::set_bucket: bucket='{}' key={}",
       (void*)this, b ? b->get_name() : std::string("<null>"), get_key());
-  rgw::sal::FilterLogObject::set_bucket(b);
+  rgw::sal::MDOFilterParentObject::set_bucket(b);
 }
 
 /****************************************************************************/
@@ -995,14 +995,14 @@ int MDOffloadWriter::prepare(optional_yield y)
 {
   COND_LOG_G(20, "MDOffloadWriter::prepare: object='{}'",
       obj ? obj->get_name() : std::string("<null>"));
-  return FilterLogWriter::prepare(y);
+  return MDOFilterParentWriter::prepare(y);
 }
 
 int MDOffloadWriter::process(bufferlist&& data, uint64_t offset)
 {
   COND_LOG_G(20, "MDOffloadWriter::process: object='{}' offset={} len={}",
       obj ? obj->get_name() : std::string("<null>"), offset, data.length());
-  return FilterLogWriter::process(std::move(data), offset);
+  return MDOFilterParentWriter::process(std::move(data), offset);
 }
 
 int MDOffloadWriter::complete(size_t accounted_size, const std::string& etag,
@@ -1072,7 +1072,7 @@ int MDOffloadWriter::complete(size_t accounted_size, const std::string& etag,
   //            object->get_name(), attrs)
   //     << dendl;
   // Attrs empty_attrs;
-  // return FilterLogWriter::complete(accounted_size, etag, mtime, set_mtime, empty_attrs,
+  // return MDOFilterParentWriter::complete(accounted_size, etag, mtime, set_mtime, empty_attrs,
   //     delete_at, if_match, if_nomatch, user_data, zones_trace, canceled, y,
   //     flags);
 
@@ -1080,7 +1080,7 @@ int MDOffloadWriter::complete(size_t accounted_size, const std::string& etag,
   //     << fmt::format(FMT_STRING("MDOffloadWriter::complete: object='{}' WRITE COMPLETE ATTRS "),
   //            object->get_name(), attrs)
   //     << dendl;
-  // return FilterLogWriter::complete(accounted_size, etag, mtime, set_mtime, attrs,
+  // return MDOFilterParentWriter::complete(accounted_size, etag, mtime, set_mtime, attrs,
   //     delete_at, if_match, if_nomatch, user_data, zones_trace, canceled, y,
   //     flags);
 
@@ -1090,7 +1090,7 @@ int MDOffloadWriter::complete(size_t accounted_size, const std::string& etag,
       attrs.erase(it.first);
     }
   }
-  return FilterLogWriter::complete(accounted_size, etag, mtime, set_mtime, attrs,
+  return MDOFilterParentWriter::complete(accounted_size, etag, mtime, set_mtime, attrs,
       delete_at, if_match, if_nomatch, user_data, zones_trace, canceled, y,
       flags);
 }

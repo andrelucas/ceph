@@ -135,6 +135,35 @@ public:
 
 namespace rgw::sal {
 
+// Make it a bit easier to switch between FilterDriver and
+// FilterLogDriver as base classes for our MDOffload* classes.
+
+#ifdef RGW_MDOFFLOAD_LOGGING_FILTER_DRIVER
+
+using MDOFilterParentDriver = FilterLogDriver;
+using MDOFilterParentUser = FilterLogUser;
+using MDOFilterParentBucket = FilterLogBucket;
+using MDOFilterParentObject = FilterLogObject;
+using MDOFilterParentMultipartUpload = FilterLogMultipartUpload;
+using MDOFilterParentMultipartPart = FilterLogMultipartPart;
+using MDOFilterParentWriter = FilterLogWriter;
+using MDOFilterParentObjectReadOp = FilterLogObject::FilterLogReadOp;
+using MDOFilterParentObjectDeleteOp = FilterLogObject::FilterLogDeleteOp;
+
+#else // !RGW_MDOFFLOAD_LOGGING_FILTER_DRIVER
+
+using MDOFilterParentDriver = FilterDriver;
+using MDOFilterParentUser = FilterUser;
+using MDOFilterParentBucket = FilterBucket;
+using MDOFilterParentObject = FilterObject;
+using MDOFilterParentMultipartUpload = FilterMultipartUpload;
+using MDOFilterParentMultipartPart = FilterMultipartPart;
+using MDOFilterParentWriter = FilterWriter;
+using MDOFilterParentObjectReadOp = FilterObject::FilterReadOp;
+using MDOFilterParentObjectDeleteOp = FilterObject::FilterDeleteOp;
+
+#endif // RGW_MDOFFLOAD_LOGGING_FILTER_DRIVER
+
 namespace gutil = akamai::grpcutil;
 
 class MDOffloadFilterDriver : public FilterLogDriver {
@@ -213,13 +242,13 @@ public:
 
 }; // class MDOffloadDriver
 
-class MDOffloadUser : public FilterLogUser {
+class MDOffloadUser : public MDOFilterParentUser {
 private:
   MDOffloadFilterDriver* driver_ = nullptr;
 
 public:
   MDOffloadUser(std::unique_ptr<User> next, MDOffloadFilterDriver* driver)
-      : FilterLogUser(std::move(next))
+      : MDOFilterParentUser(std::move(next))
       , driver_(driver)
   {
   }
@@ -247,7 +276,7 @@ public:
       optional_yield y) override;
 }; // class MDOffloadUser
 
-class MDOffloadBucket : public FilterLogBucket {
+class MDOffloadBucket : public MDOFilterParentBucket {
 
 private:
   MDOffloadFilterDriver* driver_ = nullptr;
@@ -266,7 +295,7 @@ private:
 
 public:
   MDOffloadBucket(std::unique_ptr<Bucket> next, User* user, MDOffloadFilterDriver* driver, Attrs attrs = {})
-      : FilterLogBucket(std::move(next), user)
+      : MDOFilterParentBucket(std::move(next), user)
       , driver_(driver)
       , cached_attrs_(std::move(attrs))
   {
@@ -303,7 +332,7 @@ public:
 
 }; // class MDOffloadFilterBucket
 
-class MDOffloadObject : public FilterLogObject {
+class MDOffloadObject : public MDOFilterParentObject {
 
 private:
   MDOffloadFilterDriver* driver_ = nullptr;
@@ -335,14 +364,14 @@ public:
   MDOffloadObject(MDOffloadObject&&) = delete;
   MDOffloadObject& operator=(MDOffloadObject&&) = delete;
 
-  struct MDOffloadReadOp : FilterLogReadOp {
+  struct MDOffloadReadOp : MDOFilterParentObjectReadOp {
     std::unique_ptr<ReadOp> next;
     Bucket* bucket_;
     Object* object_;
     MDOffloadFilterDriver* driver_;
 
     MDOffloadReadOp(std::unique_ptr<ReadOp> _next, Object* object, Bucket* bucket, MDOffloadFilterDriver* driver)
-        : FilterLogReadOp(std::move(_next))
+        : MDOFilterParentObjectReadOp(std::move(_next))
         , bucket_(bucket)
         , object_(object)
         , driver_(driver)
@@ -359,14 +388,14 @@ public:
         bufferlist& dest, optional_yield y) override;
   };
 
-  struct MDOffloadDeleteOp : FilterLogDeleteOp {
+  struct MDOffloadDeleteOp : MDOFilterParentObjectDeleteOp {
     std::unique_ptr<DeleteOp> next;
     Bucket* bucket_;
     Object* object_;
     MDOffloadFilterDriver* driver_;
 
     MDOffloadDeleteOp(std::unique_ptr<DeleteOp> _next, Object* object, Bucket* bucket, MDOffloadFilterDriver* driver)
-        : FilterLogDeleteOp(std::move(_next))
+        : MDOFilterParentObjectDeleteOp(std::move(_next))
         , bucket_(bucket)
         , object_(object)
         , driver_(driver)
@@ -420,14 +449,14 @@ public:
 
 }; // class MDOffloadObject
 
-class MDOffloadMultipartUpload : public FilterLogMultipartUpload {
+class MDOffloadMultipartUpload : public MDOFilterParentMultipartUpload {
 private:
   MDOffloadFilterDriver* driver_ { nullptr };
 
 public:
   MDOffloadMultipartUpload(std::unique_ptr<MultipartUpload> next,
       Bucket* bucket)
-      : FilterLogMultipartUpload(std::move(next), bucket)
+      : MDOFilterParentMultipartUpload(std::move(next), bucket)
   {
   }
   virtual ~MDOffloadMultipartUpload() override = default;
@@ -443,13 +472,13 @@ public:
       rgw::sal::Object* target_obj) override;
 }; // class MDOffloadMultipartUpload
 
-class MDOffloadWriter : public FilterLogWriter {
+class MDOffloadWriter : public MDOFilterParentWriter {
 private:
   MDOffloadFilterDriver* driver_ { nullptr };
 
 public:
   MDOffloadWriter(std::unique_ptr<Writer> next, Object* obj, MDOffloadFilterDriver* driver)
-      : FilterLogWriter(std::move(next), obj)
+      : MDOFilterParentWriter(std::move(next), obj)
       , driver_(driver)
   {
   }
