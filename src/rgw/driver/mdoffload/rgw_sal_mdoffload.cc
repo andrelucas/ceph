@@ -502,7 +502,7 @@ MDOffloadObject::MDOffloadObject(std::unique_ptr<Object> next, Bucket* bucket, M
     , driver_(driver)
 {
   COND_LOG_G(20, "MDOffloadObject({}):: created object for bucket='{}' key={}",
-    (void*)this, bucket->get_name(), get_key());
+      (void*)this, bucket->get_name(), get_key());
 }
 
 // 'Clone' constructor.
@@ -977,10 +977,34 @@ int MDOffloadMultipartUpload::complete(const DoutPrefixProvider* dpp,
     uint64_t olh_epoch,
     rgw::sal::Object* target_obj)
 {
+
+  // We have to call the upstream completer first, because amongst other
+  // important things that completer calculates the ETag of the completed
+  // object, which we need to export.
+
+  // XXX We call the upstream write completer first because we need the ETag.
+  // This means we have to try really hard to write the metadata to the remote
+  // - otherwise we're inconsistent. XXX
+
+  int ret = MDOFilterParentMultipartUpload::complete(dpp, y, cct, part_etags,
+      remove_objs, accounted_size, compressed, cs_info, ofs,
+      tag, owner, olh_epoch, target_obj);
+
+  if (ret < 0) {
+    LOG_PFX(dpp, 0, "MDOffloadMultipartUpload::complete: MDOFilterParentMultipartUpload::complete() failed ret={}", ret);
+    return ret;
+  }
+
   // For MultipartOffload subclasses, `bucket` is a protected field.
   auto key = target_obj->get_key();
   std::string log_prefix = fmt::format(FMT_STRING("MDOffloadMultipartUpload::complete: bucket={} bucket_id={} target_obj={} upload_id={}"),
       bucket->get_name(), bucket->get_bucket_id(), target_obj->get_key(), get_upload_id());
+
+  if (!MDOffloadObject::has_attrs_required_to_create(target_obj->get_attrs())) {
+    LOG_PFX(dpp, 0, "{} missing required attributes to create target_obj={}",
+        log_prefix, target_obj->get_key());
+    return -ERR_INTERNAL_ERROR; // XXX appropriate error code?
+  }
 
   // XXX CHECK
   // The target_obj has the attributes we're interested in.
@@ -1014,11 +1038,13 @@ int MDOffloadMultipartUpload::complete(const DoutPrefixProvider* dpp,
     request.set_bucket_id(bucket->get_bucket_id());
     request.set_object_key(key.name);
     request.set_object_instance_id(key.instance);
+    request.set_new_object_instance(true); // Indicate this is a new object version.
 
     auto status = client->stub()->SetObjectAttributes(&context, request, &response);
     if (!status.ok()) {
       LOG_PFX(dpp, 0, "MDOffloadMultipartUpload::complete: gRPC SetObjectAttributes failed: {}", status.error_message());
       return -ERR_INTERNAL_ERROR; // XXX appropriate error code?
+      // XXX XXX THIS IS BAD - we've already completed the upload!
     }
   } else {
     COND_LOG_PFX(dpp, 20, "MDOffloadMultipartUpload::complete: no exportable attributes to set");
@@ -1030,9 +1056,7 @@ int MDOffloadMultipartUpload::complete(const DoutPrefixProvider* dpp,
     }
   }
 
-  return MDOFilterParentMultipartUpload::complete(dpp, y, cct, part_etags,
-      remove_objs, accounted_size, compressed, cs_info, ofs,
-      tag, owner, olh_epoch, target_obj);
+  return 0;
 }
 
 /****************************************************************************/
@@ -1059,8 +1083,28 @@ int MDOffloadWriter::complete(size_t accounted_size, const std::string& etag,
     const char* if_match, const char* if_nomatch, const std::string* user_data,
     rgw_zone_set* zones_trace, bool* canceled, optional_yield y, uint32_t flags)
 {
+
+  // XXX for consistency with MultipartUpload::complete(), we call the
+  // upstream write completer first. This means we have to try really hard to
+  // write the metadata to the remote - otherwise we're inconsistent. XXX
+
+  int ret = MDOFilterParentWriter::complete(accounted_size, etag, mtime, set_mtime, attrs,
+      delete_at, if_match, if_nomatch, user_data, zones_trace, canceled, y,
+      flags);
+  if (ret < 0) {
+    LOG_G(0, "MDOffloadWriter::complete: MDOFilter*Writer::complete() failed ret={}", ret);
+    return ret;
+  }
+
   COND_LOG_G(20, "MDOffloadWriter::complete: object='{}' accounted_size={} flags={} attrs={}",
       obj ? obj->get_name() : std::string("<null>"), accounted_size, flags, attrs);
+
+  if (!MDOffloadObject::has_attrs_required_to_create(attrs)) {
+    LOG_G(0, "MDOffloadWriter::complete: missing required attributes to create object='{}'",
+        obj ? obj->get_name() : std::string("<null>"));
+    return -ERR_INTERNAL_ERROR; // XXX appropriate error code?
+  }
+
   // Send the full set of attributes to the remote store.
   auto object = obj;
   if (!object) {
@@ -1112,6 +1156,7 @@ int MDOffloadWriter::complete(size_t accounted_size, const std::string& etag,
     if (!status.ok()) {
       LOG_G(0, "{}: gRPC SetObjectAttributes failed: {}", msg_prefix, status.error_message());
       return -ERR_INTERNAL_ERROR; // XXX appropriate error code?
+                                  // XXX XXX THIS IS BAD - we've already completed the upload!
     }
   }
 
@@ -1138,9 +1183,7 @@ int MDOffloadWriter::complete(size_t accounted_size, const std::string& etag,
       attrs.erase(it.first);
     }
   }
-  return MDOFilterParentWriter::complete(accounted_size, etag, mtime, set_mtime, attrs,
-      delete_at, if_match, if_nomatch, user_data, zones_trace, canceled, y,
-      flags);
+  return 0;
 }
 
 // A list of the attributes that are exported to the remote store.
@@ -1167,6 +1210,7 @@ bool MDOffloadObject::attr_is_exported(const std::string& attr_name)
 // Attributes we want to check for changes on import. We really, really don't
 // want attributes to change, or we're asking for sync trouble.
 static std::set<std::string> attr_object_import_check = {
+  RGW_ATTR_ACL,
   RGW_ATTR_CRYPT_CONTEXT,
   RGW_ATTR_CRYPT_DATAKEY,
   RGW_ATTR_CRYPT_KEYID,
@@ -1202,6 +1246,21 @@ static std::set<std::string> attr_object_import_prohibited = {
 bool MDOffloadObject::attr_import_prohibited(const std::string& attr_name)
 {
   return attr_object_import_prohibited.contains(attr_name);
+}
+
+static std::set<std::string> attr_object_required_to_create = {
+  RGW_ATTR_ETAG,
+};
+
+bool MDOffloadObject::has_attrs_required_to_create(const Attrs& attrs)
+{
+  for (const auto& attr_name : attr_object_required_to_create) {
+    if (attrs.find(attr_name) == attrs.end()) {
+      COND_LOG_G(20, "MDOffloadObject::has_attrs_required_to_create: missing required attr '{}'", attr_name);
+      return false;
+    }
+  }
+  return true;
 }
 
 /****************************************************************************/

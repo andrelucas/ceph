@@ -170,6 +170,12 @@ using ceph::crypto::MD5;
 
 #define RGW_ATTR_TRACE RGW_ATTR_PREFIX "trace"
 
+/* Akamai-specific attributes */
+#define RGW_ATTR_AKAMAI_PREFIX RGW_ATTR_PREFIX "akamai."
+#define RGW_ATTR_MDOFFLOAD_PREFIX RGW_ATTR_AKAMAI_PREFIX "mdoffload."
+
+#define RGW_ATTR_MDOFFLOAD_VERSION RGW_ATTR_MDOFFLOAD_PREFIX "version"
+
 enum class RGWFormat : int8_t {
   BAD_FORMAT = -1,
   PLAIN = 0,

@@ -30,10 +30,24 @@
 
 /*****************************************************************************/
 
+// We're definitely going to need versioning to keep track of schema changes.
+// In this context, a schema is an agreement on which attributes are stored
+// where. Having a version means we can evolve the schema over time and
+// properly handle the inevitable cases where stored objects have an older
+// version.
+#define RGW_MDOFFLOAD_OBJECT_SCHEMA_VERSION 1
+#define RGW_MDOFFLOAD_BUCKET_SCHEMA_VERSION 1
+
 // Define this to 1 to have the MDOffload driver inherit from FilterLogDriver,
 // undefine it to have it inherit from FilterDriver directly.
 #define RGW_MDOFFLOAD_LOGGING_FILTER_DRIVER 1
 // #undef RGW_MDOFFLOAD_LOGGING_FILTER_DRIVER
+
+// Define this to 1 to have the MDOffload driver export crypto attributes to
+// the remote store, undefine it to not export them. *Don't* change this on
+// the fly without a schema version bump, that would really suck.
+#define RGW_MDOFFLOAD_EXPORT_CRYPTO_ATTRS 1
+#undef RGW_MDOFFLOAD_EXPORT_CRYPTO_ATTRS
 
 /*****************************************************************************/
 
@@ -446,6 +460,8 @@ public:
   static bool attr_needs_import_check(const std::string& attr_name);
   // Don't allow certain attributes to be imported from offload to RADOS.
   static bool attr_import_prohibited(const std::string& attr_name);
+  // Attributes required to create a new object in offload.
+  static bool has_attrs_required_to_create(const Attrs& attrs);
 
 }; // class MDOffloadObject
 
