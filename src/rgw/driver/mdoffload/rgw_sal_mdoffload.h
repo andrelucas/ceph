@@ -455,8 +455,9 @@ private:
 
 public:
   MDOffloadMultipartUpload(std::unique_ptr<MultipartUpload> next,
-      Bucket* bucket)
+      Bucket* bucket, Driver* driver)
       : MDOFilterParentMultipartUpload(std::move(next), bucket)
+      , driver_(static_cast<MDOffloadFilterDriver*>(driver))
   {
   }
   virtual ~MDOffloadMultipartUpload() override = default;

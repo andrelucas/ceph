@@ -450,7 +450,7 @@ std::unique_ptr<MultipartUpload> MDOffloadBucket::get_multipart_upload(
 {
   std::unique_ptr<MultipartUpload> nmu = next->get_multipart_upload(oid, upload_id, owner, mtime);
 
-  return std::make_unique<MDOffloadMultipartUpload>(std::move(nmu), this);
+  return std::make_unique<MDOffloadMultipartUpload>(std::move(nmu), this, driver_);
 }
 
 int MDOffloadBucket::list_multiparts(const DoutPrefixProvider* dpp,
@@ -471,7 +471,7 @@ int MDOffloadBucket::list_multiparts(const DoutPrefixProvider* dpp,
     return ret;
 
   for (auto& ent : nup) {
-    uploads.emplace_back(std::make_unique<MDOffloadMultipartUpload>(std::move(ent), this));
+    uploads.emplace_back(std::make_unique<MDOffloadMultipartUpload>(std::move(ent), this, driver_));
   }
 
   return 0;
@@ -977,12 +977,60 @@ int MDOffloadMultipartUpload::complete(const DoutPrefixProvider* dpp,
     uint64_t olh_epoch,
     rgw::sal::Object* target_obj)
 {
-  COND_LOG_PFX(dpp, 20, "MDOffloadMultipartUpload::complete: bucket='{}' bucket_id='{}' object='{}' upload_id={}, attrs={}",
-      bucket->get_name(), bucket->get_bucket_id(), target_obj->get_key(), get_upload_id(), target_obj->get_attrs());
+  // For MultipartOffload subclasses, `bucket` is a protected field.
+  auto key = target_obj->get_key();
+  std::string log_prefix = fmt::format(FMT_STRING("MDOffloadMultipartUpload::complete: bucket={} bucket_id={} target_obj={} upload_id={}"),
+      bucket->get_name(), bucket->get_bucket_id(), target_obj->get_key(), get_upload_id());
 
-  // XXX Process: Upload and then remove exportable attributes.
+  // XXX CHECK
+  // The target_obj has the attributes we're interested in.
+  COND_LOG_PFX(dpp, 20, "MDOffloadMultipartUpload::complete: {}, target_obj->attrs={}",
+      log_prefix, target_obj->get_attrs());
 
-  return FilterLogMultipartUpload::complete(dpp, y, cct, part_etags,
+  // Upload and then remove exportable attributes.
+  auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
+  mdoffload::v1::SetObjectAttributesRequest request;
+
+  // Loop through the attributes of the target object, and upload any that are
+  // marked for export.
+  auto& attrs = target_obj->get_attrs();
+  int export_count = 0;
+  std::vector<std::string> attrs_to_remove;
+
+  for (const auto& it : attrs) {
+    if (MDOffloadObject::attr_is_exported(it.first)) {
+      COND_LOG_PFX(dpp, 20, "MDOffloadMultipartUpload::complete: setting exportable attr '{}' ({} bytes)'", it.first, it.second.length());
+      (*request.mutable_attributes_to_add())[it.first] = it.second.to_str();
+      export_count++;
+    }
+    if (MDOffloadObject::attr_import_prohibited(it.first)) {
+      attrs_to_remove.push_back(it.first);
+    }
+  }
+  if (export_count > 0) {
+    ::grpc::ClientContext context;
+    mdoffload::v1::SetObjectAttributesResponse response;
+    request.set_bucket_name(bucket->get_name());
+    request.set_bucket_id(bucket->get_bucket_id());
+    request.set_object_key(key.name);
+    request.set_object_instance_id(key.instance);
+
+    auto status = client->stub()->SetObjectAttributes(&context, request, &response);
+    if (!status.ok()) {
+      LOG_PFX(dpp, 0, "MDOffloadMultipartUpload::complete: gRPC SetObjectAttributes failed: {}", status.error_message());
+      return -ERR_INTERNAL_ERROR; // XXX appropriate error code?
+    }
+  } else {
+    COND_LOG_PFX(dpp, 20, "MDOffloadMultipartUpload::complete: no exportable attributes to set");
+  }
+  if (!attrs_to_remove.empty()) {
+    for (const auto& attr_name : attrs_to_remove) {
+      COND_LOG_PFX(dpp, 20, "MDOffloadMultipartUpload::complete: removing prohibited attr '{}'", attr_name);
+      attrs.erase(attr_name);
+    }
+  }
+
+  return MDOFilterParentMultipartUpload::complete(dpp, y, cct, part_etags,
       remove_objs, accounted_size, compressed, cs_info, ofs,
       tag, owner, olh_epoch, target_obj);
 }
