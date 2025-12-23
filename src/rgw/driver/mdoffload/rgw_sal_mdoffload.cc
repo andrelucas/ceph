@@ -613,7 +613,37 @@ int MDOffloadObject::MDOffloadReadOp::read(int64_t ofs, int64_t end, bufferlist&
 
 int MDOffloadObject::MDOffloadReadOp::get_attr(const DoutPrefixProvider* dpp, const char* name, bufferlist& dest, optional_yield y)
 {
-  // Passthrough with logging.
+  // For an exported attribute, fetch it from the remote store.
+  if (MDOffloadObject::attr_is_exported(name)) {
+    COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadReadOp::get_attr: requested exported attr '{}'", name);
+
+    auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
+    ::grpc::ClientContext context;
+    mdoffload::v1::GetObjectAttributesRequest request;
+    mdoffload::v1::GetObjectAttributesResponse response;
+    auto key = object_->get_key();
+    request.set_bucket_name(bucket_->get_name());
+    request.set_bucket_id(bucket_->get_bucket_id());
+    request.set_object_key(key.name);
+    request.set_object_instance_id(key.instance);
+    auto status = client->stub()->GetObjectAttributes(&context, request, &response);
+    if (!status.ok()) {
+      LOG_PFX(dpp, 0, "MDOffloadObject::MDOffloadReadOp::get_attr: gRPC GetObjectAttributes failed: {}", status.error_message());
+      return -ERR_INTERNAL_ERROR; // XXX appropriate error code?
+    }
+    auto proto_attrs = response.attributes();
+    auto it = proto_attrs.find(name);
+    if (it != proto_attrs.end()) {
+      dest.append(it->second);
+      COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadReadOp::get_attr: fetched exported attr '{}' ({} bytes)'", name, dest.length());
+      return 0;
+    } else {
+      COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadReadOp::get_attr: exported attr '{}' not found", name);
+      return -ENOENT;
+    }
+  }
+
+  // Otherwise passthrough with logging.
   COND_LOG_PFX(dpp, 20, "MDOffloadObject::MDOffloadReadOp::get_attr: name='{}'", name);
   return MDOFilterParentObjectReadOp::get_attr(dpp, name, dest, y);
 }
@@ -706,6 +736,11 @@ int MDOffloadObject::delete_obj_aio(const DoutPrefixProvider* dpp, RGWObjState* 
 
 int MDOffloadObject::set_obj_attrs(const DoutPrefixProvider* dpp, Attrs* setattrs, Attrs* delattrs, optional_yield y)
 {
+  // XXX this is super fiddly - we need to separate exported and non-exported
+  // attributes, and call the gRPC only for the exported ones, set the local
+  // attributes after the gRPC call has set the remote, and finally call the
+  // local Filter*Object::set_obj_attrs() only for the non-exported ones.
+
   // The Rados driver uses this to set attributes in the backing store.
   //
   // Note the Rados driver call modifies the attr mtime, here's the comment:
@@ -717,37 +752,99 @@ int MDOffloadObject::set_obj_attrs(const DoutPrefixProvider* dpp, Attrs* setattr
   // same if we're storing a specific mtime. Ideally we'd automatically store
   // an mtime on the attributes and it wouldn't have to be a separate item.
 
-  // Send our gRPC to set the attributes.
-  auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
-  ::grpc::ClientContext context;
-  mdoffload::v1::SetObjectAttributesRequest request;
-  mdoffload::v1::SetObjectAttributesResponse response;
-  Bucket* bucket = get_bucket();
-  Object* next_obj = get_next();
+  // XXX inefficient
+  Attrs set_export;
+  Attrs set_nonexport;
 
-  request.set_bucket_name(bucket->get_name());
-  request.set_bucket_id(bucket->get_bucket_id());
-  request.set_object_key(next_obj->get_key().name);
-  request.set_object_instance_id(next_obj->get_key().instance);
   if (setattrs != nullptr) {
     for (const auto& it : *setattrs) {
-      ldpp_dout(dpp, 20)
-          << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: setting attr '{}' ({} bytes)'"), it.first, it.second.length())
-          << dendl;
-      (*request.mutable_attributes_to_add())[it.first] = it.second.to_str();
+      if (MDOffloadObject::attr_is_exported(it.first)) {
+        COND_LOG_PFX(dpp, 20, "MDOffloadObject::set_obj_attrs: setting exported attr '{}' ({} bytes)'", it.first, it.second.length());
+        set_export[it.first] = it.second;
+      } else {
+        COND_LOG_PFX(dpp, 20, "MDOffloadObject::set_obj_attrs: setting non-exported attr '{}' ({} bytes)'", it.first, it.second.length());
+        set_nonexport[it.first] = it.second;
+      }
     }
   }
+
+  // XXX inefficient
+  Attrs del_export;
+  Attrs del_nonexport;
+
   if (delattrs != nullptr) {
     for (const auto& it : *delattrs) {
+      if (MDOffloadObject::attr_is_exported(it.first)) {
+        COND_LOG_PFX(dpp, 20, "MDOffloadObject::set_obj_attrs: deleting exported attr '{}'", it.first);
+        del_export[it.first] = it.second;
+      } else {
+        COND_LOG_PFX(dpp, 20, "MDOffloadObject::set_obj_attrs: deleting non-exported attr '{}'", it.first);
+        // Non-exported attributes are handled below.
+        del_nonexport[it.first] = it.second;
+      }
       COND_LOG_PFX(dpp, 20, "MDOffloadObject::set_obj_attrs: deleting attr '{}'", it.first);
-      request.add_attributes_to_delete(it.first);
       ;
     }
   }
-  auto status = client->stub()->SetObjectAttributes(&context, request, &response);
-  if (!status.ok()) {
-    COND_LOG_PFX(dpp, 20, "MDOffloadObject::set_obj_attrs: gRPC SetObjectAttributes failed: {}", status.error_message());
-    return -EINVAL; // XXX appropriate error code?
+
+  if (set_export.empty() && del_export.empty()) {
+    COND_LOG_PFX(dpp, 20, "MDOffloadObject::set_obj_attrs: no exported attributes to set or delete, skipping gRPC call");
+    // No exported attributes to set or delete, skip the gRPC call.
+  } else {
+    COND_LOG_PFX(dpp, 20, "MDOffloadObject::set_obj_attrs: setting exported attrs={} deleting exported attrs={}",
+        set_export, del_export);
+
+    // Send our gRPC to set the attributes.
+    auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
+    ::grpc::ClientContext context;
+    mdoffload::v1::SetObjectAttributesRequest request;
+    mdoffload::v1::SetObjectAttributesResponse response;
+    Bucket* bucket = get_bucket();
+    Object* next_obj = get_next();
+
+    request.set_bucket_name(bucket->get_name());
+    request.set_bucket_id(bucket->get_bucket_id());
+    request.set_object_key(next_obj->get_key().name);
+    request.set_object_instance_id(next_obj->get_key().instance);
+
+    for (const auto& it : set_export) {
+      request.mutable_attributes_to_add()->insert({ it.first, it.second.to_str() });
+    }
+    for (const auto& it : del_export) {
+      request.add_attributes_to_delete(it.first);
+    }
+    auto status = client->stub()->SetObjectAttributes(&context, request, &response);
+    if (!status.ok()) {
+      COND_LOG_PFX(dpp, 20, "MDOffloadObject::set_obj_attrs: gRPC SetObjectAttributes failed: {}", status.error_message());
+      return -EINVAL; // XXX appropriate error code?
+    }
+
+    // Now set the local attrs to match what we sent remotely.
+    auto& attrs = MDOFilterParentObject::get_attrs();
+    for (const auto& it : set_export) {
+      attrs[it.first] = it.second;
+    }
+    for (const auto& it : del_export) {
+      attrs.erase(it.first);
+    }
+  }
+
+  if (set_nonexport.empty() && del_nonexport.empty()) {
+    COND_LOG_PFX(dpp, 20, "MDOffloadObject::set_obj_attrs: no non-exported attributes to set or delete, skipping local call");
+    // No non-exported attributes to set or delete, skip the local call.
+    return 0;
+  } else {
+    COND_LOG_PFX(dpp, 20, "MDOffloadObject::set_obj_attrs: setting non-exported attrs={} deleting non-exported attrs={}",
+        set_nonexport, del_nonexport);
+    int ret = MDOFilterParentObject::set_obj_attrs(dpp, &set_nonexport, &del_nonexport, y);
+    if (ret < 0) {
+      // XXX uh-oh - what do we do here? We've already modified the remote.
+      // XXX FIXME
+      ldpp_dout(dpp, 20)
+          << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: Filter*Object::set_obj_attrs() failed: {}"), ret)
+          << dendl;
+      return ret;
+    }
   }
 
   // // Only after gRPC success do we modify our cached attributes.
@@ -771,15 +868,6 @@ int MDOffloadObject::set_obj_attrs(const DoutPrefixProvider* dpp, Attrs* setattr
   // cached_attrs_ = new_attrs;
   // has_attrs_ = true;
 
-  int ret = MDOFilterParentObject::set_obj_attrs(dpp, setattrs, delattrs, y);
-  if (ret < 0) {
-    // XXX uh-oh - what do we do here? We've already modified the remote.
-    // XXX FIXME
-    ldpp_dout(dpp, 20)
-        << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: Filter*Object::set_obj_attrs() failed: {}"), ret)
-        << dendl;
-    return ret;
-  }
   ldpp_dout(dpp, 20)
       << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: set_attrs() attrs={}"),
              MDOFilterParentObject::get_attrs())
@@ -790,14 +878,15 @@ int MDOffloadObject::set_obj_attrs(const DoutPrefixProvider* dpp, Attrs* setattr
 int MDOffloadObject::get_obj_attrs(optional_yield y, const DoutPrefixProvider* dpp, rgw_obj* target_obj)
 {
   // The Rados driver fetches the attributes from the backing store using this
-  // call.
+  // call. We need to load those attributes, then merge with the ones we store
+  // remotely.
 
-  // // Call the upstream driver first.
-  // int ret = MDOFilterParentObject::get_obj_attrs(y, dpp, target_obj);
-  // if (ret < 0) {
-  //   COND_LOG_PFX(dpp, 20, "MDOffloadObject::get_obj_attrs: MDOFilter*Object::get_obj_attrs() failed: {}", ret);
-  //   return ret;
-  // }
+  // Call the upstream driver first.
+  int ret = MDOFilterParentObject::get_obj_attrs(y, dpp, target_obj);
+  if (ret < 0) {
+    COND_LOG_PFX(dpp, 20, "MDOffloadObject::get_obj_attrs: MDOFilter*Object::get_obj_attrs() failed: {}", ret);
+    return ret;
+  }
 
   // Send our gRPC to get the attributes.
   auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
@@ -817,6 +906,8 @@ int MDOffloadObject::get_obj_attrs(optional_yield y, const DoutPrefixProvider* d
     return -EINVAL; // XXX appropriate error code?
   }
 
+  // XXX should we merge in place?
+
   auto new_attrs = rgw::sal::Attrs {};
   for (const auto& kv : response.attributes()) {
     bufferlist bl;
@@ -824,12 +915,31 @@ int MDOffloadObject::get_obj_attrs(optional_yield y, const DoutPrefixProvider* d
     new_attrs[kv.first] = std::move(bl);
   }
 
-  // Move the fetched attributes to the final destination.
-  MDOFilterParentObject::set_attrs(std::move(new_attrs));
-  COND_LOG_PFX(dpp, 20, "MDOffloadObject::get_obj_attrs: set_attrs() passthrough attrs={}", MDOFilterParentObject::get_attrs());
+  // Merge the fetched attributes into our existing ones.
+  auto& attrs = MDOFilterParentObject::get_attrs();
+  for (const auto& it : new_attrs) {
+    // XXX not convinced what to do here.
+    if (MDOffloadObject::attr_needs_import_check(it.first)) {
+      auto local_it = attrs.find(it.first);
+      if (local_it != attrs.end()) {
+        // Attribute exists locally, compare.
+        if (local_it->second == it.second) {
+          // No change.
+          COND_LOG_PFX(dpp, 20, "MDOffloadObject::get_obj_attrs: attribute '{}' unchanged", it.first);
+          continue;
+        } else {
+          // Changed.
+          LOG_PFX(dpp, 1, "MDOffloadObject::get_obj_attrs: attribute '{}' CHANGED, updating", it.first);
+        }
+      }
+    }
+    attrs[it.first] = it.second;
+  }
+  COND_LOG_PFX(dpp, 20, "MDOffloadObject::get_obj_attrs: merged attrs={}", attrs);
 
   return 0;
 }
+
 int MDOffloadObject::modify_obj_attrs(const char* attr_name, bufferlist& attr_val, optional_yield y, const DoutPrefixProvider* dpp)
 {
   // The Rados driver uses this to modify a single attribute. Note that an
@@ -837,67 +947,15 @@ int MDOffloadObject::modify_obj_attrs(const char* attr_name, bufferlist& attr_va
   // example, tags are all stored on the single attribute
   // RGW_ATTR_TAGS.
 
-  // NOTE the Rados driver call to set_atomic() when modifying attributes. We
-  // need to be VERY CAREFUL to not modify the upstream object's invariants;
-  // changes are we may have to make that call here too, without the attr
-  // changes.
-
-  // Send our gRPC to set the attribute.
-  auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
-  ::grpc::ClientContext context;
-  mdoffload::v1::SetObjectAttributesRequest request;
-  mdoffload::v1::SetObjectAttributesResponse response;
-  Bucket* bucket = get_bucket();
-  Object* next_obj = get_next();
-
-  request.set_bucket_name(bucket->get_name());
-  request.set_bucket_id(bucket->get_bucket_id());
-  request.set_object_key(next_obj->get_key().name);
-  request.set_object_instance_id(next_obj->get_key().instance);
-  (*request.mutable_attributes_to_add())[attr_name] = attr_val.to_str();
-
-  auto status = client->stub()->SetObjectAttributes(&context, request, &response);
-  if (!status.ok()) {
-    COND_LOG_PFX(dpp, 20, "MDOffloadObject::modify_obj_attrs: gRPC SetObjectAttributes failed: {}", status.error_message());
-    return -EINVAL; // XXX appropriate error code?
-  }
-
-  // // Only after gRPC success do we modify our cached attributes.
-  // Attrs new_attrs = cached_attrs_;
-  // ldpp_dout(dpp, 20)
-  //     << fmt::format(FMT_STRING("MDOffloadObject::modify_obj_attrs: attr_name={} attr_val[{} bytes]"),
-  //            attr_name, attr_val.length())
-  //     << dendl;
-  // new_attrs[attr_name] = attr_val;
-  // cached_attrs_ = new_attrs;
-
-  // XXX passthrough
-  auto& attrs = MDOFilterParentObject::get_attrs();
-  attrs[attr_name] = attr_val;
-  // set_attrs(attrs);
-  COND_LOG_PFX(dpp, 20, "MDOffloadObject::modify_obj_attrs: set_attrs() attrs={}", attrs);
-
-  return 0;
-}
-
-int MDOffloadObject::delete_obj_attrs(const DoutPrefixProvider* dpp, const char* attr_name, optional_yield y)
-{
-  // The Rados driver uses this to delete a single attribute. It does it via
-  // set_obj_attrs(), and we should do the same. Remember, all the tags are on
-  // a single attribute RGW_ATTR_TAGS.
+  // It is possible that we set an attribute locally and remotely.
 
   // NOTE the Rados driver call to set_atomic() when modifying attributes. We
   // need to be VERY CAREFUL to not modify the upstream object's invariants;
   // changes are we may have to make that call here too, without the attr
   // changes.
 
-  if (!MDOffloadObject::attr_is_exported(attr_name)) {
-    // Passthrough with logging.
-    COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: non-exported attr_name='{}', passthrough", attr_name);
-    return MDOFilterParentObject::delete_obj_attrs(dpp, attr_name, y);
-
-  } else {
-    // Send our gRPC to delete the attribute.
+  if (MDOffloadObject::attr_is_exported(attr_name)) {
+    // Send our gRPC to set the attribute.
     auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
     ::grpc::ClientContext context;
     mdoffload::v1::SetObjectAttributesRequest request;
@@ -909,21 +967,74 @@ int MDOffloadObject::delete_obj_attrs(const DoutPrefixProvider* dpp, const char*
     request.set_bucket_id(bucket->get_bucket_id());
     request.set_object_key(next_obj->get_key().name);
     request.set_object_instance_id(next_obj->get_key().instance);
-    request.add_attributes_to_delete(attr_name);
+    (*request.mutable_attributes_to_add())[attr_name] = attr_val.to_str();
 
+    COND_LOG_PFX(dpp, 20, "MDOffloadObject::modify_obj_attrs: setting exported attr_name='{}' ({} bytes)'",
+        attr_name, attr_val.length());
     auto status = client->stub()->SetObjectAttributes(&context, request, &response);
     if (!status.ok()) {
-      COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: gRPC SetObjectAttributes failed: {}", status.error_message());
+      COND_LOG_PFX(dpp, 20, "MDOffloadObject::modify_obj_attrs: gRPC SetObjectAttributes failed: {}", status.error_message());
       return -ERR_INTERNAL_ERROR; // XXX appropriate error code?
     }
-
-    // Only after gRPC success do we modify our cached attributes.
-    Attrs rmattr;
-    rmattr[attr_name] = bufferlist();
-
-    COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: attr_name={}", attr_name);
-    return MDOFilterParentObject::set_obj_attrs(dpp, nullptr, &rmattr, y);
   }
+
+  if (!MDOffloadObject::attr_import_prohibited(attr_name)) {
+    auto& attrs = MDOFilterParentObject::get_attrs();
+    COND_LOG_PFX(dpp, 20, "MDOffloadObject::modify_obj_attrs: local set_attrs() attrs={}", attrs);
+    attrs[attr_name] = attr_val;
+  }
+
+  return 0;
+}
+
+int MDOffloadObject::delete_obj_attrs(const DoutPrefixProvider* dpp, const char* attr_name, optional_yield y)
+{
+  // The Rados driver uses this to delete a single attribute. It does it via
+  // set_obj_attrs(), and we should do the same. Remember, all the tags are on
+  // a single attribute RGW_ATTR_TAGS.
+
+  // It is possible that an attribute is stored both locally and remotely.
+
+  // NOTE the Rados driver call to set_atomic() when modifying attributes. We
+  // need to be VERY CAREFUL to not modify the upstream object's invariants;
+  // changes are we may have to make that call here too, without the attr
+  // changes.
+
+  std::map<std::string, bufferlist> delattrs;
+  delattrs[attr_name] = bufferlist();
+  return set_obj_attrs(dpp, nullptr, &delattrs, y);
+
+  // COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: deleting attr_name='{}'", attr_name);
+
+  // if (MDOffloadObject::attr_is_exported(attr_name)) {
+  //   // Send our gRPC to delete the attribute.
+  //   auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
+  //   ::grpc::ClientContext context;
+  //   mdoffload::v1::SetObjectAttributesRequest request;
+  //   mdoffload::v1::SetObjectAttributesResponse response;
+  //   Bucket* bucket = get_bucket();
+  //   Object* next_obj = get_next();
+
+  //   request.set_bucket_name(bucket->get_name());
+  //   request.set_bucket_id(bucket->get_bucket_id());
+  //   request.set_object_key(next_obj->get_key().name);
+  //   request.set_object_instance_id(next_obj->get_key().instance);
+  //   request.add_attributes_to_delete(attr_name);
+
+  //   COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: deleting exported attr_name='{}'",
+  //       attr_name);
+  //   auto status = client->stub()->SetObjectAttributes(&context, request, &response);
+  //   if (!status.ok()) {
+  //     COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: gRPC SetObjectAttributes failed: {}", status.error_message());
+  //     return -ERR_INTERNAL_ERROR; // XXX appropriate error code?
+  //   }
+  // }
+
+  // //// XXX Seems to be breaking metadata XXX
+  // // COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: upstream passthrough");
+  // // return MDOFilterParentObject::delete_obj_attrs(dpp, attr_name, y);
+
+  return 0;
 }
 
 Attrs& MDOffloadObject::get_attrs(void)
@@ -990,12 +1101,13 @@ int MDOffloadMultipartUpload::complete(const DoutPrefixProvider* dpp,
   // This means we have to try really hard to write the metadata to the remote
   // - otherwise we're inconsistent. XXX
 
-  // This *must* be a copy!
-  auto original_attrs = target_obj->get_attrs();
+  // This *must* be a copy! (Don't 'optimise' this to a reference.)
+  auto export_attrs = target_obj->get_attrs();
+  // target_attrs is intentionally a reference to the target object's attributes.
   auto& target_attrs = target_obj->get_attrs();
   for (const auto& it : target_attrs) {
     if (MDOffloadObject::attr_import_prohibited(it.first)) {
-      COND_LOG_PFX(dpp, 20, "MDOffloadMultipartUpload::complete: removing prohibited attr '{}' before complete()", it.first);
+      COND_LOG_PFX(dpp, 20, "MDOffloadMultipartUpload::complete: removing import-prohibited attr '{}' before upstream complete()", it.first);
       target_attrs.erase(it.first);
     }
   }
@@ -1007,6 +1119,15 @@ int MDOffloadMultipartUpload::complete(const DoutPrefixProvider* dpp,
   if (ret < 0) {
     LOG_PFX(dpp, 0, "MDOffloadMultipartUpload::complete: MDOFilterParentMultipartUpload::complete() failed ret={}", ret);
     return ret;
+  }
+
+  // The ETag is set by RADOS' MultipartUpload::complete(), we need to grab
+  // it.
+  if (target_attrs.find(RGW_ATTR_ETAG) != target_attrs.end()) {
+    export_attrs[RGW_ATTR_ETAG] = target_attrs[RGW_ATTR_ETAG];
+  } else {
+    // Unexpected - MultipartUpload::complete() really should have set this.
+    LOG_PFX(dpp, 1, "MDOffloadMultipartUpload::complete: WARNING: missing ETag after complete()");
   }
 
   // For MultipartOffload subclasses, `bucket` is a protected field.
@@ -1022,8 +1143,8 @@ int MDOffloadMultipartUpload::complete(const DoutPrefixProvider* dpp,
 
   // XXX CHECK
   // The target_obj has the attributes we're interested in.
-  COND_LOG_PFX(dpp, 20, "MDOffloadMultipartUpload::complete: {}, target_obj->attrs={}",
-      log_prefix, target_obj->get_attrs());
+  COND_LOG_PFX(dpp, 20, "MDOffloadMultipartUpload::complete: {}, target_obj->attrs={}, export_attrs={}",
+      log_prefix, target_obj->get_attrs(), export_attrs);
 
   // Upload and then remove exportable attributes.
   auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
@@ -1031,20 +1152,14 @@ int MDOffloadMultipartUpload::complete(const DoutPrefixProvider* dpp,
 
   // Loop through the ORIGINAL attributes of the target object, and upload any
   // that are marked for export.
-  // XXX auto& attrs = target_obj->get_attrs();
   int export_count = 0;
-  // XXX relic of export-then-complete
-  // std::vector<std::string> attrs_to_remove;
 
-  for (const auto& it : original_attrs) {
+  for (const auto& it : export_attrs) {
     if (MDOffloadObject::attr_is_exported(it.first)) {
       COND_LOG_PFX(dpp, 20, "MDOffloadMultipartUpload::complete: setting exportable attr '{}' ({} bytes)'", it.first, it.second.length());
       (*request.mutable_attributes_to_add())[it.first] = it.second.to_str();
       export_count++;
     }
-    // if (MDOffloadObject::attr_import_prohibited(it.first)) {
-    //   attrs_to_remove.push_back(it.first);
-    // }
   }
   if (export_count > 0) {
     ::grpc::ClientContext context;
@@ -1064,14 +1179,6 @@ int MDOffloadMultipartUpload::complete(const DoutPrefixProvider* dpp,
   } else {
     COND_LOG_PFX(dpp, 20, "MDOffloadMultipartUpload::complete: no exportable attributes to set");
   }
-  // XXX relic of export-then-complete
-  // if (!attrs_to_remove.empty()) {
-  //   for (const auto& attr_name : attrs_to_remove) {
-  //     COND_LOG_PFX(dpp, 20, "MDOffloadMultipartUpload::complete: removing prohibited attr '{}'", attr_name);
-  //     attrs.erase(attr_name);
-  //   }
-  // }
-
   return 0;
 }
 
@@ -1186,31 +1293,6 @@ int MDOffloadWriter::complete(size_t accounted_size, const std::string& etag,
                                   // XXX XXX THIS IS BAD - we've already completed the upload!
     }
   }
-
-  // ldout(g_ceph_context, 20)
-  //     << fmt::format(FMT_STRING("MDOffloadWriter::complete: object='{}' WRITE EMPTY ATTRS "),
-  //            object->get_name(), attrs)
-  //     << dendl;
-  // Attrs empty_attrs;
-  // return MDOFilterParentWriter::complete(accounted_size, etag, mtime, set_mtime, empty_attrs,
-  //     delete_at, if_match, if_nomatch, user_data, zones_trace, canceled, y,
-  //     flags);
-
-  // ldout(g_ceph_context, 20)
-  //     << fmt::format(FMT_STRING("MDOffloadWriter::complete: object='{}' WRITE COMPLETE ATTRS "),
-  //            object->get_name(), attrs)
-  //     << dendl;
-  // return MDOFilterParentWriter::complete(accounted_size, etag, mtime, set_mtime, attrs,
-  //     delete_at, if_match, if_nomatch, user_data, zones_trace, canceled, y,
-  //     flags);
-
-  // XXX relic from the 'export then update' period.
-  // for (const auto& it : attrs) {
-  //   if (MDOffloadObject::attr_import_prohibited(it.first)) {
-  //     LOG_G(1, "{}: removing external-only attribute '{}' from local attrs", msg_prefix, it.first);
-  //     attrs.erase(it.first);
-  //   }
-  // }
   return 0;
 }
 
@@ -1236,7 +1318,8 @@ bool MDOffloadObject::attr_is_exported(const std::string& attr_name)
 }
 
 // Attributes we want to check for changes on import. We really, really don't
-// want attributes to change, or we're asking for sync trouble.
+// want attributes to change, or we're asking for sync trouble. If they're not
+// present locally, it's fine.
 static std::set<std::string> attr_object_import_check = {
   RGW_ATTR_ACL,
   RGW_ATTR_CRYPT_CONTEXT,
@@ -1257,7 +1340,8 @@ bool MDOffloadObject::attr_needs_import_check(const std::string& attr_name)
 }
 
 // Attributes we don't want stored in Rados. This means we intercept them in
-// Writer::prepare() and remove them from the Attrs passed to the next driver.
+// Writer::prepare() and MultipartUpload::complete() and remove them from the
+// Attrs passed to the next driver.
 static std::set<std::string> attr_object_import_prohibited = {
   RGW_ATTR_ACL,
   RGW_ATTR_CRYPT_CONTEXT,
@@ -1268,6 +1352,7 @@ static std::set<std::string> attr_object_import_prohibited = {
   RGW_ATTR_CRYPT_MODE,
   RGW_ATTR_CRYPT_PARTS,
   RGW_ATTR_CRYPT_PREFIX,
+  // ETAG deliberately not included here.
   RGW_ATTR_TAGS,
 };
 
