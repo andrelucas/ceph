@@ -295,23 +295,10 @@ class MDOffloadBucket : public MDOFilterParentBucket {
 private:
   MDOffloadFilterDriver* driver_ = nullptr;
 
-  /**
-   * @brief Cached bucket attributes.
-   *
-   * It's very tempting to make this a more complicated data structure with
-   * locking etc., but the API is constructed around returning a reference to
-   * this field (via get_attrs()) so we need to keep it simple. If we do
-   * complicate things, we need a way to still return that simple reference so
-   * we're not having to change the API in multiple places, creating a
-   * maintenance problem over time.
-   */
-  ::rgw::sal::Attrs cached_attrs_;
-
 public:
   MDOffloadBucket(std::unique_ptr<Bucket> next, User* user, MDOffloadFilterDriver* driver, Attrs attrs = {})
       : MDOFilterParentBucket(std::move(next), user)
       , driver_(driver)
-      , cached_attrs_(std::move(attrs))
   {
   }
   virtual ~MDOffloadBucket() = default;

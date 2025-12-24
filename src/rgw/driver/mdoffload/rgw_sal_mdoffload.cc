@@ -171,7 +171,7 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
     return ret;
 
   // Bucket exists. Need to preload the bucket attributes.
-  COND_LOG_PFX(dpp, 20, "MDOffloadFilterDriver::get_bucket: (variant 3) fetched bucket name={} id={}",
+  COND_LOG_PFX(dpp, 20, "MDOffloadFilterDriver::get_bucket: (variant 1) fetched bucket name={} id={}",
       nb->get_name(), nb->get_bucket_id());
 
   // Fetch attributes for this bucket.
@@ -187,7 +187,7 @@ int MDOffloadFilterDriver::get_bucket(const DoutPrefixProvider* dpp, User* u, co
 
   auto status = client->stub()->GetBucketAttributes(&context, request, &response);
   if (!status.ok()) {
-    LOG_PFX(dpp, 0, "MDOffloadFilterDriver::get_bucket: (variant 3) gRPC GetBucketAttributes failed: {}", status.error_message());
+    LOG_PFX(dpp, 0, "MDOffloadFilterDriver::get_bucket: (variant 1) gRPC GetBucketAttributes failed: {}", status.error_message());
     return -1;
   }
 
@@ -379,8 +379,9 @@ int MDOffloadUser::create_bucket(const DoutPrefixProvider* dpp,
 
 Attrs& MDOffloadBucket::get_attrs()
 {
-  COND_LOG_G(20, "MDOffloadBucket::get_attrs: cached_attrs_={}", cached_attrs_);
-  return cached_attrs_;
+  auto& a = MDOFilterParentBucket::get_attrs();
+  COND_LOG_G(20, "MDOffloadBucket::get_attrs: attrs={}", a);
+  return a;
 }
 
 /**
@@ -397,13 +398,25 @@ Attrs& MDOffloadBucket::get_attrs()
  */
 int MDOffloadBucket::set_attrs(Attrs a)
 {
-  cached_attrs_ = a;
-  COND_LOG_G(20, "MDOffloadBucket::set_attrs: attrs={}", cached_attrs_);
+  COND_LOG_G(20, "MDOffloadBucket::set_attrs: attrs={}", a);
+  MDOFilterParentBucket::set_attrs(a);
   return 0;
 }
 
 int MDOffloadBucket::merge_and_store_attrs(const DoutPrefixProvider* dpp, Attrs& new_attrs, optional_yield y)
 {
+  // Now: This doesn't appear to work the way it says it does. Look at the
+  // combination of RGWDeleteBucketTags::execute() and
+  // RadosBucket::merge_and_store_attrs(). The execute() loads the existing
+  // attributes, erases the tags, and calls merge_and_store_attrs() with the
+  // resulting attribute set. If merge_and_store_attrs() merged the new
+  // attributes with the existing ones, the tags would never get deleted. But
+  // they do get deleted, so merge_and_store_attrs() must be replacing the
+  // existing attributes with the new set.
+  //
+  // As a result, we're mimicking that Rados behavior here, replacing the
+  // existing stored attributes with the new set.
+
   // Fetch attributes for this bucket.
   auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
   ::grpc::ClientContext context;
@@ -415,18 +428,23 @@ int MDOffloadBucket::merge_and_store_attrs(const DoutPrefixProvider* dpp, Attrs&
   for (const auto& it : new_attrs) {
     (*request.mutable_attributes_to_add())[it.first] = it.second.to_str();
   }
+  // Indicate we want to replace existing attributes with the new set. I hate
+  // this; it feels deeply dangerous. But that's how the Rados driver appears
+  // to works, and it's the only way to make attr deletion work.
+  request.set_replace_existing_attributes(true);
 
   auto status = client->stub()->SetBucketAttributes(&context, request, &response);
   if (!status.ok()) {
     COND_LOG_G(20, "MDOffloadBucket::merge_and_store_attrs: gRPC SetBucketAttributes failed: {}", status.error_message());
-    return -EINVAL; // XXX appropriate error code?
+    return -ERR_INTERNAL_ERROR; // XXX appropriate error code?
   }
 
+  auto& attrs = get_attrs();
   for (auto& it : new_attrs) {
-    cached_attrs_[it.first] = it.second;
+    attrs[it.first] = it.second;
   }
-  COND_LOG_G(20, "MDOffloadBucket::merge_and_store_attrs: bucket='{}' id='{}' new_attrs='{}' cached_attrs_='{}'",
-      get_name(), get_bucket_id(), new_attrs, cached_attrs_);
+  COND_LOG_G(20, "MDOffloadBucket::merge_and_store_attrs: bucket='{}' id='{}' new_attrs='{}' attrs_='{}'",
+      get_name(), get_bucket_id(), new_attrs, attrs);
   return 0;
 }
 
