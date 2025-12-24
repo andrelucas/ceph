@@ -546,16 +546,6 @@ int MDOffloadObject::MDOffloadReadOp::prepare(optional_yield y, const DoutPrefix
   // time.
   auto& attr = object_->get_attrs();
 
-  std::set<std::string> attr_must_export;
-
-  // for (const auto& it : attr) {
-  //   if (attr_is_exported(it.first)) {
-  //     ldpp_dout(dpp, 1)
-  //         << fmt::format(FMT_STRING("MDOffloadObject::MDOffloadReadOp::prepare: ERROR found existing exportable attr '{}' ({} bytes)'"), it.first, it.second.length())
-  //         << dendl;
-  //   }
-  // }
-
   // Fetch the external attributes for this object from the remote store.
   auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
   ::grpc::ClientContext context;
@@ -847,27 +837,6 @@ int MDOffloadObject::set_obj_attrs(const DoutPrefixProvider* dpp, Attrs* setattr
     }
   }
 
-  // // Only after gRPC success do we modify our cached attributes.
-  // Attrs new_attrs = cached_attrs_;
-  // if (setattrs != nullptr) {
-  //   for (const auto& it : *setattrs) {
-  //     new_attrs[it.first] = it.second;
-  //   }
-  // }
-  // if (delattrs != nullptr) {
-  //   for (const auto& it : *delattrs) {
-  //     new_attrs.erase(it.first);
-  //   }
-  // }
-  // ldpp_dout(dpp, 20)
-  //     << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: setattrs={} delattrs={} cached_attrs_={}"),
-  //            fmt_maybe(setattrs),
-  //            fmt_maybe(delattrs),
-  //            cached_attrs_)
-  //     << dendl;
-  // cached_attrs_ = new_attrs;
-  // has_attrs_ = true;
-
   ldpp_dout(dpp, 20)
       << fmt::format(FMT_STRING("MDOffloadObject::set_obj_attrs: set_attrs() attrs={}"),
              MDOFilterParentObject::get_attrs())
@@ -1000,41 +969,10 @@ int MDOffloadObject::delete_obj_attrs(const DoutPrefixProvider* dpp, const char*
   // changes are we may have to make that call here too, without the attr
   // changes.
 
+  COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: deleting attr_name='{}'", attr_name);
   std::map<std::string, bufferlist> delattrs;
   delattrs[attr_name] = bufferlist();
   return set_obj_attrs(dpp, nullptr, &delattrs, y);
-
-  // COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: deleting attr_name='{}'", attr_name);
-
-  // if (MDOffloadObject::attr_is_exported(attr_name)) {
-  //   // Send our gRPC to delete the attribute.
-  //   auto client = driver_->channel()->create_client<gutil::MDOffloadGrpcClient>();
-  //   ::grpc::ClientContext context;
-  //   mdoffload::v1::SetObjectAttributesRequest request;
-  //   mdoffload::v1::SetObjectAttributesResponse response;
-  //   Bucket* bucket = get_bucket();
-  //   Object* next_obj = get_next();
-
-  //   request.set_bucket_name(bucket->get_name());
-  //   request.set_bucket_id(bucket->get_bucket_id());
-  //   request.set_object_key(next_obj->get_key().name);
-  //   request.set_object_instance_id(next_obj->get_key().instance);
-  //   request.add_attributes_to_delete(attr_name);
-
-  //   COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: deleting exported attr_name='{}'",
-  //       attr_name);
-  //   auto status = client->stub()->SetObjectAttributes(&context, request, &response);
-  //   if (!status.ok()) {
-  //     COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: gRPC SetObjectAttributes failed: {}", status.error_message());
-  //     return -ERR_INTERNAL_ERROR; // XXX appropriate error code?
-  //   }
-  // }
-
-  // //// XXX Seems to be breaking metadata XXX
-  // // COND_LOG_PFX(dpp, 20, "MDOffloadObject::delete_obj_attrs: upstream passthrough");
-  // // return MDOFilterParentObject::delete_obj_attrs(dpp, attr_name, y);
-
-  return 0;
 }
 
 Attrs& MDOffloadObject::get_attrs(void)
@@ -1047,11 +985,13 @@ const Attrs& MDOffloadObject::get_attrs(void) const
 {
   // Passthrough.
   const auto& a = MDOFilterParentObject::get_attrs();
-  if (get_bucket()) {
-    COND_LOG_G(20, "MDOffloadObject::get_attrs (const): bucket={} bucket_id={} attrs={}",
-        get_bucket()->get_name(), get_bucket()->get_bucket_id(), a);
-  } else {
-    COND_LOG_G(20, "MDOffloadObject::get_attrs (const): bucket=<null> attrs={}", a);
+  if (LOG_ENABLED_G(20)) {
+    if (get_bucket()) {
+      LOG_G(20, "MDOffloadObject::get_attrs (const): bucket={} bucket_id={} attrs={}",
+          get_bucket()->get_name(), get_bucket()->get_bucket_id(), a);
+    } else {
+      LOG_G(20, "MDOffloadObject::get_attrs (const): bucket=<null> attrs={}", a);
+    }
   }
   return a;
 }
