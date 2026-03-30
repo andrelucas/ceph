@@ -451,7 +451,7 @@ protected:
  * It's still using std::tuple<> simply to minimise the diff to the versioned
  * harness, and maybe to make it easier to extend later.
  */
-class SQObjectlistHarnessNonversioned : public SQObjectListHarnessBase, public testing::TestWithParam<std::tuple<size_t>> {
+class SQObjectlistHarnessNonversioned : public SQObjectListHarnessBase, public testing::TestWithParam<std::tuple<size_t, bool>> {
 
 protected:
   void SetUp() override
@@ -550,6 +550,11 @@ TEST_P(SQObjectlistHarnessNonversioned, StdNonVersionedFirstPage)
 {
   size_t count = std::get<0>(GetParam());
   sim_.fill_bucket_nonversioned(count);
+  auto short_results = std::get<1>(GetParam());
+  sim_.set_short_results(short_results);
+  if (short_results) {
+    sim_.permute_prng_seed(count);
+  }
 
   DEFINE_REQ_STATE;
   init_op(&s, kDefaultEntries, std::nullopt);
@@ -592,6 +597,11 @@ TEST_P(SQObjectlistHarnessNonversioned, StdNonVersionedLastPage)
 {
   size_t count = std::get<0>(GetParam());
   sim_.fill_bucket_nonversioned(count);
+  auto short_results = std::get<1>(GetParam());
+  sim_.set_short_results(short_results);
+  if (short_results) {
+    sim_.permute_prng_seed(count);
+  }
 
   size_t last_page_size = count % kDefaultEntries;
   size_t last_page_index = (count / kDefaultEntries) * kDefaultEntries;
@@ -641,6 +651,11 @@ TEST_P(SQObjectlistHarnessNonversioned, CompoundQueryNonversioned)
 {
   auto count = std::get<0>(GetParam());
   sim_.fill_bucket_nonversioned(count);
+  auto short_results = std::get<1>(GetParam());
+  sim_.set_short_results(short_results);
+  if (short_results) {
+    sim_.permute_prng_seed(count);
+  }
 
   std::optional<std::string> next_marker;
   int reps = 0;
@@ -662,6 +677,9 @@ TEST_P(SQObjectlistHarnessNonversioned, CompoundQueryNonversioned)
     if (!next_marker) {
       break;
     }
+    if (short_results) {
+      sim_.permute_prng_seed(reps);
+    }
   }
   // We should get the same number of items back.
   ASSERT_EQ(count, items.size());
@@ -676,16 +694,18 @@ TEST_P(SQObjectlistHarnessNonversioned, CompoundQueryNonversioned)
 
 INSTANTIATE_TEST_SUITE_P(SQObjectlistSourceSizeParamNonversioned, SQObjectlistHarnessNonversioned,
     ::testing::Combine(
-        ::testing::Values(1, 2, 9, 10, 11, 99, 100, 101, 999, 1000, 1001, 1999, 2000, 2001)),
+        ::testing::Values(1, 2, 9, 10, 11, 99, 100, 101, 999, 1000, 1001, 1999, 2000, 2001),
+        ::testing::Values(false, true)),
     [](const ::testing::TestParamInfo<SQObjectlistHarnessNonversioned::ParamType>& info) {
-      return fmt::format(FMT_STRING("size_{}"), std::get<0>(info.param));
+      return fmt::format(FMT_STRING("size_{}{}"),
+          std::get<0>(info.param), std::get<1>(info.param) ? "_short" : "");
     });
 
 /**
  * @brief Versioned harness, parameterised by bucket size and number of
  * versions of each object to test.
  */
-class SQObjectlistHarnessVersioned : public SQObjectListHarnessBase, public testing::TestWithParam<std::tuple<size_t, size_t>> {
+class SQObjectlistHarnessVersioned : public SQObjectListHarnessBase, public testing::TestWithParam<std::tuple<size_t, size_t, bool>> {
 
 protected:
   void SetUp() override
@@ -747,6 +767,12 @@ TEST_P(SQObjectlistHarnessVersioned, StdVersionedFirstPage)
   size_t count = std::get<0>(GetParam());
   size_t versions = std::get<1>(GetParam());
   sim_.fill_bucket_versioned(count, versions);
+  auto short_results = std::get<2>(GetParam());
+  sim_.set_short_results(short_results);
+  if (short_results) {
+    sim_.permute_prng_seed(count);
+    sim_.permute_prng_seed(versions);
+  }
 
   op->execute(null_yield);
   ASSERT_EQ(op->get_ret(), 0);
@@ -769,6 +795,12 @@ TEST_P(SQObjectlistHarnessVersioned, CompoundQueryVersionedNoDeletes)
   auto count = std::get<0>(GetParam());
   auto versions = std::get<1>(GetParam());
   sim_.fill_bucket_versioned(count, versions);
+  auto short_results = std::get<2>(GetParam());
+  sim_.set_short_results(short_results);
+  if (short_results) {
+    sim_.permute_prng_seed(count);
+    sim_.permute_prng_seed(versions);
+  }
 
   std::optional<std::string> next_marker;
   int reps = 0;
@@ -789,6 +821,9 @@ TEST_P(SQObjectlistHarnessVersioned, CompoundQueryVersionedNoDeletes)
     next_marker = op->return_marker();
     if (!next_marker) {
       break;
+    }
+    if (short_results) {
+      sim_.permute_prng_seed(reps);
     }
   }
   // We should get the same number of items back.
@@ -839,6 +874,12 @@ TEST_P(SQObjectlistHarnessVersioned, CompoundQueryVersionedWithDeletes)
   auto count = std::get<0>(GetParam());
   auto versions = std::get<1>(GetParam());
   sim_.fill_bucket_versioned(count, versions, deletions);
+  auto short_results = std::get<2>(GetParam());
+  sim_.set_short_results(short_results);
+  if (short_results) {
+    sim_.permute_prng_seed(count);
+    sim_.permute_prng_seed(versions);
+  }
 
   std::optional<std::string> next_marker;
   int reps = 0;
@@ -860,6 +901,9 @@ TEST_P(SQObjectlistHarnessVersioned, CompoundQueryVersionedWithDeletes)
     if (!next_marker) {
       break;
     }
+    if (short_results) {
+      sim_.permute_prng_seed(reps);
+    }
   }
   // We should get the same number of items back.
   ASSERT_EQ(count, items.size());
@@ -875,9 +919,11 @@ TEST_P(SQObjectlistHarnessVersioned, CompoundQueryVersionedWithDeletes)
 INSTANTIATE_TEST_SUITE_P(SQObjectlistSourceSizeParamVersioned, SQObjectlistHarnessVersioned,
     ::testing::Combine(
         ::testing::Values(1, 2, 9, 10, 11, 99, 100, 101, 999, 1000, 1001, 1999, 2000, 2001),
-        ::testing::Values(1, 2, 5, 10)),
+        ::testing::Values(1, 2, 5, 10),
+        ::testing::Values(false, true)),
     [](const ::testing::TestParamInfo<SQObjectlistHarnessVersioned::ParamType>& info) {
-      return fmt::format(FMT_STRING("size_{}_versions_{}"), std::get<0>(info.param), std::get<1>(info.param));
+      return fmt::format(FMT_STRING("size_{}_versions_{}{}"),
+          std::get<0>(info.param), std::get<1>(info.param), std::get<2>(info.param) ? "_short" : "");
     });
 
 /***************************************************************************/

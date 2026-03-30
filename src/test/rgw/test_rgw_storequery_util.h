@@ -23,6 +23,38 @@ namespace storequery_util {
 
 /***************************************************************************/
 
+class DirSimResultShortener {
+
+private:
+  bool enabled_ = false;
+  uint64_t prng_seed_ = 0xDEADBEEF;
+
+public:
+  void set_short_results(bool enabled)
+  {
+    enabled_ = enabled;
+  }
+  bool short_results() const
+  {
+    return enabled_;
+  }
+  void set_prng_seed(uint64_t seed)
+  {
+    prng_seed_ = seed;
+  }
+  // Stir (XOR) the seed with a new value, to get a different sequence of
+  // 'random' numbers. This is useful to get variation between tests, while
+  // still having deterministic results.
+  void permute_prng_seed(uint64_t new_seed)
+  {
+    prng_seed_ ^= new_seed;
+  }
+  uint64_t prng_seed() const
+  {
+    return prng_seed_;
+  }
+}; // class DirSimResultShortener
+
 // objectlist harness support.
 
 using SALBucket = rgw::sal::Bucket;
@@ -157,7 +189,7 @@ struct SrcKey {
  * direct substitution in storequery's objectlist implementation, so unit
  * tests can be written.
  */
-class BucketDirSim {
+class BucketDirSim : public DirSimResultShortener {
 
 public:
   using bucket_type = std::vector<SrcKey>;
@@ -335,6 +367,17 @@ public:
   {
     clear_results(results);
 
+    int actual_entries = max_entries;
+    if (short_results()) {
+      // It's up to the caller to set the seed to get both deterministic
+      // results *and* variation between tests. If it's left to the default,
+      // you'll just get the same random number every time.
+      std::mt19937_64 rng(prng_seed());
+      std::uniform_int_distribution<int> dist(max_entries / 2, max_entries);
+      actual_entries = dist(rng);
+      ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("list_standard() short results mode active, returning {} entries instead of max {}"), actual_entries, max_entries) << dendl;
+    }
+
     auto& objs = results.objs;
 
     size_t start_index = 0;
@@ -378,7 +421,7 @@ public:
     bool seen_eof = false;
 
     size_t n = start_index;
-    for (; objs.size() < max_entries && n < get_bucket().size(); n++) {
+    for (; objs.size() < actual_entries && n < get_bucket().size(); n++) {
       auto src_obj = get_bucket()[n];
       auto entry = src_obj.to_dir_entry();
       objs.push_back(entry);
@@ -391,7 +434,7 @@ public:
         FMT_STRING("list_standard() loop exit n={} objs.size={} marker=[name={},instance={}]"),
         n, objs.size(), param.marker.name, param.marker.instance)
                       << dendl;
-    assert(objs.size() <= max_entries);
+    assert(objs.size() <= actual_entries);
     if (n == get_bucket().size()) {
       seen_eof = true;
       // In this case, we don't want a marker set.
@@ -518,38 +561,6 @@ public:
 
 }; // class MpuHarnessMultipartUpload
 
-class DirSimResultShortener {
-  
-private:
-bool enabled_ = false;
-uint64_t prng_seed_ = 0xDEADBEEF;
-
-public:
-  void set_short_results(bool enabled)
-  {
-    enabled_ = enabled;
-  }
-  bool short_results() const
-  {
-    return enabled_;
-  }
-  void set_prng_seed(uint64_t seed)
-  {
-    prng_seed_ = seed;
-  }
-  // Stir (XOR) the seed with a new value, to get a different sequence of
-  // 'random' numbers. This is useful to get variation between tests, while
-  // still having deterministic results.
-  void permute_prng_seed(uint64_t new_seed)
-  {
-    prng_seed_ ^= new_seed;
-  }
-  uint64_t prng_seed() const
-  {
-    return prng_seed_;
-  }
-}; // class DirSimResultShortener
-
 class MpuBucketDirSim : public DirSimResultShortener {
 
 public:
@@ -568,7 +579,7 @@ public:
   {
     return src_bucket_;
   }
-    
+
   void fill_bucket(size_t count, size_t uploads_per_item)
   {
     std::vector<MpuSrcKey> src;
@@ -649,16 +660,16 @@ public:
       bool* is_truncated)
   {
     clear_uploads(uploads);
-        
+
     // If so configured, randomly return a short page of results. This is what
-    // RGW does.    
+    // RGW does.
     int actual_uploads = max_uploads;
     if (short_results()) {
       // It's up to the caller to set the seed to get both deterministic
       // results *and* variation between tests. If it's left to the default,
       // you'll just get the same random number every time.
       std::mt19937_64 rng(prng_seed());
-      std::uniform_int_distribution<int> dist(max_uploads/2, max_uploads);
+      std::uniform_int_distribution<int> dist(max_uploads / 2, max_uploads);
       actual_uploads = dist(rng);
       ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("list_multiparts_standard() short results mode active, returning {} uploads instead of max {}"), actual_uploads, max_uploads) << dendl;
     }
@@ -698,7 +709,7 @@ public:
     ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("list_multiparts_standard() starting loop n={} uploads.size={} marker='{}'"),
         n, uploads.size(), marker)
                       << dendl;
-    
+
     for (; uploads.size() < static_cast<size_t>(actual_uploads) && n < get_bucket().size(); n++) {
       auto src_obj = get_bucket()[n];
       auto up = std::make_unique<MpuHarnessMultipartUpload>(src_obj.key, src_obj.upload_id);
