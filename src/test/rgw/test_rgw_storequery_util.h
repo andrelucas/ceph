@@ -13,6 +13,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <sys/types.h>
 
 #include "cls/rgw/cls_rgw_types.h"
 #include "common/dout.h"
@@ -548,6 +549,21 @@ public:
   {
     return short_results_;
   }
+  void set_short_results_prng_seed(uint64_t seed)
+  {
+    short_results_prng_seed_ = seed;
+  }
+  // Stir (XOR) the seed with a new value, to get a different sequence of
+  // 'random' numbers. This is useful to get variation between tests, while
+  // still having deterministic results.
+  void permute_short_results_prng_seed(uint64_t new_seed)
+  {
+    short_results_prng_seed_ ^= new_seed;
+  }
+  uint64_t short_results_prng_seed() const
+  {
+    return short_results_prng_seed_;
+  }
   
   void fill_bucket(size_t count, size_t uploads_per_item)
   {
@@ -634,6 +650,9 @@ public:
     // RGW does.    
     int actual_uploads = max_uploads;
     if (short_results()) {
+      // It's up to the caller to set the seed to get both deterministic
+      // results *and* variation between tests. If it's left to the default,
+      // you'll just get the same random number every time.
       std::mt19937_64 rng(short_results_prng_seed_);
       std::uniform_int_distribution<int> dist(max_uploads/2, max_uploads);
       actual_uploads = dist(rng);
@@ -647,11 +666,12 @@ public:
       // Find the marker in the list of multipart uploads.
       for (size_t n = 0; n < get_bucket().size(); n++) {
         MpuSrcKey entry = get_bucket()[n];
-        if (marker <= entry.key) {
+        std::string this_entry_meta = entry.make_marker();
+        if (marker <= this_entry_meta) {
 
           // It matters if we matched exactly. If we did, we want to start at
           // the following item, otherwise start at the existing item.
-          if (marker == entry.key) {
+          if (marker == this_entry_meta) {
             start_index = n + 1;
           } else {
             start_index = n;
