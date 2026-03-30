@@ -1005,8 +1005,8 @@ TEST_P(SQMpuploadlistHarness, StdFirstPage)
   auto short_results = std::get<2>(GetParam());
   sim_.set_short_results(short_results);
   if (short_results) {
-    sim_.permute_short_results_prng_seed(uploads_per_key);
-    sim_.set_short_results_prng_seed(count);
+    sim_.permute_prng_seed(uploads_per_key);
+    sim_.permute_prng_seed(count);
   }
 
   DEFINE_REQ_STATE;
@@ -1055,8 +1055,8 @@ TEST_P(SQMpuploadlistHarness, CompoundQuery)
   auto short_results = std::get<2>(GetParam());
   sim_.set_short_results(short_results);
   if (short_results) {
-    sim_.permute_short_results_prng_seed(uploads_per_key);
-    sim_.set_short_results_prng_seed(count);
+    sim_.permute_prng_seed(uploads_per_key);
+    sim_.permute_prng_seed(count);
   }
 
   sim_.fill_bucket(count, uploads_per_key);
@@ -1074,7 +1074,7 @@ TEST_P(SQMpuploadlistHarness, CompoundQuery)
       // Change the random seed for each query, so we get different
       // permutations of the results on each page.
       ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("Permuting short results with reps {}"), reps) << dendl;
-      sim_.permute_short_results_prng_seed(reps);
+      sim_.permute_prng_seed(reps);
     }
     op->set_list_multiparts_function(std::bind(&MpuBucketDirSim::list_multiparts_standard, &sim_,
         std::placeholders::_1, std::placeholders::_2, std::placeholders::_3,

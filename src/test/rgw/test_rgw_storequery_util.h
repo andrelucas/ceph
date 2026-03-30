@@ -518,17 +518,45 @@ public:
 
 }; // class MpuHarnessMultipartUpload
 
-class MpuBucketDirSim {
+class DirSimResultShortener {
+  
+private:
+bool enabled_ = false;
+uint64_t prng_seed_ = 0xDEADBEEF;
+
+public:
+  void set_short_results(bool enabled)
+  {
+    enabled_ = enabled;
+  }
+  bool short_results() const
+  {
+    return enabled_;
+  }
+  void set_prng_seed(uint64_t seed)
+  {
+    prng_seed_ = seed;
+  }
+  // Stir (XOR) the seed with a new value, to get a different sequence of
+  // 'random' numbers. This is useful to get variation between tests, while
+  // still having deterministic results.
+  void permute_prng_seed(uint64_t new_seed)
+  {
+    prng_seed_ ^= new_seed;
+  }
+  uint64_t prng_seed() const
+  {
+    return prng_seed_;
+  }
+}; // class DirSimResultShortener
+
+class MpuBucketDirSim : public DirSimResultShortener {
 
 public:
   using bucket_type = std::vector<MpuSrcKey>;
 
 private:
   bucket_type src_bucket_;
-  
-  bool short_results_ = false;
-  // Set up a prng we'll use to randomly (but predictably) permute result sizes.
-  uint64_t short_results_prng_seed_ = 0xDEADBEEF;
 
 public:
   void set_bucket(bucket_type&& bucket)
@@ -540,31 +568,7 @@ public:
   {
     return src_bucket_;
   }
-
-  void set_short_results(bool short_results)
-  {
-    short_results_ = short_results;
-  }
-  bool short_results() const
-  {
-    return short_results_;
-  }
-  void set_short_results_prng_seed(uint64_t seed)
-  {
-    short_results_prng_seed_ = seed;
-  }
-  // Stir (XOR) the seed with a new value, to get a different sequence of
-  // 'random' numbers. This is useful to get variation between tests, while
-  // still having deterministic results.
-  void permute_short_results_prng_seed(uint64_t new_seed)
-  {
-    short_results_prng_seed_ ^= new_seed;
-  }
-  uint64_t short_results_prng_seed() const
-  {
-    return short_results_prng_seed_;
-  }
-  
+    
   void fill_bucket(size_t count, size_t uploads_per_item)
   {
     std::vector<MpuSrcKey> src;
@@ -653,7 +657,7 @@ public:
       // It's up to the caller to set the seed to get both deterministic
       // results *and* variation between tests. If it's left to the default,
       // you'll just get the same random number every time.
-      std::mt19937_64 rng(short_results_prng_seed_);
+      std::mt19937_64 rng(prng_seed());
       std::uniform_int_distribution<int> dist(max_uploads/2, max_uploads);
       actual_uploads = dist(rng);
       ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("list_multiparts_standard() short results mode active, returning {} uploads instead of max {}"), actual_uploads, max_uploads) << dendl;
