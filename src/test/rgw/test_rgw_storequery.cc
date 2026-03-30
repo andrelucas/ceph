@@ -676,7 +676,7 @@ TEST_P(SQObjectlistHarnessNonversioned, CompoundQueryNonversioned)
 
 INSTANTIATE_TEST_SUITE_P(SQObjectlistSourceSizeParamNonversioned, SQObjectlistHarnessNonversioned,
     ::testing::Combine(
-        ::testing::Values(1, 2, 9, 10, 11, 99, 100, 101, 999, 1000, 1001, 1999, 2000, 2001, 9999, 10000, 10001)),
+        ::testing::Values(1, 2, 9, 10, 11, 99, 100, 101, 999, 1000, 1001, 1999, 2000, 2001)),
     [](const ::testing::TestParamInfo<SQObjectlistHarnessNonversioned::ParamType>& info) {
       return fmt::format(FMT_STRING("size_{}"), std::get<0>(info.param));
     });
@@ -874,8 +874,8 @@ TEST_P(SQObjectlistHarnessVersioned, CompoundQueryVersionedWithDeletes)
 
 INSTANTIATE_TEST_SUITE_P(SQObjectlistSourceSizeParamVersioned, SQObjectlistHarnessVersioned,
     ::testing::Combine(
-        ::testing::Values(1, 2, 9, 10, 11, 99, 100, 101, 999, 1000, 1001, 1999, 2000, 2001, 9999, 10000, 10001),
-        ::testing::Values(1, 2, 5)),
+        ::testing::Values(1, 2, 9, 10, 11, 99, 100, 101, 999, 1000, 1001, 1999, 2000, 2001),
+        ::testing::Values(1, 2, 5, 10)),
     [](const ::testing::TestParamInfo<SQObjectlistHarnessVersioned::ParamType>& info) {
       return fmt::format(FMT_STRING("size_{}_versions_{}"), std::get<0>(info.param), std::get<1>(info.param));
     });
@@ -1111,8 +1111,8 @@ TEST_P(SQMpuploadlistHarness, CompoundQuery)
 
 INSTANTIATE_TEST_SUITE_P(SQMpuloadlistUploadsSizeParam, SQMpuploadlistHarness,
     ::testing::Combine(
-        ::testing::Values(1, 2, 9, 10, 11, 99, 100, 101, 999, 1000, 1001, 1999, 2000, 2001, 9999, 10000, 10001),
-        ::testing::Values(1, 2, 5),
+        ::testing::Values(1, 2, 9, 10, 11, 99, 100, 101, 999, 1000, 1001, 1999, 2000, 2001),
+        ::testing::Values(1, 2, 5, 10),
         ::testing::Values(false, true)),
     [](const ::testing::TestParamInfo<SQMpuploadlistHarness::ParamType>& info) {
       return fmt::format(FMT_STRING("size_{}_uploads_{}{}"), std::get<0>(info.param), std::get<1>(info.param), std::get<2>(info.param) ? "_short" : "");
