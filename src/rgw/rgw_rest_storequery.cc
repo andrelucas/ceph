@@ -815,6 +815,7 @@ bool RGWStoreQueryOp_MPUploadList::execute_query(optional_yield y)
           break;
         }
       }
+      
     } // for each upload result
   } // while !seen_eof && items_.size() < max_entries_
 

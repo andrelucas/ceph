@@ -19,7 +19,11 @@ if [ -r /etc/os-release ]; then
   source /etc/os-release
   case "$ID" in
       fedora)
-          if [ "$VERSION_ID" -ge "35" ] ; then
+          if [ "$VERSION_ID" -ge "39" ] ; then
+            PYBUILD="3.12"
+          elif [ "$VERSION_ID" -ge "37" ] ; then
+            PYBUILD="3.11"
+          elif [ "$VERSION_ID" -ge "35" ] ; then
             PYBUILD="3.10"
           elif [ "$VERSION_ID" -ge "33" ] ; then
             PYBUILD="3.9"
@@ -66,16 +70,21 @@ if type ccache > /dev/null 2>&1 ; then
     ARGS+=" -DWITH_CCACHE=ON"
 fi
 
-cxx_compiler="g++"
-c_compiler="gcc"
-# 20 is used for more future-proof
-for i in $(seq 20 -1 11); do
-  if type -t gcc-$i > /dev/null; then
-    cxx_compiler="g++-$i"
-    c_compiler="gcc-$i"
-    break
-  fi
-done
+if [[ -z "$CXX" ]]; then
+  cxx_compiler="g++"
+  c_compiler="gcc"
+  # 20 is used for more future-proof
+  for i in $(seq 20 -1 11); do
+    if type -t gcc-$i > /dev/null; then
+      cxx_compiler="g++-$i"
+      c_compiler="gcc-$i"
+      break
+    fi
+  done
+else
+  cxx_compiler="$CXX"
+  c_compiler="$CC"
+fi
 ARGS+=" -DCMAKE_CXX_COMPILER=$cxx_compiler"
 ARGS+=" -DCMAKE_C_COMPILER=$c_compiler"
 

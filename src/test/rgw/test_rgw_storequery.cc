@@ -886,7 +886,7 @@ INSTANTIATE_TEST_SUITE_P(SQObjectlistSourceSizeParamVersioned, SQObjectlistHarne
 
 // Use DEFINE_REQ_STATE and BasicClient from the objectlist harness.
 
-class SQMpuploadlistHarness : public testing::TestWithParam<std::tuple<size_t, size_t>> {
+class SQMpuploadlistHarness : public testing::TestWithParam<std::tuple<size_t, size_t, bool>> {
 protected:
   /// The default number of entries to return in a list operation. When
   /// debugging, it will help you *a lot* to reduce this to a much smaller
@@ -1002,6 +1002,9 @@ TEST_P(SQMpuploadlistHarness, StdFirstPage)
   size_t count = std::get<0>(GetParam());
   sim_.fill_bucket(count, uploads_per_key);
 
+  auto short_results = std::get<2>(GetParam());
+  sim_.set_short_results(short_results);
+
   DEFINE_REQ_STATE;
   init_op(&s, kDefaultEntries, std::nullopt);
   op->set_list_multiparts_function(std::bind(&MpuBucketDirSim::list_multiparts_standard, &sim_,
@@ -1047,6 +1050,8 @@ TEST_P(SQMpuploadlistHarness, CompoundQuery)
 {
   auto count = std::get<0>(GetParam());
   auto uploads_per_version = std::get<1>(GetParam());
+  auto short_results = std::get<2>(GetParam());
+  sim_.set_short_results(short_results);
   sim_.fill_bucket(count, uploads_per_version);
 
   std::optional<std::string> next_marker;
@@ -1094,9 +1099,10 @@ TEST_P(SQMpuploadlistHarness, CompoundQuery)
 INSTANTIATE_TEST_SUITE_P(SQMpuloadlistUploadsSizeParam, SQMpuploadlistHarness,
     ::testing::Combine(
         ::testing::Values(1, 2, 9, 10, 11, 99, 100, 101, 999, 1000, 1001, 1999, 2000, 2001, 9999, 10000, 10001),
-        ::testing::Values(1, 2, 5)),
+        ::testing::Values(1, 2, 5, 10),
+        ::testing::Values(false, true)),
     [](const ::testing::TestParamInfo<SQMpuploadlistHarness::ParamType>& info) {
-      return fmt::format(FMT_STRING("size_{}_uploads_{}"), std::get<0>(info.param), std::get<1>(info.param));
+      return fmt::format(FMT_STRING("size_{}_uploads_{}{}"), std::get<0>(info.param), std::get<1>(info.param), std::get<2>(info.param) ? "_short" : "");
     });
 
 /***************************************************************************/

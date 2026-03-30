@@ -275,7 +275,11 @@ target_link_libraries(unittest_rgw_lua ${rgw_libs})
 # Create a dummy .o for the utility library so that clangd knows where
 # to find the includes (because the utility library shows up in
 # compile_commands.json).
-add_library(test_rgw_storequery_util OBJECT test_rgw_storequery_util.cc)
+add_library(test_rgw_storequery_util
+  OBJECT 
+  test_rgw_storequery_util.cc
+  test_rgw_storequery_util.h
+)
 target_link_libraries(test_rgw_storequery_util ${rgw_libs})
 # The actual executable, links against the dummy.o.
 add_executable(unittest_rgw_storequery test_rgw_storequery.cc)

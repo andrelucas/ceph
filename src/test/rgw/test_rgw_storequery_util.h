@@ -9,6 +9,7 @@
  *
  */
 
+#include <random>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -523,6 +524,10 @@ public:
 
 private:
   bucket_type src_bucket_;
+  
+  bool short_results_ = false;
+  // Set up a prng we'll use to randomly (but predictably) permute result sizes.
+  uint64_t short_results_prng_seed_ = 0xDEADBEEF;
 
 public:
   void set_bucket(bucket_type&& bucket)
@@ -535,6 +540,15 @@ public:
     return src_bucket_;
   }
 
+  void set_short_results(bool short_results)
+  {
+    short_results_ = short_results;
+  }
+  bool short_results() const
+  {
+    return short_results_;
+  }
+  
   void fill_bucket(size_t count, size_t uploads_per_item)
   {
     std::vector<MpuSrcKey> src;
@@ -615,6 +629,16 @@ public:
       bool* is_truncated)
   {
     clear_uploads(uploads);
+        
+    // If so configured, randomly return a short page of results. This is what
+    // RGW does.    
+    int actual_uploads = max_uploads;
+    if (short_results()) {
+      std::mt19937_64 rng(short_results_prng_seed_);
+      std::uniform_int_distribution<int> dist(max_uploads/2, max_uploads);
+      actual_uploads = dist(rng);
+      ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("list_multiparts_standard() short results mode active, returning {} uploads instead of max {}"), actual_uploads, max_uploads) << dendl;
+    }
 
     size_t start_index = 0;
     if (!marker.empty()) {
@@ -637,17 +661,21 @@ public:
         }
       }
       if (!seen_marker) {
-        ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("marker='{}' not found in bucket"), marker) << dendl;
+        ldpp_dout(dpp, 1) << fmt::format(FMT_STRING("marker='{}' not found in bucket"), marker) << dendl;
         *is_truncated = true;
         return -ENOENT; // XXX XXX what does RGW do with marker-not-found?
       }
     }
-    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("list_multiparts_standard() marker='{}' max_uploads={}"), marker, max_uploads) << dendl;
+    ldpp_dout(dpp, 20) << fmt::format(FMT_STRING("list_multiparts_standard() marker='{}' max_uploads={}"), marker, actual_uploads) << dendl;
 
     bool seen_eof = false;
 
     size_t n = start_index;
-    for (; uploads.size() < static_cast<size_t>(max_uploads) && n < get_bucket().size(); n++) {
+    ldpp_dout(dpp, 5) << fmt::format(FMT_STRING("list_multiparts_standard() starting loop n={} uploads.size={} marker='{}'"),
+        n, uploads.size(), marker)
+                      << dendl;
+    
+    for (; uploads.size() < static_cast<size_t>(actual_uploads) && n < get_bucket().size(); n++) {
       auto src_obj = get_bucket()[n];
       auto up = std::make_unique<MpuHarnessMultipartUpload>(src_obj.key, src_obj.upload_id);
       uploads.push_back(std::move(up));
